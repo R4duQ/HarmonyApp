@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Harmony's mark: a slanted H built from three round-capped bars.
+
+  The slant and the round terminals are the whole idea — upright with square
+  ends it would read as a generic monogram, while the lean gives it the
+  forward motion of something playing, and the round caps echo the circled
+  play buttons the interface is built from. Three bars also quietly reads as
+  a level meter, which is the app's own subject matter.
+
+  Geometry: 108dp adaptive canvas, centred on (54,54). The furthest point of
+  any stroke sits 34.5dp from centre, inside the 36dp radius that every
+  launcher mask is guaranteed to show, so nothing clips on a circle, a
+  squircle, or a rounded square.
+
+  Colours are the app's own tokens, not new ones: the ink is the same
+  #1A1403 the Library screen writes in, on that screen's amber field
+  (@color/ic_launcher_background).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M45,34 L34,74 M74,34 L63,74 M39.5,54 L68.5,54"
+        android:strokeColor="#1A1403"
+        android:strokeWidth="12.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

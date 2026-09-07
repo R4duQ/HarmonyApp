@@ -1,0 +1,41 @@
+HARMONY 1.4.3 - CONECTAREA SPOTIFY
+
+Eroarea din poza: client_id: Invalid
+Spotify respinge identificatorul aplicatiei trimis de Harmony.
+Ai nevoie de Client ID-ul unei aplicatii active din Spotify Developer Dashboard.
+Arhiva nu contine un Client ID gata configurat si nu poate genera unul valid.
+
+1. Extrage folderul Harmony in D:\Harmony si accepta inlocuirea surselor vechi.
+   Pastreaza fisierele tale local.properties si keystore.properties, daca exista.
+   Nu dezinstala aplicatia pentru a face actualizarea.
+2. Ruleaza D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd pentru build si instalare.
+   Scriptul foloseste Android SDK din D:\Android.
+3. Deschide https://developer.spotify.com/dashboard si creeaza sau selecteaza
+   aplicatia ta, cu acces Web API.
+4. In Settings, la Redirect URIs, adauga exact si salveaza:
+
+   com.harmony.app://spotify-playlist-callback
+
+   Nu adauga slash la final. In Harmony ai butonul Copy Redirect URI.
+   Aceasta este adresa folosita in pachetul final 1.4.3.
+5. In Settings / Basic Information copiaza Client ID (32 de caractere).
+   NU copia Client Secret. Nu introduce username-ul sau un link de playlist.
+6. In Harmony: Playlists -> Playlist Transfer -> lipeste Client ID -> Connect.
+7. Accepta accesul in browser. Telefonul trebuie sa revina in Harmony.
+
+Pentru Spotify Development Mode, proprietarul aplicatiei trebuie sa aiba Premium.
+In Settings -> Users Management adauga contul Spotify folosit la conectare.
+Lipsa accesului pentru cont poate produce 403 dupa autentificare.
+
+Daca ramane client_id: Invalid:
+- verifica daca ai copiat Client ID din aplicatia corecta si daca aceasta este activa;
+- inlocuieste campul din Harmony si apasa Connect din nou;
+- butonul Connection help explica eroarea direct in aplicatie.
+
+Formatul corect al unui ID nu garanteaza ca Spotify il recunoaste.
+Nu trebuie sa trimiti Client Secret nimanui pentru aceasta integrare.
+
+Documentatie:
+https://developer.spotify.com/documentation/web-api/concepts/apps
+https://developer.spotify.com/documentation/android/tutorials/authorization
+https://developer.spotify.com/documentation/web-api/concepts/quota-modes

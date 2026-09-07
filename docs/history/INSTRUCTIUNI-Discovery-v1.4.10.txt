@@ -1,0 +1,41 @@
+HARMONY 1.4.10 - CORECTIE REFRESH DISCOVERY
+
+INSTALARE
+1. Extrage continutul folderului Harmony din arhiva peste D:\Harmony.
+2. Pastreaza local.properties, keystore.properties si cheia de semnare existente.
+3. Conecteaza telefonul prin USB si ruleaza:
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+4. Verifica versiunea 1.4.10 in informatiile aplicatiei.
+SDK-ul ramane D:\Android. Foloseste aceeasi cheie pentru actualizarea aplicatiei
+existente, fara dezinstalare sau stergerea datelor. Arhiva contine surse, nu APK.
+
+CE S-A SCHIMBAT
+- Refresh trece la pana la 24 de albume diferite fata de lotul afisat.
+- Fiecare Refresh schimba ordinea de departajare, pastrand preferintele muzicale.
+- La inceputul unui nou ciclu, lotul anterior este amanat; revine mai tarziu,
+  astfel incat toate albumele sa poata fi parcurse din nou.
+- Numarul lotului este vizibil, iar noul lot incepe de la primul card.
+- Apasarile repetate si evenimentele unui card vechi nu mai pot afecta noul lot.
+- Schimbarea genului si istoricul lotului se actualizeaza impreuna.
+- Daca toate albumele genului incap intr-un singur lot, apare numarul total si
+  butonul All sounds pentru eliminarea filtrului.
+- Refresh la albume nu schimba ordinea melodiilor din runda de swipe.
+
+Catalogul inclus are 96 de albume. Dupa ce sunt parcurse, albumele pot reaparea
+intr-un nou ciclu. Refresh nu descarca automat un catalog nou de pe SHFL.
+
+VERIFICARE RAPIDA PE TELEFON
+Discovery > Albums > All albums > All sounds.
+Apasa Refresh: numarul Batch creste, primul card se schimba si nu trebuie sa
+apara albumele din lotul precedent. Primele patru loturi acopera cele 96.
+Incearca si un gen cu putine albume, apoi All sounds pentru revenire.
+Deschide un album si revino: lotul si pozitia trebuie pastrate.
+
+VALIDARE
+58 de teste Discovery trecute, inclusiv patru regresii noi pentru Refresh.
+Scenariul cu ViewModel, preferinte si SavedStateHandle AndroidX reale a trecut;
+serviciile Android si durata de viata a ViewModel-ului sunt simulate.
+Codul Kotlin/Compose si integrarea navigarii au fost compilate izolat.
+Buildul Gradle complet ramane blocat la descarcarea distributiei in acest mediu;
+nu a fost produs un APK si interfata nu a fost rulata pe un telefon/emulator aici.
+Detalii: docs\DISCOVERY-REFRESH-v1.4.10.md

@@ -1,0 +1,47 @@
+HARMONY 1.0.0 - AUDIT SI CORECTURI
+
+Arhiva contine proiectul complet, inclusiv SpotiFLAC, Soulseek si Discovery.
+Este un pachet de SURSE, nu un APK. versionCode: 83.
+
+ACTUALIZARE PE PC
+1. Inchide Android Studio daca are proiectul deschis.
+2. Extrage CONTINUTUL folderului Harmony din arhiva peste D:\Harmony.
+   Fisierul settings.gradle.kts trebuie sa fie in D:\Harmony, nu intr-un
+   al doilea subfolder Harmony.
+3. Pastreaza local.properties, keystore.properties si cheia de semnare existente.
+   SDK-ul tau ramane D:\Android.
+4. Pentru instalarea debug folosita anterior, conecteaza telefonul prin USB,
+   autorizeaza depanarea si ruleaza:
+
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+
+5. Verifica versiunea 1.0.0 in informatiile Android despre aplicatie.
+
+Daca aplicatia de pe telefon este un RELEASE semnat, foloseste aceeasi cheie
+si un build release. In PowerShell:
+
+   cd D:\Harmony
+   .\gradlew.bat :app:assembleRelease -PharmonyAbi=arm64-v8a
+   D:\Android\platform-tools\adb.exe install -r .\app\build\outputs\apk\release\app-release.apk
+
+Nu dezinstala aplicatia si nu sterge datele pentru a rezolva o eroare de semnare.
+O actualizare trebuie semnata cu cheia versiunii instalate.
+
+PRIMELE VERIFICARI
+- Discovery: Refresh pe All sounds schimba lotul; dupa intoarcerea dintr-un
+  album, lotul ramane acelasi. Fara internet functiile online sunt blocate;
+  dupa reconectare exista perioada de revenire de 5 secunde.
+- Crossfade 12 secunde: testeaza Pause, Shuffle si Repeat All. Pause trebuie
+  sa opreasca ambele piese, iar urmatoarea piesa trebuie sa respecte coada.
+- Inchide Harmony din aplicatiile recente si redeschide: coada se restaureaza
+  fara redare automata. Testeaza Play si dupa oprirea/recrearea serviciului.
+- Edit tags: schimba numele, salveaza de doua ori, apoi Undo all edits.
+  Verifica titlul in playlist, Favorites si Most played.
+- Descarca un album cu melodii selectate; schimba ecranul in timpul descarcarii.
+  Verifica notificarea, anularea si reluarea. Verifica stergerea din Library
+  si dialogul de pastrare/stergere dupa ascultarea albumului.
+
+Rezultatele auditului, limitele verificarilor si lista detaliata a corecturilor:
+   docs\history\AUDIT-v1.4.11.md
+
+Testele de regresie sunt incluse in modulele src\test si tools\audit.

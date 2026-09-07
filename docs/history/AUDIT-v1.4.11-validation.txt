@@ -1,0 +1,48 @@
+work/Harmony/app/src/main/kotlin/com/harmony/app/navigation/HarmonyApp.kt:111:63: warning: 'val Icons.Rounded.PlaylistPlay: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.PlaylistPlay.
+        TopLevel(Routes.PLAYLISTS, "Playlists", Icons.Rounded.PlaylistPlay),
+                                                              ^^^^^^^^^^^^
+work/Harmony/core/media/src/main/kotlin/com/harmony/core/media/scanner/LibraryScanner.kt:122:50: warning: this declaration is in a preview state and can be changed in a backwards-incompatible manner with a best-effort migration. Its usage should be marked with '@kotlinx.coroutines.FlowPreview' or '@OptIn(kotlinx.coroutines.FlowPreview::class)' if you accept the drawback of relying on preview API
+    override fun changes(): Flow<Unit> = watcher.changes()
+                                                 ^^^^^^^
+work/Harmony/core/ui/src/main/kotlin/com/harmony/core/ui/component/EditorialSongCard.kt:179:30: warning: 'val Icons.Rounded.QueueMusic: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.QueueMusic.
+        icon = Icons.Rounded.QueueMusic,
+                             ^^^^^^^^^^
+work/Harmony/core/ui/src/main/kotlin/com/harmony/core/ui/component/SongRow.kt:99:35: warning: 'val Icons.Rounded.QueueMusic: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.QueueMusic.
+                    Icons.Rounded.QueueMusic,
+                                  ^^^^^^^^^^
+work/Harmony/feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistTransferScreen.kt:306:32: warning: 'val Icons.Rounded.ArrowBack: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.ArrowBack.
+            Icon(Icons.Rounded.ArrowBack, null, modifier = Modifier.size(20.dp))
+                               ^^^^^^^^^
+work/Harmony/feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistTransferScreen.kt:401:35: warning: 'constructor(capitalization: KeyboardCapitalization = ..., autoCorrect: Boolean, keyboardType: KeyboardType = ..., imeAction: ImeAction = ..., platformImeOptions: PlatformImeOptions? = ..., showKeyboardOnFocus: Boolean? = ..., hintLocales: LocaleList? = ...): KeyboardOptions' is deprecated. Please use the new constructor that takes optional autoCorrectEnabled parameter.
+                keyboardOptions = KeyboardOptions(
+                                  ^^^^^^^^^^^^^^^
+work/Harmony/feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistTransferScreen.kt:424:42: warning: 'val Icons.Rounded.Login: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.Login.
+                    icon = Icons.Rounded.Login,
+                                         ^^^^^
+work/Harmony/feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistTransferScreen.kt:464:36: warning: 'val Icons.Rounded.Logout: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.Logout.
+                Icon(Icons.Rounded.Logout, null, modifier = Modifier.size(18.dp))
+                                   ^^^^^^
+work/Harmony/feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistTransferScreen.kt:810:97: warning: 'val Icons.Rounded.OpenInNew: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.OpenInNew.
+                    EditorialPill("Verify ${providerName(challenge.providerId)}", Icons.Rounded.OpenInNew, onVerify, palette)
+                                                                                                ^^^^^^^^^
+work/Harmony/feature/library/src/main/kotlin/com/harmony/feature/library/AddToPlaylistSheet.kt:108:59: warning: 'val Icons.Rounded.PlaylistAdd: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.PlaylistAdd.
+                    leadingContent = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
+                                                          ^^^^^^^^^^^
+work/Harmony/feature/library/src/main/kotlin/com/harmony/feature/library/LibraryScreen.kt:285:56: warning: 'val Icons.Rounded.ViewList: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.ViewList.
+                            if (arcMode) Icons.Rounded.ViewList else Icons.Rounded.Album,
+                                                       ^^^^^^^^
+work/Harmony/feature/player/src/main/kotlin/com/harmony/feature/player/NowPlayingScreen.kt:567:56: warning: 'val Icons.Rounded.QueueMusic: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.QueueMusic.
+                    leadingIcon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
+                                                       ^^^^^^^^^^
+PASS: 207 production Kotlin files compiled
+JUnit version 4.13.2
+.......................................................................................................................................
+Time: 0.373
+
+OK (135 tests)
+
+PASS: tag editor (7 scenarios: stale search/selection, back, revert, repeat save, navigation during save, storage failure)
+PASS: Spotify client (4 scenarios: refresh/disconnect race, change-client race, successful refresh, repeated pagination)
+PASS: crossfade (shuffle target, pause, full 12-second ramp, disable, repeat-all handoff, final track, repeat-one, slow preview, stop)
+PASS: ReplayGain PCM (active at unity, byte-exact bypass, mid-track gain, clipping, invalid metadata)
+PASS: 6 effective-metadata queries, 2 missing-song writes, deletion cascades in 4 tables

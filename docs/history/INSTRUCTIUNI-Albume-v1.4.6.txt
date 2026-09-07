@@ -1,0 +1,65 @@
+HARMONY 1.4.6 - DESCARCA, ASCULTA, PASTREAZA CE ITI PLACE
+
+INSTALARE
+1. Extrage folderul Harmony din arhiva peste D:\Harmony.
+2. Pastreaza local.properties, keystore.properties si cheia de semnare existente.
+3. Conecteaza telefonul prin USB si ruleaza:
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+4. Verifica versiunea 1.4.6 in informatiile aplicatiei.
+Android SDK ramane D:\Android. Actualizeaza folosind aceeasi cheie de semnare;
+nu dezinstala aplicatia si nu sterge datele acesteia.
+
+CUM DESCARCI UN ALBUM
+- Discover > swipe stanga/dreapta > Download / open album.
+- Alege editia albumului; Harmony incarca lista completa a pieselor.
+- Alege SpotiFLAC sau Soulseek si formatul, apoi Download album.
+- Pentru Soulseek, conecteaza contul in Downloads. Daca SpotiFLAC cere
+  verificarea furnizorului, foloseste Provider verification, finalizeaza in
+  browser, revino in Harmony si apasa Resume album.
+- Existing files sunt refolosite; sunt descarcate doar piesele lipsa.
+- Unmetered network only asteapta o conexiune pe care Android o considera
+  necontorizata. Nu reprezinta neaparat orice retea Wi-Fi.
+- Poti parasi ecranul. Notificarea afiseaza piesa curenta si permite Pause.
+- Downloads > Your Discover albums redeschide albumele si progresul lor.
+- Resume pastreaza piesele finalizate. O piesa intrerupta poate fi reluata
+  de motor sau poate fi descarcata din nou, in functie de sursa.
+- Play reda piesele disponibile, in ordinea albumului, fara shuffle/repeat.
+
+FORMAT SI SPATIU
+FLAC pastreaza sunetul lossless. MP3 ocupa mai putin spatiu pe telefon.
+SpotiFLAC obtine mai intai fisierul lossless si apoi il converteste in MP3:
+alegerea MP3 nu reduce neaparat traficul de internet. Pe Soulseek, MP3 este
+fisierul oferit de peer, iar bitrate-ul poate varia.
+Fisierele deja existente isi pastreaza formatul. Schimbarea formatului
+afecteaza piesele lipsa, nu reconverteste colectia existenta.
+
+DUPA ASCULTARE
+- Inima de langa o piesa o adauga la favoritele Harmony.
+- Progresul se salveaza in timp ce asculti, inclusiv cu ecranul stins.
+- Albumul este eligibil dupa ascultarea a minimum 90% din fiecare piesa
+  a editiei alese. Saritul la final si repetarea unui refren nu umplu progresul.
+- La final / dupa oprirea redarii apare selectia: pastreaza tot albumul,
+  pastreaza doar piesele bifate sau sterge albumul din telefon.
+- Favoritele si piesele pe care le aveai deja sunt bifate initial.
+  Poti modifica orice bifa. Delete the whole album include si piesele vechi.
+- Decide later amana intrebarea 24 de ore. Manage songs to keep permite
+  deschiderea manuala a selectiei oricand descarcarea este oprita.
+- Harmony cere confirmarea inainte de stergere; Android poate cere si el
+  acordul pentru fisiere. Anularea nu autorizeaza stergerea altor fisiere.
+
+STERGERE DIN LIBRARY
+- In lista Songs sau in rezultatele cautarii: meniul cu trei puncte al piesei
+  > Delete from phone > confirma.
+- In modul cu discuri (arc), piesa centrata are si buton de stergere.
+- In pagina unui album: meniul piesei sau Delete album from phone.
+- Stergerea elimina fisierul audio, nu doar randul afisat; se curata si
+  referintele din playlisturi, favorite, istoricul descarcarilor si player.
+- Daca permisiunea lipseste sau un furnizor refuza, fisierul nu este marcat
+  drept sters. Poti reface accesul si incerca din nou.
+
+Arhiva contine surse, nu un APK deja construit. Au fost compilate separat
+modulele modificate cu Android 35 si bibliotecile UI reale si au fost rulate
+teste automate pentru progres, potrivire, persistenta si stergere.
+Buildul Gradle complet, aspectul pe telefon si descarcarile reale de la
+furnizori nu au putut fi verificate in acest mediu.
+Modificarile Spotify 1.4.4 si redesignul Discover 1.4.5 sunt incluse.

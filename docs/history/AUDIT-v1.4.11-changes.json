@@ -1,0 +1,314 @@
+{
+  "baseline_sha256": "31f861f291669b573c2e08e568dfbdb9b967fd826059676a29c7a7764f5b33be",
+  "version": "1.4.11",
+  "versionCode": 83,
+  "scope": "Source and documentation changes; this manifest excludes itself and generated validation logs.",
+  "removed": [],
+  "changes": [
+    {
+      "path": "INSTRUCTIUNI-Audit-v1.4.11.txt",
+      "change": "added",
+      "sha256": "889eb4073f5e5ca425b3a7026765ddd415076b4ff9942f99f12088acc9fe778f"
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "change": "modified",
+      "sha256": "48feccb648714aa06e0b16356b1fceb1a688de59a75c08e53890ffcc95a993f6"
+    },
+    {
+      "path": "app/src/main/kotlin/com/harmony/app/MainActivity.kt",
+      "change": "modified",
+      "sha256": "a8791543c6219e94329229731d83ed4dfdb8d68762c419bc47b9b666ba0e3577"
+    },
+    {
+      "path": "core/database/src/main/kotlin/com/harmony/core/database/dao/AnalysisDao.kt",
+      "change": "modified",
+      "sha256": "50d287f723a046186395ebb3306ceec0e060409f5175126079078ca14dc35648"
+    },
+    {
+      "path": "core/database/src/main/kotlin/com/harmony/core/database/dao/HistoryDao.kt",
+      "change": "modified",
+      "sha256": "083ef97cf9b31cb2203fc800f160774be3b5268ffdedbee329a791337cd8a6e9"
+    },
+    {
+      "path": "core/database/src/main/kotlin/com/harmony/core/database/dao/PlaylistDao.kt",
+      "change": "modified",
+      "sha256": "7be1fed3f92dc379011e0cab103bde5d022446e2c38a6acd5a4476537f592891"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/artwork/ArtworkCache.kt",
+      "change": "modified",
+      "sha256": "d3e12b1ea1763a2242b1b9a6a397e73fcd26855aa03cc7639fe0d99eeaf14e60"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/artwork/ArtworkProvider.kt",
+      "change": "modified",
+      "sha256": "20d3aa3b167f50a5a9ce9bebe48695cb95200c950e72c010569fd6590051ac8c"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/model/MediaCandidate.kt",
+      "change": "modified",
+      "sha256": "4a946e62accc61f8689bf1629d0c27780ca88cb1e7a24f72e8dea4e525c5e7c9"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/scanner/LibraryScanner.kt",
+      "change": "modified",
+      "sha256": "054345f925b272608be5090fca10aa690e7079381e3f4df796749111f02c4999"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/scanner/MediaStoreSource.kt",
+      "change": "modified",
+      "sha256": "f4c57dfa6571206ee410e91fee0c2a9e7c742e32b0d357db44680be0d6e9ff09"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/scanner/SafTreeSource.kt",
+      "change": "modified",
+      "sha256": "6b73e2d089ca789b74bc5c7d808ee27864e912c5047ddebe65bfc42a83fcd292"
+    },
+    {
+      "path": "core/media/src/main/kotlin/com/harmony/core/media/scanner/ScanIdentity.kt",
+      "change": "added",
+      "sha256": "b42229c83935ff9fdc57934a4d5e88aa7b79be6237118a63e1a30de46b99c2a2"
+    },
+    {
+      "path": "core/media/src/test/kotlin/com/harmony/core/media/scanner/ScanIdentityTest.kt",
+      "change": "added",
+      "sha256": "a8fa6f2eed86d65f4bab2b31f1c87892538c6f6423a16c844b6ed4179580ac14"
+    },
+    {
+      "path": "data/analysis/src/main/kotlin/com/harmony/data/analysis/AnalysisRepositoryImpl.kt",
+      "change": "modified",
+      "sha256": "24a61a03ba87fc72d9867a8150cb031bd8ab9efa5d753ed104fae08d493b4961"
+    },
+    {
+      "path": "data/analysis/src/main/kotlin/com/harmony/data/analysis/decode/AudioDecoder.kt",
+      "change": "modified",
+      "sha256": "0a18644a5ab9889ccb4df7a2d86a26f75ea776756c122e6096d628a46f505d2c"
+    },
+    {
+      "path": "data/analysis/src/main/kotlin/com/harmony/data/analysis/inspect/SpectralInspector.kt",
+      "change": "modified",
+      "sha256": "f08cecedc04a96f8f96ceded04b00ae7fddedffc21f5965632776818418265b2"
+    },
+    {
+      "path": "data/library/src/main/kotlin/com/harmony/data/library/HistoryAndFavoritesRepositories.kt",
+      "change": "modified",
+      "sha256": "b0e9452759a4827115daec758bc9fc54ebdceeae79f896377a58ecb6ce83f48e"
+    },
+    {
+      "path": "data/library/src/main/kotlin/com/harmony/data/library/PlaylistRepositoryImpl.kt",
+      "change": "modified",
+      "sha256": "7a04c45ce0ad87b311c56dd300e43ab5a5dcad46f5ed7aa9fa57724984914b0e"
+    },
+    {
+      "path": "data/library/src/main/kotlin/com/harmony/data/library/m3u/M3uCodec.kt",
+      "change": "modified",
+      "sha256": "4eb1a5a83f8a278f6d7fd99da9a0e8aa70c80d6ea9da337c4eb557bec45aa9aa"
+    },
+    {
+      "path": "data/library/src/test/kotlin/com/harmony/data/library/M3uCodecTest.kt",
+      "change": "added",
+      "sha256": "7340fd1f0d8a50e2a61fe7a606f8cb446f1bf75b6adb3295b3516b12a60cb28f"
+    },
+    {
+      "path": "docs/AUDIT-v1.4.11.md",
+      "change": "added",
+      "sha256": "d757c2a437aa641df3c6ba7573363195c6dd40682334753d0c2235d0abb36e0b"
+    },
+    {
+      "path": "domain/library/src/main/kotlin/com/harmony/domain/library/usecase/ScanLibraryUseCase.kt",
+      "change": "modified",
+      "sha256": "3d8d0069d16f76bb156d5171133c084169125c566e036e8039035ce34cbd08b5"
+    },
+    {
+      "path": "domain/library/src/test/kotlin/com/harmony/domain/library/AlbumListeningTest.kt",
+      "change": "modified",
+      "sha256": "0d61287fa8d3cbee2c02ccd91040ab066141ee812cad7b4d50a051c9c55255cc"
+    },
+    {
+      "path": "domain/library/src/test/kotlin/com/harmony/domain/library/ScanLibraryUseCaseTest.kt",
+      "change": "added",
+      "sha256": "4139ecf33cc6adc80b98e8b33e25bdefcd923479641b7fee70a412d56fa86133"
+    },
+    {
+      "path": "domain/playback/src/main/kotlin/com/harmony/domain/playback/QueueRestoration.kt",
+      "change": "added",
+      "sha256": "7dd29b60e32922bd51379acc6a3f4973883769fd7f280ee5f3281d0b58d3662f"
+    },
+    {
+      "path": "domain/playback/src/test/kotlin/com/harmony/domain/playback/QueueRestorationTest.kt",
+      "change": "added",
+      "sha256": "7e93ac80bfe54d892362cdef0788c0bb87b1b349db3624e80f06369e2c75a33d"
+    },
+    {
+      "path": "feature/downloads/build.gradle.kts",
+      "change": "modified",
+      "sha256": "95d3f2a08b0bbcdc056ca0a01e5708bb50928a9aa639db31405449cd0f5c2723"
+    },
+    {
+      "path": "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/DownloadProcessAwaiter.kt",
+      "change": "added",
+      "sha256": "3e6241b9f68e55404d26c26e962d8e1b00f11343df08da515b06d09a3a40705e"
+    },
+    {
+      "path": "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/DownloadsViewModel.kt",
+      "change": "modified",
+      "sha256": "c6ff094b0b6cec366f1c36e1e8e96c18bf65a736a2b51ef80ef5a36e8fa8439c"
+    },
+    {
+      "path": "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/MusicDownloadRepository.kt",
+      "change": "modified",
+      "sha256": "b603a787302fe5f0f30ef377070ab53070bfb2d6013ed99bf54bc13bfdaa29bc"
+    },
+    {
+      "path": "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotiFlacDownloadEngine.kt",
+      "change": "modified",
+      "sha256": "5295903dabaf6cd9dcf657bbb29b061eeadb6eb68b356708928215402689148b"
+    },
+    {
+      "path": "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyApiUrlPolicy.kt",
+      "change": "added",
+      "sha256": "e14489ca028bc8bdc0fcd5227c5d2781736d1a5d7b5ab530cae31f07f1a9b740"
+    },
+    {
+      "path": "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistClient.kt",
+      "change": "modified",
+      "sha256": "1db3a1df0724bfac5431654d8322517b54b1c90b680192a4790721fdb9b04548"
+    },
+    {
+      "path": "feature/downloads/src/test/kotlin/com/harmony/feature/downloads/DownloadProcessAwaiterTest.kt",
+      "change": "added",
+      "sha256": "b336aa989e1dbd1ebacf1afadac3932bf8b50e28aadc0102fee1d4beb75e4045"
+    },
+    {
+      "path": "feature/downloads/src/test/kotlin/com/harmony/feature/downloads/SpotifyApiUrlPolicyTest.kt",
+      "change": "added",
+      "sha256": "adbde7ef94798692803cd089455c56d9cb1abbcb5f1f4e7eb972e5f8b2eae5c2"
+    },
+    {
+      "path": "feature/settings/src/main/kotlin/com/harmony/feature/settings/FlacCheckViewModel.kt",
+      "change": "modified",
+      "sha256": "df0c27af7f266d7a81986578fb56fa3d5c0154c23161084c182228a23695c3ff"
+    },
+    {
+      "path": "feature/settings/src/main/kotlin/com/harmony/feature/settings/SettingsScreen.kt",
+      "change": "modified",
+      "sha256": "2d274db199ad065b6a1e1cc12498d0bc4f0e8e44240fea8facc647e31872e7a2"
+    },
+    {
+      "path": "feature/settings/src/main/kotlin/com/harmony/feature/settings/TagEditorScreen.kt",
+      "change": "modified",
+      "sha256": "a250d2c3a3168d42ace1bbbf3dc377dacc7e84496d17252ae83e556e8c08bbcb"
+    },
+    {
+      "path": "feature/settings/src/main/kotlin/com/harmony/feature/settings/TagEditorViewModel.kt",
+      "change": "modified",
+      "sha256": "a4f34e754c1ff5fc41a69ec9fce3e995346afab9cd15ead9862d6045f4fcbbc2"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/PlaybackService.kt",
+      "change": "modified",
+      "sha256": "ef2774ae07acf0fba2f2283ec834e735b77a9ca768b8321e65cc1121e217e554"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/controller/PlaybackConnection.kt",
+      "change": "modified",
+      "sha256": "eca5c951f9c022022d4f421e55a60434f7a948618dcf9dd64266bcedf41f0bef"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/di/PlaybackModule.kt",
+      "change": "modified",
+      "sha256": "b48b284dd7338c5f618ad1c45ddc50423483e1708e078a8d605ad668f263af7d"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/player/CrossfadeController.kt",
+      "change": "modified",
+      "sha256": "ccd442ab7640cee7cb2e69c71d440a5fe93c7ec27e62311b48ad595da18aa29b"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/player/HarmonyPlayer.kt",
+      "change": "modified",
+      "sha256": "96f0c2ade5a63b7d65a50f5fe027c3a3e863cefb88a35802b7dd8d3841db540b"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/player/ReplayGainAudioProcessor.kt",
+      "change": "modified",
+      "sha256": "6a50f5fdd52b07f852dd97e26a42236517eccc89991c48341c085d64eb84a799"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/player/ReplayGainMetadata.kt",
+      "change": "added",
+      "sha256": "810f32d3594098b6e4da97db5f5bbe8e406b1b08e51849fe080b4326d95475c1"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/session/BrowseTree.kt",
+      "change": "modified",
+      "sha256": "4e586a31fc4071b47e75f287aeaffe86330a7d3220dfc2e40af05a0344c78666"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/session/HarmonyMediaLibraryCallback.kt",
+      "change": "modified",
+      "sha256": "7fe803587a53e7068de39d6c1668b86c7f0eb1e68117185c86306d924f6bbb93"
+    },
+    {
+      "path": "playback/service/src/main/kotlin/com/harmony/playback/service/timer/SleepTimer.kt",
+      "change": "modified",
+      "sha256": "520af43c0a4bfc58b5675258ed36a457c625737e434e76d6f7c3c68319a14d77"
+    },
+    {
+      "path": "tools/audit/README.md",
+      "change": "added",
+      "sha256": "3c4ed21b67a358bacec64ee3bbb644e8afea76de994da43c828c6a52083f8034"
+    },
+    {
+      "path": "tools/audit/audit-harness/Android.kt",
+      "change": "added",
+      "sha256": "36f7a6f2e3e9dae8cf2825458d028d8a57d934fa94e5d1aec49ac9b28442147b"
+    },
+    {
+      "path": "tools/audit/audit-harness/Run.kt",
+      "change": "added",
+      "sha256": "5cbfd2a0bbdd767c69c014eb0503c75a11234440890ef59e84bb1de3e6f877bd"
+    },
+    {
+      "path": "tools/audit/audit-harness/Uri.kt",
+      "change": "added",
+      "sha256": "54163be4509f0b72eaa773d1af072ac721db2efbd01fc1b4fcc106772a50fe39"
+    },
+    {
+      "path": "tools/audit/playback-harness/Context.kt",
+      "change": "added",
+      "sha256": "18ef6768b6caf16a32d1e46754823b3545d5e00c999c934123cc6b91aa38751b"
+    },
+    {
+      "path": "tools/audit/playback-harness/Platform.kt",
+      "change": "added",
+      "sha256": "184caa9a6f6f7ed19db05ca0320879956b1895559150ac6b32c68c670d2ca5b3"
+    },
+    {
+      "path": "tools/audit/playback-harness/Run.kt",
+      "change": "added",
+      "sha256": "a02f104b3685b00e5616e2fd49e7e8080cc3d3dbb40ba82d80e3419407239045"
+    },
+    {
+      "path": "tools/audit/playback-harness/TextUtils.kt",
+      "change": "added",
+      "sha256": "a49f94210211ab432246ffc3ab387bef052e2a4acb5aee69719c50e84e2c34e4"
+    },
+    {
+      "path": "tools/audit/playback-harness/Uri.kt",
+      "change": "added",
+      "sha256": "bd7dede593c38fb23ac0c51071491a3fa380d39e0d80968baffb40606602c04b"
+    },
+    {
+      "path": "tools/audit/run_isolated.py",
+      "change": "added",
+      "sha256": "4c04daf0d3a1d3e94931d511ff513f76b61adc4c8355dfdf405df48d88ca75c2"
+    },
+    {
+      "path": "tools/audit/verify_database.py",
+      "change": "added",
+      "sha256": "6a7ea5dc5c44334300eea4b833f347014f2b2761c8e14f26227a6c368ea8cd98"
+    }
+  ]
+}

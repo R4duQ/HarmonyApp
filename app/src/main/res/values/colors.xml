@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The launcher field. Same amber as the Library screen's field
+      (EditorialLook.kt, AmberLight.field) so the icon and the first screen
+      you land on are the same colour.
+    -->
+    <color name="ic_launcher_background">#F3A311</color>
+    <!-- Shared by the launcher icon, the app theme, and Android Auto's
+         rendering of this app. Same values as EditorialLook.kt's amber. -->
+    <color name="harmony_amber">#F3A311</color>
+    <color name="harmony_ink">#1A1403</color>
+</resources>

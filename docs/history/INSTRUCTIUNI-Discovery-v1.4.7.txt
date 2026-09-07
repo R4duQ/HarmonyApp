@@ -1,0 +1,80 @@
+HARMONY 1.4.7 - SWIPE PE MELODII SI ALBUME PENTRU GUSTURILE TALE
+
+INSTALARE
+1. Extrage continutul folderului Harmony din arhiva peste D:\Harmony.
+2. Pastreaza local.properties, keystore.properties si cheia de semnare existente.
+3. Conecteaza telefonul prin USB si ruleaza:
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+4. Verifica versiunea 1.4.7 in informatiile aplicatiei.
+SDK-ul ramane D:\Android. Foloseste aceeasi cheie de semnare si actualizeaza
+aplicatia existenta; nu o dezinstala si nu ii sterge datele.
+Arhiva contine surse, nu un APK deja construit.
+
+SWIPE SONGS
+- Discover se deschide in modul Swipe songs.
+- Dreapta / inima: imi place. Stanga / X: nu imi place.
+- Skip trece peste melodie fara sa o considere un vot negativ.
+- Butonul Undo anuleaza ultima alegere. Poti revedea piesele sarite.
+- Listen reda cel mult 30 de secunde: fisierul local, daca exista, sau un
+  preview oferit de Deezer. Daca nu exista un preview potrivit, apare un mesaj;
+  poti sari peste melodie sau o poti evalua daca o cunosti deja.
+- Redarea principala se opreste cand alegi o auditie scurta. Preview-ul se
+  opreste la schimbarea piesei, a modului, la iesirea din ecran sau din aplicatie.
+- Alegerile influenteaza recomandarile prin album, artist si gen. Sunt salvate
+  local, separat de favoritele din Library. Nu este necesara conectarea Spotify.
+- Sub melodii apar albume recomandate; apasa unul pentru lista pieselor.
+
+ALBUMS SI REFRESH
+- Modul Albums pastreaza cardurile si navigarea stanga/dreapta intre albume.
+- For you foloseste gusturile si biblioteca; All albums si Saved raman disponibile.
+- Catalogul include 96 de albume cu pagini si coperti verificate pe The Shfl.
+- Refresh trece la urmatorul lot de maximum 24 de albume diferite. Fara filtre,
+  cele 96 de albume formeaza patru loturi, apoi catalogul este reluat.
+- Pentru un gen sau pentru Saved pot exista mai putine rezultate; numarul real
+  apare in ecran. Refresh este dezactivat daca nu exista alte albume eligibile.
+- Sunt 19 genuri: Rock, Electronic, Hip-hop, Soul, Pop, Indie & alternative,
+  R&B, Funk, Jazz, Metal, Folk, Country, Blues, Reggae & dub, Latin, African,
+  Worldwide, Classical si Ambient.
+- Selectia este curatoriata in Harmony, nu reprezinta intregul catalog live
+  SHFL. Explore more on The Shfl deschide site-ul pentru alte descoperiri.
+
+INTERNET
+- Discovery, auditiile online, cautarea editiilor si pornirea descarcarilor
+  necesita internet validat de Android. O retea Wi-Fi fara internet nu este suficienta.
+- Fara internet apare un mesaj. Dupa revenirea conexiunii, functiile se activeaza
+  automat dupa 5 secunde, cu numaratoare vizibila. Nu trebuie sa redeschizi aplicatia.
+- Daca legatura cade din nou in cele 5 secunde, numaratoarea se anuleaza.
+- Biblioteca locala, redarea fisierelor existente, gestionarea fisierelor si
+  butonul Pause pentru o descarcare raman utilizabile fara internet.
+
+DESCARCA DOAR CE VREI
+- Deschide albumul, alege editia si consulta lista completa a pieselor.
+- Lasa bifate doar piesele dorite; All si None modifica selectia pieselor lipsa.
+- Piesele deja in telefon au o bifa de disponibilitate si nu sunt descarcate din nou.
+- Alege SpotiFLAC sau Soulseek, FLAC sau MP3 si apasa Download N selected tracks.
+- Selectia si sursa sunt fixate pentru lotul pornit. Apasa Pause inainte de
+  a schimba selectia unui album aflat in coada. Fisierele finalizate se pastreaza.
+- Formatul MP3 din SpotiFLAC poate reduce spatiul final, dar sursa lossless
+  este descarcata mai intai. MP3 de pe Soulseek foloseste fisierul oferit de peer.
+- Progresul albumului are propriul proprietar: navigarea prin Downloads sau
+  Spotify Transfer nu ii mai sterge bannerul. Notificarea Android foloseste
+  acelasi ID pe durata lotului si este actualizata fara repornire la fiecare piesa.
+
+PASTRARE SI STERGERE
+- Functiile din 1.4.6 pentru pastrarea si stergerea pieselor sunt incluse.
+- Dupa minimum 90% din FIECARE piesa a albumului complet, Harmony intreaba
+  ce vrei sa pastrezi. Un subset descarcat nu marcheaza intregul album ca ascultat.
+- Pentru un subset, foloseste Manage songs to keep oricand descarcarea este oprita.
+- Poti sterge piese si direct din Library, prin meniul piesei > Delete from phone.
+- Stergerea necesita confirmarea ta; simpla ascultare nu sterge fisiere.
+
+VERIFICARE
+Au trecut 51 de teste JUnit si verificarile separate pentru persistenta gusturilor,
+loturi distincte, selectie, restaurare, stergere si anularea consimtamantului Android.
+Interfetele Kotlin/Compose, monitorul de conexiune, playerul pentru preview,
+workerul, biblioteca si navigarea au fost compilate cu Android 35 si dependintele
+AndroidX/Media3 ale proiectului. La compilarea izolata, motoarele native existente
+si unele ecrane nemodificate sunt reprezentate prin semnaturile lor.
+Buildul Gradle complet ramane blocat in acest mediu la descarcarea distributiei
+Gradle. Aspectul pe telefon, notificarea Android reala si transferurile audio de
+la furnizori trebuie verificate pe dispozitiv; disponibilitatea preview-urilor variaza.

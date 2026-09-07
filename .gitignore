@@ -1,0 +1,32 @@
+.gradle/
+build/
+local.properties
+keystore.properties
+*.keystore
+.idea/
+*.iml
+captures/
+.DS_Store
+.cxx/
+
+# Generated from pinned SpotiFLAC Go source by CI/local release tooling.
+vendor-maven/
+feature/downloads/libs/
+
+# GitHub/local release signing material
+release.keystore
+*.jks
+*.p12
+*.pfx
+
+# Local credentials and generated release outputs
+.env
+.env.*
+!.env.example
+dist/
+APK/
+*.apk
+*.aab
+*.log
+__pycache__/
+*.pyc

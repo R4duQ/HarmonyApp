@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  App theme.
+
+  This matters beyond the phone: Android Auto reads a media app's theme to
+  colour its own media surfaces — the now-playing background, browse
+  headers, and control tints. It's the ONLY presentation control a projected
+  media app has besides the browse tree's content style, because the Auto
+  host renders every pixel itself and exposes no drawing surface to the app.
+
+  So these are Harmony's own tokens rather than defaults: the Library
+  screen's amber field and near-black ink, which is what makes the car
+  interface read as the same app rather than a generic media shell.
+-->
+<resources>
+    <style name="Theme.Harmony" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/harmony_amber</item>
+        <item name="android:colorPrimaryDark">@color/harmony_ink</item>
+        <item name="android:colorAccent">@color/harmony_amber</item>
+        <item name="android:colorBackground">@color/harmony_ink</item>
+        <item name="android:windowBackground">@color/harmony_ink</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Compose owns the window; edge-to-edge is handled in MainActivity. -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

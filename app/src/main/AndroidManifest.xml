@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Library access (Phase 3 requests these at runtime) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Package visibility (Android 11+) for the Discover screen's browser
+      handoff. Without these, resolving a Custom Tabs provider and the plain
+      ACTION_VIEW fallback can come back empty on devices where the browser
+      is not the system default, and the SHFL links would silently do
+      nothing. Declaring the intents Harmony wants to resolve is the narrow
+      alternative to QUERY_ALL_PACKAGES, which this app does not request.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".HarmonyApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Harmony"
+        android:enableOnBackInvokedCallback="true">
+
+        <!--
+          Disable WorkManager's automatic self-initialization (a ContentProvider
+          that runs before Application.onCreate(), and therefore before Hilt has
+          injected our fields). We initialize WorkManager manually instead, from
+          HarmonyApplication.onCreate(), once workerFactory is actually available
+          — otherwise WorkManager silently falls back to plain reflection to
+          construct workers, which fails for any @HiltWorker with real
+          dependencies (exactly the bug that made scanning never run).
+        -->
+        <!--
+          Serves artwork across the process boundary to the Android Auto
+          host.
+
+          exported="true" is required, not sloppiness: the Auto host is a
+          separate app, and reading a non-exported provider needs a
+          per-URI grant that MediaSession does not reliably issue for
+          artwork. With exported="false" every cover in the car stays
+          blank.
+
+          The exposure is bounded by what the provider can do: query,
+          insert, update and delete all return nothing, and openFile only
+          resolves paths of the form /art/{id} or /vinyl/{id} against
+          images already cached for the user's own library. There is no
+          path traversal and no data here beyond album covers.
+        -->
+        <provider
+            android:name="com.harmony.core.media.artwork.ArtworkProvider"
+            android:authorities="com.harmony.app.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- SpotiFLAC extension OAuth / signed-session callbacks.
+                 MainActivity is singleTask so browser verification returns to
+                 the existing Harmony activity through onNewIntent(). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spotiflac" android:host="callback" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spotiflac" android:host="spotify-callback" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spotiflac" android:host="session-grant" />
+            </intent-filter>
+
+            <!-- Spotify Authorization Code + PKCE return for Playlist Transfer. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.harmony.app" android:host="spotify-playlist-callback" />
+            </intent-filter>
+        </activity>
+
+        <!-- Android Auto -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+    </application>
+</manifest>

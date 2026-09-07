@@ -1,0 +1,53 @@
+HARMONY 1.4.4 - CORECTIE LA REVENIREA DIN SPOTIFY
+
+Mesaj raportat:
+Harmony ignored an unexpected Spotify authorization return.
+
+Acest mesaj provine din verificarea adresei de intoarcere in Harmony,
+inainte de schimbarea codului de autorizare cu un token Spotify.
+Nu este acelasi lucru cu eroarea Spotify "client_id: Invalid".
+
+Versiunea 1.4.3 respingea inclusiv adresele corecte cu un fragment dupa #
+sau cu un slash la radacina. 1.4.4 corecteaza aceste cazuri si afiseaza un
+motiv sigur, fara coduri sau tokenuri, pentru adresele inca respinse.
+Captura nu contine adresa completa: cauza exacta de pe telefon nu a putut
+fi confirmata. Corectia a fost verificata cu raspunsuri sintetice locale.
+
+ACTUALIZARE
+
+1. Extrage folderul Harmony din aceasta arhiva peste D:\Harmony.
+   Accepta inlocuirea surselor. Pastreaza local.properties,
+   keystore.properties si cheia ta de semnare, daca exista.
+   NU dezinstala aplicatia si NU sterge datele ei.
+2. Conecteaza telefonul prin USB, cu USB debugging activat.
+3. Ruleaza D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd.
+   Scriptul construieste APK-ul si instaleaza actualizarea cu datele pastrate.
+   Este necesara aceeasi cheie de semnare ca pentru instalarea existenta.
+4. Verifica versiunea 1.4.4 in informatiile aplicatiei.
+5. In Harmony, revino la Playlists -> Playlist Transfer si apasa Connect.
+   Porneste o conectare noua; nu reutiliza pagina vechii incercari din browser.
+6. Aproba accesul in browser si asteapta revenirea in Harmony.
+
+PASTREAZA CONFIGURATIA EXISTENTA
+
+Nu este necesar un Client ID nou pentru aceasta corectie.
+Redirect URI-ul inregistrat si trimis catre Spotify ramane exact:
+
+com.harmony.app://spotify-playlist-callback
+
+Nu adauga slash sau # in Dashboard. Compatibilitatea cu acestea se aplica
+doar adresei primite inapoi. Codul, state si erorile sunt citite exclusiv
+din parametrii query; fragmentele nu pot autoriza conectarea.
+Client Secret nu este folosit si nu trebuie trimis nimanui.
+
+DACA APARE ALTA EROARE
+
+Trimite o captura a mesajului din Harmony dupa instalarea versiunii 1.4.4.
+Nu trimite adresa completa de revenire: poate contine coduri de autorizare.
+Un mesaj de tip "state did not match" sau "expired" necesita o noua
+apasare pe Connect, nu dezactivarea verificarilor de securitate.
+
+Aceasta este o arhiva cu surse, nu un APK gata construit.
+Testele locale au trecut. Build-ul Android complet si autentificarea reala
+Spotify nu au putut fi verificate in acest mediu.
+Detalii: docs\SPOTIFY-CALLBACK-FIX-v1.4.4.md si docs\VALIDATION-v1.4.4.md.

@@ -1,0 +1,20 @@
+{
+  "versionName": "1.0.0",
+  "versionCode": 83,
+  "checks": {
+    "current_version_labels": "passed",
+    "release_tag_v1_0_0": "passed",
+    "old_tag_rejection": "passed",
+    "private_file_and_common_credential_signature_scan": "no findings",
+    "source_files_preserved": "passed"
+  },
+  "changed_source_files": [
+    "app/build.gradle.kts",
+    "feature/settings/src/main/kotlin/com/harmony/feature/settings/SettingsScreen.kt",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/MusicDownloadRepository.kt",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotiFlacDownloadEngine.kt",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotifyPlaylistClient.kt",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/AlbumMetadataClient.kt"
+  ],
+  "limitations": "No new APK build or device tests. Historical audit logs are unchanged."
+}

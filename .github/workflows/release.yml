@@ -1,0 +1,195 @@
+name: Publish Android Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harmony-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JAVA_VERSION: '17'
+  GO_VERSION: '1.26.6'
+  ANDROID_API_LEVEL: '35'
+  ANDROID_BUILD_TOOLS: '35.0.0'
+  NDK_VERSION: '29.0.14206865'
+  SPOTIFLAC_TAG: 'v4.9.5'
+
+jobs:
+  release:
+    name: Signed phone + emulator APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag matches Android version
+        id: version
+        run: bash ./scripts/ci/verify-release-version.sh app/build.gradle.kts "${GITHUB_REF_NAME}"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API_LEVEL}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "cmake;3.22.1" \
+            "ndk;${NDK_VERSION}"
+
+      - name: Build pinned SpotiFLAC Go backend
+        env:
+          NDK_VERSION: ${{ env.NDK_VERSION }}
+          SPOTIFLAC_TAG: ${{ env.SPOTIFLAC_TAG }}
+          EXPECTED_GO_VERSION: ${{ env.GO_VERSION }}
+        run: bash ./scripts/ci/build-spotiflac-backend.sh
+
+      - name: Restore release signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.HARMONY_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HARMONY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!value:-}" ]]; then
+              echo "ERROR: Required Harmony GitHub Actions signing secret for $value is missing." >&2
+              exit 20
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > release.keystore
+          chmod 600 release.keystore
+          keytool -list -keystore release.keystore -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Kotlin release preflight
+        env:
+          HARMONY_KEYSTORE_FILE: release.keystore
+          HARMONY_KEYSTORE_PASSWORD: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          HARMONY_KEY_ALIAS: ${{ secrets.HARMONY_KEY_ALIAS }}
+          HARMONY_KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: >-
+          ./gradlew
+          :core:database:compileReleaseKotlin
+          :domain:shuffle:compileKotlin
+          :feature:player:compileReleaseKotlin
+          :feature:downloads:compileReleaseKotlin
+          :feature:downloads:testReleaseUnitTest
+          --no-daemon
+          --stacktrace
+
+      - name: Build signed arm64 phone APK
+        env:
+          HARMONY_KEYSTORE_FILE: release.keystore
+          HARMONY_KEYSTORE_PASSWORD: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          HARMONY_KEY_ALIAS: ${{ secrets.HARMONY_KEY_ALIAS }}
+          HARMONY_KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: >-
+          ./gradlew
+          :app:assembleRelease
+          -PharmonyAbi=arm64-v8a
+          --no-daemon
+          --stacktrace
+
+      - name: Verify and package arm64 phone APK
+        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" arm64-v8a
+
+      - name: Build signed x86_64 emulator APK
+        env:
+          HARMONY_KEYSTORE_FILE: release.keystore
+          HARMONY_KEYSTORE_PASSWORD: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          HARMONY_KEY_ALIAS: ${{ secrets.HARMONY_KEY_ALIAS }}
+          HARMONY_KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: >-
+          ./gradlew
+          :app:clean
+          :app:assembleRelease
+          -PharmonyAbi=x86_64
+          --no-daemon
+          --stacktrace
+
+      - name: Verify and package x86_64 emulator APK
+        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" x86_64
+
+      - name: Upload signed APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Harmony-v${{ steps.version.outputs.version_name }}-release-apks
+          path: |
+            dist/Harmony-v${{ steps.version.outputs.version_name }}-arm64-v8a.apk
+            dist/Harmony-v${{ steps.version.outputs.version_name }}-x86_64.apk
+            dist/SHA256SUMS.txt
+            dist/APK-SIGNATURE.txt
+            vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.source.txt
+            vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.sha256.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          RELEASE_TITLE="Harmony v${VERSION_NAME}"
+          NOTES="docs/RELEASE-v${VERSION_NAME}-STABLE.md"
+          if [[ ! -f "$NOTES" ]]; then
+            NOTES="docs/RELEASE-v1.0.0-STABLE.md"
+          fi
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" --title "$RELEASE_TITLE" --notes-file "$NOTES"
+            gh release upload "${GITHUB_REF_NAME}" --clobber \
+              "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
+              "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
+              "dist/SHA256SUMS.txt#SHA-256 checksums" \
+              "dist/APK-SIGNATURE.txt#APK signing certificate details"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$NOTES" \
+              "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
+              "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
+              "dist/SHA256SUMS.txt#SHA-256 checksums" \
+              "dist/APK-SIGNATURE.txt#APK signing certificate details"
+          fi
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f release.keystore keystore.properties

@@ -1,0 +1,51 @@
+HARMONY 1.4.5 - DISCOVER: DE LA O MELODIE LA UN ALBUM INTREG
+
+CE ESTE NOU
+
+- Discover este refacut ca un carusel nativ cu coperte mari si carduri de album.
+- Swipe spre stanga: albumul urmator. Swipe spre dreapta: albumul anterior.
+  Exista si butoane cu sageti pentru navigare.
+- Fiecare album are o piesa de pornire si o explicatie originala Harmony
+  despre ascultarea albumului integral.
+- For you prioritizeaza albumele legate de piesele din biblioteca ta.
+  O piesa de pe o compilatie poate sugera albumul original, fara a pretinde
+  ca ai deja toate piesele de pe el.
+- I know it marcheaza o piesa pe care o recunosti, chiar daca nu o ai local.
+- Bookmark salveaza albumul in Saved. Swipe-ul nu salveaza automat.
+- Heard the album il scoate din For you; Undo anuleaza actiunea.
+  Albumul ramane disponibil in All albums si, daca era salvat, in Saved.
+- Filtre: Rock, Electronic, Hip-hop, Soul & pop. New order reordoneaza selectia.
+- Play reda numai fisierele reale din biblioteca ta.
+- Find locally deschide cautarea Harmony cu titlul albumului completat.
+- Read on The Shfl deschide pagina exacta a albumului in browser.
+
+SELECTIA INITIALA
+
+Sunt incluse 24 de albume verificate pe The Shfl: Daft Punk, Fleetwood Mac,
+Radiohead, Amy Winehouse, Nas, Massive Attack, Portishead, The Strokes,
+Kate Bush, Depeche Mode, Lauryn Hill, Kendrick Lamar, Pink Floyd, Pixies,
+Gorillaz, A Tribe Called Quest, Eminem, Prince, Stevie Wonder, The Cure,
+R.E.M., Fugees si Michael Jackson.
+
+Aceasta este o selectie curatoriata inclusa in aplicatie, nu un flux live
+din intregul catalog The Shfl. Butonul Explore more on The Shfl deschide
+site-ul pentru explorare suplimentara. Cardurile si notitele pot fi citite
+offline; copertele noi si paginile externe necesita internet.
+Salvarea in Harmony este separata de contul sau listele de pe The Shfl.
+
+INSTALARE PE TELEFON
+
+1. Extrage folderul Harmony din arhiva peste D:\Harmony.
+2. Pastreaza local.properties, keystore.properties si cheia de semnare.
+3. Conecteaza telefonul prin USB si ruleaza:
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+4. Verifica versiunea 1.4.5 in informatiile aplicatiei si deschide Discover.
+
+Nu dezinstala aplicatia si nu sterge datele. Actualizarea trebuie semnata
+cu aceeasi cheie ca instalarea existenta. Android SDK: D:\Android.
+Corectiile Spotify din 1.4.4 sunt incluse.
+
+Arhiva contine surse, nu un APK gata construit.
+Noul ecran a fost compilat separat cu bibliotecile UI reale si au trecut
+24 de teste JUnit, plus verificari locale ale starii si redarii.
+Build-ul Android complet si aspectul pe telefon nu au putut fi verificate aici.

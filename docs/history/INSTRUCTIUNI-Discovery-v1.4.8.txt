@@ -1,0 +1,66 @@
+HARMONY 1.4.8 - UN ALBUM EXPLICAT DUPA 10 ALEGERI
+
+INSTALARE
+1. Extrage continutul folderului Harmony din arhiva peste D:\Harmony.
+2. Pastreaza local.properties, keystore.properties si cheia de semnare existente.
+3. Conecteaza telefonul prin USB si ruleaza:
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+4. Verifica versiunea 1.4.8 in informatiile aplicatiei.
+SDK-ul ramane D:\Android. Actualizeaza aplicatia existenta cu aceeasi cheie;
+nu o dezinstala si nu ii sterge datele. Arhiva contine surse, nu un APK.
+
+CUM FUNCTIONEAZA RECOMANDAREA NOUA
+- Deschide Discover > Swipe songs. O runda are 10 alegeri.
+- Dreapta / inima: imi place. Stanga / X: nu imi place. Ambele conteaza.
+- Skip sare peste melodie fara sa consume o alegere. Poti revedea piesele sarite.
+- Bara arata progresul, de exemplu 6/10 si cate alegeri mai ai pana la album.
+- Dupa a zecea alegere apare un singur album, cu coperta si doua explicatii:
+  WHY THIS FITS YOU: piesele apreciate care au dus la recomandare si legatura
+  prin album, artist sau gen muzical.
+  WHY STAY FOR THE WHOLE ALBUM: o nota scurta despre ce merita ascultat pe
+  intregul album, scrisa de Harmony.
+- Nota este text original Harmony. Read on The Shfl deschide pagina albumului,
+  unde poti citi recomandarea publicata de SHFL.
+- Open album > choose tracks deschide selectia existenta pentru descarcare.
+  Poti descarca tot albumul sau numai piesele dorite.
+- Save for later pastreaza albumul in Saved; apasa din nou pentru a-l elimina.
+- Next 10 songs porneste urmatoarea runda. Alegerile vechi continua sa ajute,
+  iar cele din runda noua primesc mai multa greutate.
+
+PROGRES SI CAZURI SPECIALE
+- Progresul, alegerile si albumul recomandat sunt salvate local. Schimbarea
+  genului, iesirea din Discover sau repornirea aplicatiei pastreaza runda.
+- Undo anuleaza ultima alegere din runda curenta. Dupa aparitia albumului,
+  Undo revine la 9/10 si poti schimba decizia. Poti anula apoi si alegeri anterioare
+  din aceeasi runda; pornirea unei runde noi inchide anularea rundei precedente.
+- Swipe-urile repetate pe aceeasi piesa nu sunt numarate de doua ori.
+- Cardurile favorizeaza albume diferite in aceeasi runda, pentru mai multa varietate.
+- Daca respingi toate piesele, Harmony spune cand foloseste aprecieri mai vechi
+  sau cand propune doar o directie de explorat. Nu inventeaza aprecieri.
+- Albumele marcate deja ca ascultate sunt excluse din alegerea unei noi recomandari.
+  Sunt preferate recomandari diferite de cele din rundele anterioare atunci cand
+  exista alte optiuni potrivite.
+- Daca intr-un gen nu mai sunt piese, poti continua cu All sounds; progresul ramane.
+- La sfarsitul catalogului, o runda mai scurta poate fi incheiata explicit prin
+  Recommend from my available choices. Cand ai evaluat toate piesele, ecranul
+  pastreaza rezultatul si ofera explorarea albumelor.
+- La actualizare, aprecierile din 1.4.7 devin istoricul tau, iar runda noua porneste
+  de la zero. Daca evaluasei deja toate piesele, poti cere un album din istoricul salvat.
+
+FUNCTIILE EXISTENTE SUNT INCLUSE
+Albums, Refresh cu pana la 24 de albume diferite, cele 19 genuri, catalogul de
+96 de albume, auditiile de maximum 30 de secunde, detectorul de internet cu
+revenire dupa 5 secunde, descarcarile selective si gestionarea pastrarii/stergerii
+pieselor sunt incluse. Pentru aceste functii, vezi instructiunile 1.4.7.
+Recomandarile folosesc selectia locala de albume cu pagini SHFL; catalogul nu se
+actualizeaza automat din intregul site SHFL. Nu este necesar un cont Spotify.
+
+VERIFICARE
+Au trecut 45 de teste JUnit pentru Discovery, dintre care 15 pentru noul flux.
+Codul Discover si integrarea navigarii au fost compilate izolat cu Kotlin 2.1,
+Android 35 si dependintele Compose/Media3 ale proiectului.
+Un scenariu de executie cu stocarea si ViewModel-ul reale, folosind limite Android
+si Lifecycle simulate, a verificat progresul la 9/10, rezultatul la 10/10, Undo,
+runda urmatoare, restaurarea, istoricul vechi, alegerile concurente si accesul offline.
+Buildul Gradle complet si APK-ul necesita compilarea pe PC. Aspectul si gesturile
+trebuie verificate pe telefon; aceasta arhiva nu include un APK testat pe dispozitiv.

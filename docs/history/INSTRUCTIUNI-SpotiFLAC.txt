@@ -1,0 +1,36 @@
+HARMONY v1.0.2 - TEST LOCAL CU SPOTIFLAC
+
+Acest pachet include:
+- corectia pentru cautarea melodiilor locale cu/fara diacritice;
+- backendul real SpotiFLAC Mobile 4.9.5 cu downloadSegments;
+- cheie securizata pentru extensii, derivata din Android Keystore;
+- cautare metadata disponibila chiar daca verificarea Tidal este in asteptare;
+- reverificare automata cand utilizatorul revine din browser;
+- corectie pentru callback-ul Tidal: nonce-ul unic este rezolvat prin backend,
+  iar finalizarea continua chiar daca Android recreeaza ecranul aplicatiei;
+- mini player si ecranul Now Playing cu format audio, bitrate in kbps,
+  frecventa in kHz si badge LOSSLESS pentru codecurile lossless identificate;
+- corectie identificare format: fisierele FLAC nu mai sunt afisate ca WAV pe
+  telefoanele care raporteaza generic fluxul decodat drept audio/raw;
+- scriptul pentru build si instalare directa pe telefon.
+
+PASI:
+1. Dezarhiveaza folderul Harmony direct in D:\, astfel incat fisierul
+   settings.gradle.kts sa fie exact aici: D:\Harmony\settings.gradle.kts
+2. Nu muta si nu sterge folderul vendor-maven.
+3. Conecteaza telefonul prin USB si activeaza USB debugging.
+4. Deschide Instaleaza-Harmony-pe-telefon.cmd.
+5. Accepta mesajul Allow USB debugging pe telefon.
+
+Scriptul construieste un APK Debug pentru arm64-v8a, il instaleaza fara sa
+stearga datele existente si porneste Harmony.
+
+APK-ul rezultat se gaseste aici:
+app\build\outputs\apk\debug\app-debug.apk
+
+IMPORTANT:
+- backendul SpotiFLAC inclus este pentru telefoane arm64-v8a;
+- nu este destinat unui emulator Android x86_64;
+- foloseste calea scurta D:\Harmony; caile foarte lungi pot bloca CMake;
+- verificarea Tidal este necesara pentru download, nu pentru cautare;
+- prima compilare poate dura mai mult deoarece Gradle descarca dependintele.

@@ -1,0 +1,37 @@
+HARMONY 1.4.9 - CORECTII DIN AUDITUL DISCOVERY
+
+INSTALARE
+1. Extrage continutul folderului Harmony din arhiva peste D:\Harmony.
+2. Pastreaza local.properties, keystore.properties si cheia de semnare existente.
+3. Conecteaza telefonul prin USB si ruleaza:
+   D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+4. Verifica versiunea 1.4.9 in informatiile aplicatiei.
+SDK-ul ramane D:\Android. Actualizeaza aplicatia existenta cu aceeasi cheie,
+fara dezinstalare sau stergerea datelor. Arhiva contine surse, nu un APK.
+
+CORECTII PRINCIPALE
+- Saved isi revine corect cand elimini ultimul album al ultimului lot.
+- Refresh arata numarul real si este dezactivat cand nu exista alternative.
+- Potrivirea pieselor pastreaza numele nelatine si diferenta dintre live/studio.
+- Editiile de descarcat trebuie sa corespunda si artistului, nu doar titlului.
+- Rezultatele vechi ale cautarii nu mai sunt acceptate pentru alt album.
+- Preview-urile in asteptare sunt anulate cand pornesti playerul principal.
+  Limita de asteptare acopera si cautarea; potrivirea bibliotecii ruleaza in fundal.
+- Redarea unui album local din Discovery dezactiveaza shuffle si repeat.
+- Dublura Running Up That Hill a fost reunita; voturile vechi sunt pastrate.
+- Next/Undo readuc noul card in zona vizibila, iar pagerul retine pozitia utila.
+- Rezultatul gol pentru albume ascultate permite accesul la All albums.
+- Dialogul Info poate fi derulat la font mare.
+
+Rundele de 10 alegeri, explicatiile recomandarilor, cele 96 de albume/19 genuri,
+descarcarile selective si gestionarea pastrarii/stergerii sunt incluse.
+Nu este nevoie sa refaci preferintele sau conectarea furnizorilor.
+
+RAPORT SI VERIFICARE
+Lista detaliata a problemelor, corectiilor si limitelor verificarii se afla in:
+   docs\DISCOVERY-AUDIT-v1.4.9.md
+Au trecut 79 de teste JUnit si scenariile separate pentru Discovery si cautarea
+editiilor. Codul Kotlin/Compose si integrarea navigarii au fost compilate izolat.
+Buildul APK trebuie facut pe PC, deoarece acest mediu nu poate descarca Gradle.
+Notificarea Android reala, gesturile, audio focus si descarcarile de la furnizori
+trebuie verificate pe telefon; nu este promisa absenta tuturor bugurilor.
