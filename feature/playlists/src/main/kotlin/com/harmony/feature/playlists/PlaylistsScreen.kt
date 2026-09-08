@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,7 +84,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -204,18 +207,28 @@ fun PlaylistsScreen(
     val context = LocalContext.current
     val palette = greenPalette()
 
+    val importScope = rememberCoroutineScope()
     val importPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            val content = context.contentResolver.openInputStream(uri)
-                ?.bufferedReader()?.use { it.readText() }
-            if (content != null) {
-                val name = uri.lastPathSegment
-                    ?.substringAfterLast('/')
-                    ?.substringBeforeLast('.')
-                    ?: "Imported playlist"
-                viewModel.importM3u(name, content)
+            val name = uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.substringBeforeLast('.')
+                ?: "Imported playlist"
+            // This callback runs on the main thread, and the picked document
+            // can be anywhere a provider chooses to put it — including a
+            // cloud provider that fetches it over the network on first read.
+            // Reading it inline was a stall of unbounded length on the UI
+            // thread; a large playlist from Drive is an ANR, not a hiccup.
+            importScope.launch {
+                val content = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader()?.use { it.readText() }
+                    }.getOrNull()
+                }
+                if (content != null) viewModel.importM3u(name, content)
             }
         }
     }

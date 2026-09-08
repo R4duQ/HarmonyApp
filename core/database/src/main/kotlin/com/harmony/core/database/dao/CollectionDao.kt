@@ -24,7 +24,7 @@ private const val DIACRITIC_INSENSITIVE_ARTIST_SEARCH =
         ) AS names
         JOIN songs_effective s
           ON TRIM(s.artist) = names.name OR TRIM(COALESCE(s.albumArtist, '')) = names.name
-        WHERE """ + FOLDED_ARTIST_NAME + """ LIKE '%' || :q || '%'
+        WHERE """ + FOLDED_ARTIST_NAME + """ LIKE '%' || :q || '%' ESCAPE '\'
         GROUP BY names.name
         ORDER BY names.name COLLATE NOCASE
         LIMIT :limit
@@ -34,8 +34,8 @@ private const val DIACRITIC_INSENSITIVE_ALBUM_SEARCH =
     """
         SELECT a.id, a.name, a.albumArtist, a.year, a.artworkUri, COUNT(s.id) AS songCount
         FROM albums a JOIN songs s ON s.albumId = a.id
-        WHERE """ + FOLDED_ALBUM_NAME + """ LIKE '%' || :q || '%'
-           OR """ + FOLDED_ALBUM_ARTIST + """ LIKE '%' || :q || '%'
+        WHERE """ + FOLDED_ALBUM_NAME + """ LIKE '%' || :q || '%' ESCAPE '\'
+           OR """ + FOLDED_ALBUM_ARTIST + """ LIKE '%' || :q || '%' ESCAPE '\'
         GROUP BY a.id ORDER BY a.name COLLATE NOCASE LIMIT :limit
     """
 

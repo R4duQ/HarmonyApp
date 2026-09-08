@@ -1,0 +1,16 @@
+{
+  "scope": "host codec integration (not Android hardware)",
+  "converter_sha256": "2dabce7385c370e880267e2ac28597fddd34cb6de39874b447fc3148edb8267c",
+  "passed": [
+    "flac-44100-16-fragmented=False: exact PCM",
+    "flac-96000-24-fragmented=False: exact PCM",
+    "flac-44100-16-fragmented=True: exact PCM",
+    "alac-96000-24-fragmented=False: exact PCM",
+    "MP3 320k + metadata + artwork=none",
+    "MP3 320k + metadata + artwork=png",
+    "MP3 320k + metadata + artwork=jpg",
+    "AAC input rejected",
+    "Truncated input rejected"
+  ],
+  "count": 9
+}

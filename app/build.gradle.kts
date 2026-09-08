@@ -8,21 +8,20 @@ plugins {
 
 android {
     namespace = "com.harmony.app"
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.harmony.app"
-        versionCode = 83
-        versionName = "1.0.0"
+        versionCode = 85
+        versionName = "1.0.1-universal"
 
-        // Optional single-ABI build: -PharmonyAbi=arm64-v8a
-        //
-        // A debug APK ships every supported ABI's native libraries, which is
-        // right for a store upload and pure waste when installing on one
-        // known phone — the unused ABI is dead weight over the wire. Opt-in
-        // via a property so ordinary builds and CI are unaffected.
-        providers.gradleProperty("harmonyAbi").orNull?.let { abi ->
-            ndk { abiFilters += abi }
+        val supportedAbis = setOf("arm64-v8a", "x86_64")
+        val requestedAbi = providers.gradleProperty("harmonyAbi").orNull
+        require(requestedAbi == null || requestedAbi in supportedAbis) {
+            "Use arm64-v8a or x86_64; omit harmonyAbi for the universal APK."
         }
+        // Never let a transitive 32-bit library expand the supported ABI set.
+        ndk { abiFilters += requestedAbi?.let { setOf(it) } ?: supportedAbis }
     }
 
     buildFeatures {
@@ -54,6 +53,7 @@ android {
             // four ABIs from the AAR regardless of the -PharmonyAbi filter
             // applied later at packaging time.
             keepDebugSymbols += setOf(
+                "**/libharmony_flac.so",
                 "**/libffmpeg.zip.so",
                 "**/libpython.zip.so",
                 "**/libaria2c.zip.so",

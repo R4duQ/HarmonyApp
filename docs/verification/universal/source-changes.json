@@ -1,0 +1,27 @@
+{
+  "base": "Harmony-v1_0_1-audiofix.zip",
+  "version": "1.0.1-universal",
+  "version_code": 85,
+  "changed_original_files": [
+    "Instaleaza-Harmony-pe-telefon.cmd",
+    ".github/workflows/release.yml",
+    "feature/downloads/build.gradle.kts",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/DownloadsScreen.kt",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotiFlacDownloadEngine.kt",
+    "feature/downloads/src/main/kotlin/com/harmony/feature/downloads/SpotiFlacNativeRuntime.kt",
+    "feature/settings/src/main/kotlin/com/harmony/feature/settings/SettingsScreen.kt",
+    "app/build.gradle.kts",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "scripts/ci/build-spotiflac-backend.sh",
+    "scripts/ci/package-release.sh",
+    "INSTRUCTIUNI.txt",
+    "vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar",
+    "vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.source.txt",
+    "vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.sha256.txt",
+    "vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.pom",
+    "core/dsp-native/build.gradle.kts"
+  ],
+  "playback_processors": "byte-for-byte unchanged",
+  "native_backend_sha256": "7f0fba577070912c7c970d467e150204aa4bd6ac65855611ed5f5092b66574cd"
+}

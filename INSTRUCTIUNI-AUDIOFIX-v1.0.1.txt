@@ -1,0 +1,111 @@
+HARMONY 1.0.1-audiofix - REPARAREA CAUZEI REALE
+
+Versiunea e acum vizibila: versionCode 84, versionName "1.0.1-audiofix".
+Verific-o in Setari dupa instalare, ca sa stii sigur ce ruleaza. Ca ea
+lipsea inainte e vina mea - te-am pus sa faci build-uri fara sa ai cum sa
+distingi rezultatul.
+
+INSTALARE
+1. Extrage continutul folderului Harmony peste D:\Harmony.
+2. D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
+3. Confirma "BUILD SUCCESSFUL" inainte sa continui.
+
+
+CAUZA, DIN LOGUL TAU
+
+  java.lang.IllegalArgumentException: The source buffer is this buffer
+      at java.nio.ByteBuffer.put(ByteBuffer.java:1023)
+      at ReplayGainAudioProcessor.queueInput(ReplayGainAudioProcessor.kt:56)
+      at DefaultAudioSink.processBuffers(DefaultAudioSink.java:1176)
+
+Linia 56 era ramura de bypass la castig unitar:
+
+    val output = replaceOutputBuffer(remaining)
+    if (s == 1f) {
+        output.put(inputBuffer)      // output SI inputBuffer = acelasi obiect
+    }
+
+ByteBuffer.put(src) arunca exceptie cand src este chiar bufferul destinatie.
+Media3 poate da unui procesor inapoi propriul buffer de iesire ca intrare.
+
+Lantul complet al simptomului:
+  eroare in procesorul audio
+    -> ExoPlayer raporteaza playback error
+    -> HarmonyPlayer.onPlayerError sare la piesa urmatoare (recuperarea ta)
+    -> piesa urmatoare loveste acelasi bug
+    -> se repeta
+
+In log: 19 erori, si onPositionDiscontinuity reason=1 (SEEK) avansand
+462 -> 463 -> 464 -> 465 la fiecare ~400 ms, cu un decodor FLAC alocat si
+distrus de fiecare data. Aia e "sare la sute de piese". Iar "porneste si se
+opreste" e state=2 (buffering) -> 3 (ready) -> eroare -> skip, in bucla.
+
+
+FIXUL
+
+Ambele procesoare copiaza acum intrarea intr-un buffer propriu INAINTE de a
+cere bufferul de iesire:
+
+    scratch.clear()
+    scratch.put(inputBuffer)     // goleste intrarea
+    scratch.flip()
+    val output = replaceOutputBuffer(remaining)   // abia acum
+
+Ordinea conteaza. replaceOutputBuffer() apeleaza clear() pe bufferul sau,
+deci o verificare de tipul "sunt acelasi obiect?" facuta DUPA acel apel ar
+fi venit prea tarziu - pozitia si limita intrarii ar fi fost deja sterse.
+Asa, oricare ar fi bufferul primit, el e citit integral inainte sa atingem
+iesirea, si suprapunerea devine irelevanta.
+
+Costa un memcpy per buffer. La 48 kHz stereo, nesemnificativ.
+
+Am aplicat acelasi fix si in EqualizerAudioProcessor. Avea exact acelasi
+output.put(inputBuffer) pe calea de bypass - aceeasi bomba, doar ca nu
+explodase inca pentru ca EQ-ul iese din lant cand e oprit.
+
+
+BUGUL NU ERA DE LA MINE
+ReplayGainAudioProcessor e singurul fisier de pe calea audio pe care nu
+l-am atins niciodata. E cod v1.0.0 original. Te-am pus sa faci doua
+build-uri de revert degeaba, pentru ca am presupus vinovatia din
+cronologie in loc sa cer logul din prima.
+
+
+DE URMARIT (nu am schimbat)
+Procesoarele sunt @ServiceScoped, iar ExoPlayer se construieste in init-ul
+lui HarmonyPlayer. Daca serviciul e recreat cat vechiul sink inca dreneaza,
+doua DefaultAudioSink ajung sa imparta aceeasi instanta de procesor - exact
+felul de stare partajata care produce suprapunerea de buffere. Fixul de mai
+sus face crashul imposibil oricum, dar daca vrei sa eliminam si cauza
+structurala, e o discutie separata.
+
+
+CE MAI E IN ARHIVA
+Nu doar fixul audio - ca sa fiu clar, contrar a ce ti-am spus. Au ramas si
+corecturile din sesiunile anterioare care NU ating redarea, si care erau
+deja prezente in build-ul de diagnostic unde crashul s-a reprodus, deci
+sunt dovedite nevinovate:
+  - SoulseekClient: verificarea pe dimensiunea negociata, anularea care nu
+    mai porneste sursa urmatoare, scurgerea pendingUploads, bufferul de
+    upload, sweep-ul de partiale in perechi
+  - Escapare % si _ in cautare
+  - Import M3U mutat de pe firul principal
+  - Salvarea periodica in DataStore sare peste scrieri identice
+  - Testul de migrare a bazei de date
+Daca vrei totusi experimentul curat - doar v1.0.0 plus fixul audio - spune
+si iti trimit exact aia.
+
+
+CUM CONFIRMAM
+Ruleaza asta in timp ce asculti:
+
+    D:\Android\platform-tools\adb.exe logcat -c
+    D:\Android\platform-tools\adb.exe logcat -d > D:\Harmony\verificare.txt
+
+Daca in verificare.txt nu apare niciun "HarmonyDiag: onPlayerError" si
+niciun "The source buffer is this buffer", e rezolvat. Am lasat intentionat
+doar logul de eroare in cod, tocmai pentru verificarea asta - restul
+liniilor de diagnostic le-am scos.
+
+ATENTIE la citire: PowerShell scrie fisierul in UTF-16, motiv pentru care
+primul log parea gol. Deschide-l cu Notepad sau VS Code, nu cu findstr.

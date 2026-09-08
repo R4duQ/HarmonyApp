@@ -128,13 +128,13 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/4] Construiesc APK-ul de test pentru arm64-v8a...
+echo [2/4] Construiesc APK-ul universal de test (ARM64 + x86_64) pentru arm64-v8a...
 pushd "!PROJECT_DIR!" >nul
 
 if exist "gradlew.bat" (
-    call gradlew.bat :app:assembleDebug -PharmonyAbi=arm64-v8a --refresh-dependencies --no-daemon
+    call gradlew.bat :app:assembleDebug --refresh-dependencies --no-daemon
 ) else (
-    "!JAVA_EXE!" -Dorg.gradle.appname=gradlew -classpath "gradle\wrapper\gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain :app:assembleDebug -PharmonyAbi=arm64-v8a --refresh-dependencies --no-daemon
+    "!JAVA_EXE!" -Dorg.gradle.appname=gradlew -classpath "gradle\wrapper\gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain :app:assembleDebug --refresh-dependencies --no-daemon
 )
 
 if errorlevel 1 (
@@ -154,7 +154,7 @@ if not exist "!APK!" (
 
 echo.
 echo [3/4] Instalez Harmony pe telefon si pastrez datele existente...
-"%ADB%" install -r -d "!APK!"
+"%ADB%" install -r "!APK!"
 if errorlevel 1 (
     echo.
     echo Instalarea a esuat. Aplicatia existenta NU a fost stearsa.

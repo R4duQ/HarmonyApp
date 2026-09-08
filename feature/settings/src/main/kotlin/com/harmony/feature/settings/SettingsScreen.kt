@@ -154,6 +154,10 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val appVersion = remember(context) {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+            .getOrNull().orEmpty().ifBlank { "Unknown" }
+    }
     val palette = stonePalette()
 
     val folderPicker = rememberLauncherForActivityResult(
@@ -492,7 +496,7 @@ fun SettingsScreen(
                     color = palette.ink,
                 )
                 Text(
-                    "Version 1.0.0",
+                    "Version $appVersion",
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = palette.muted,

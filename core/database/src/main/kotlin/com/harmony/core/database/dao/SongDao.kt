@@ -27,12 +27,20 @@ private const val FOLDED_SONG_TITLE = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REP
 private const val FOLDED_SONG_ARTIST = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(artist, 'ă', 'a'), 'Ă', 'a'), 'â', 'a'), 'Â', 'a'), 'î', 'i'), 'Î', 'i'), 'ș', 's'), 'Ș', 's'), 'ş', 's'), 'Ş', 's'), 'ț', 't'), 'Ț', 't'), 'ţ', 't'), 'Ţ', 't'))"
 private const val FOLDED_SONG_ALBUM = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(album, 'ă', 'a'), 'Ă', 'a'), 'â', 'a'), 'Â', 'a'), 'î', 'i'), 'Î', 'i'), 'ș', 's'), 'Ș', 's'), 'ş', 's'), 'Ş', 's'), 'ț', 't'), 'Ț', 't'), 'ţ', 't'), 'Ţ', 't'))"
 
+// The ESCAPE clauses matter: :q is raw user input, so without them a typed
+// '%' matches every song in the library and a typed '_' matches any single
+// character. LibraryRepositoryImpl escapes both, plus the backslash itself,
+// before binding. This is a plain (escaped) Kotlin string literal, so the
+// four source characters below are the ONE backslash SQLite needs: its
+// ESCAPE argument must be a single character or the query throws.
+private const val LIKE_ESCAPE = " ESCAPE '\\' "
+
 private const val DIACRITIC_INSENSITIVE_SONG_SEARCH =
     "SELECT * FROM songs_effective " +
-        "WHERE " + FOLDED_SONG_TITLE + " LIKE '%' || :q || '%' " +
-        "OR " + FOLDED_SONG_ARTIST + " LIKE '%' || :q || '%' " +
-        "OR " + FOLDED_SONG_ALBUM + " LIKE '%' || :q || '%' " +
-        "ORDER BY CASE WHEN " + FOLDED_SONG_TITLE + " LIKE :q || '%' THEN 0 ELSE 1 END, " +
+        "WHERE " + FOLDED_SONG_TITLE + " LIKE '%' || :q || '%'" + LIKE_ESCAPE +
+        "OR " + FOLDED_SONG_ARTIST + " LIKE '%' || :q || '%'" + LIKE_ESCAPE +
+        "OR " + FOLDED_SONG_ALBUM + " LIKE '%' || :q || '%'" + LIKE_ESCAPE +
+        "ORDER BY CASE WHEN " + FOLDED_SONG_TITLE + " LIKE :q || '%'" + LIKE_ESCAPE + "THEN 0 ELSE 1 END, " +
         "title COLLATE NOCASE LIMIT :limit"
 
 @Dao

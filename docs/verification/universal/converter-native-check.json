@@ -1,0 +1,22 @@
+{
+  "arm64-v8a": {
+    "machine": 183,
+    "load_alignment": 16384,
+    "needed": [
+      "libm.so",
+      "libz.so",
+      "libc.so"
+    ],
+    "sha256": "4d394dac29b29dd06bb44174283fdc5578a58fde6510532a4eeb9c69f4d8f652"
+  },
+  "x86_64": {
+    "machine": 62,
+    "load_alignment": 16384,
+    "needed": [
+      "libm.so",
+      "libz.so",
+      "libc.so"
+    ],
+    "sha256": "01ff3409322a5aaea360c442532c726151b0cea2a676fa6ad2a9c12303170f26"
+  }
+}

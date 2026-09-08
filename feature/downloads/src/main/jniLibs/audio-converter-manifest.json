@@ -1,0 +1,12 @@
+{
+  "ffmpeg": "7.1.5",
+  "lame": "3.100",
+  "android_api": 29,
+  "ndk": "29.0.14206865",
+  "page_alignment": 16384,
+  "configuration_sha256": "7c8d27035868a5f8734fd8bb69a157f930c4a2ba15125339a3767830c61c6b85",
+  "binaries": {
+    "arm64-v8a/libharmony_flac.so": "4d394dac29b29dd06bb44174283fdc5578a58fde6510532a4eeb9c69f4d8f652",
+    "x86_64/libharmony_flac.so": "01ff3409322a5aaea360c442532c726151b0cea2a676fa6ad2a9c12303170f26"
+  }
+}

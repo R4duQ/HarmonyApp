@@ -57,8 +57,8 @@ import javax.inject.Singleton
  *  - detect and redact SpotiFLAC's decryption descriptor before local format probing;
  *  - never implement protected-stream decryption or provider access-control bypasses;
  *  - reproduce the unencrypted lossless container finalization policy;
- *  - initialize yt-dlp + FFmpeg exactly as the Android wrapper documents, and use a two-stage
- *    FLAC-in-MP4 finalizer (bit-exact remux first, official-style FLAC encode fallback);
+ *  - prefer Harmony's portable FFmpeg/LAME converter on both supported ABIs,
+ *    with bit-exact FLAC remux first and lossless FLAC encode fallback;
  *  - accept native FLAC immediately, and convert M4A/MP4 to native FLAC only when
  *    the provider/backend codec probe proves the source audio is lossless FLAC/ALAC;
  *  - validate final fLaC bytes before import and never upscale AAC/Opus/other lossy
@@ -2267,7 +2267,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             put("source_codec", probe.effectiveCodec)
             put("lossless_source", probe.isLosslessSource)
             put("source_size", source.length())
-            put("host_finalizer", "v1.0.0-device-ffmpeg-compat")
+            put("host_finalizer", "portable-ffmpeg-7.1.5")
             put("device_manufacturer", Build.MANUFACTURER)
             put("device_model", Build.MODEL)
             put("android_sdk", Build.VERSION.SDK_INT)
@@ -2280,12 +2280,16 @@ class SpotiFlacDownloadEngine @Inject constructor(
             return@withContext LosslessFinalizationResult(null, diagnostic)
         }
 
-        // youtubedl-android's own README initializes both objects when FFmpeg is
-        // used. YoutubeDL.init establishes the package layout/environment, while
-        // FFmpeg.init expands the bundled FFmpeg dependency libraries.
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val portableExecutable = File(nativeDir, "libharmony_flac.so")
+        val hasPortableConverter = portableExecutable.isFile
+        // The portable converter has no extracted Python/FFmpeg dependencies.
+        // Keep the previous runtime as a fallback for older custom builds.
         val initFailure = runCatching {
-            YoutubeDL.getInstance().init(context)
-            FFmpeg.getInstance().init(context)
+            if (!hasPortableConverter) {
+                YoutubeDL.getInstance().init(context)
+                FFmpeg.getInstance().init(context)
+            }
         }.exceptionOrNull()
         if (initFailure != null) {
             diagnostic.put("success", false)
@@ -2294,8 +2298,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
             return@withContext LosslessFinalizationResult(null, diagnostic)
         }
 
-        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
         val executable = listOf(
+            portableExecutable,
             File(nativeDir, "libffmpeg.so"),
             File(nativeDir, "libffmpeg.bin.so"),
         ).firstOrNull { it.isFile }
@@ -2318,15 +2322,18 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val attempts = JSONArray()
         diagnostic.put("attempts", attempts)
 
-        // Samsung/One UI and some other Android builds are stricter about the
-        // dynamic-linker environment inherited by an executable launched from
-        // nativeLibraryDir. Test the exact environment used by youtubedl-android
-        // first, then a compatibility environment as a fallback.
+        // Verify the installed executable before processing user audio.
+        // The portable build uses public Android system libraries only.
         val selfTests = JSONArray()
         diagnostic.put("ffmpeg_self_tests", selfTests)
-        var selectedEnvironment = FfmpegEnvironmentProfile.UPSTREAM
+        val environmentProfiles = if (hasPortableConverter) {
+            listOf(FfmpegEnvironmentProfile.PORTABLE)
+        } else {
+            listOf(FfmpegEnvironmentProfile.UPSTREAM, FfmpegEnvironmentProfile.EXTENDED)
+        }
+        var selectedEnvironment = environmentProfiles.first()
         var selfTest: FfmpegProcessResult? = null
-        for (profile in listOf(FfmpegEnvironmentProfile.UPSTREAM, FfmpegEnvironmentProfile.EXTENDED)) {
+        for (profile in environmentProfiles) {
             val selfTestLog = File(jobDir, "harmony-ffmpeg-selftest-${profile.id}.log").also { it.delete() }
             val candidate = runFfmpegProcess(
                 command = listOf(executable.absolutePath, "-hide_banner", "-version"),
@@ -2389,10 +2396,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
             runCatching { output.delete() }
         }
 
-        // Match SpotiFLAC Mobile's documented local M4A->FLAC path as closely as
-        // practical: decode only the audio stream and encode native FLAC at level 8.
-        // This remains lossless because we enter this branch only after the source
-        // codec has been classified as FLAC or ALAC.
+        // Level 5 reduces CPU work without changing audio samples. Only
+        // verified FLAC/ALAC sources enter this lossless conversion branch.
         val output = freshOutput()
         val log = File(jobDir, "harmony-ffmpeg-flac-encode.log").also { it.delete() }
         val command = listOf(
@@ -2400,7 +2405,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             "-v", "error", "-xerror", "-nostdin", "-hide_banner", "-y",
             "-i", source.absolutePath,
             "-map", "0:a:0", "-vn", "-sn", "-dn",
-            "-c:a", "flac", "-compression_level", "8",
+            "-c:a", "flac", "-compression_level", "5",
             "-f", "flac",
             output.absolutePath,
         )
@@ -2408,7 +2413,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             command, log, nativeDir, LOSSLESS_FINALIZER_TIMEOUT_SECONDS, selectedEnvironment,
         )
         var usedEnvironment = selectedEnvironment
-        if (!attempt.success) {
+        if (!attempt.success && !hasPortableConverter) {
             val alternate = if (selectedEnvironment == FfmpegEnvironmentProfile.UPSTREAM) {
                 FfmpegEnvironmentProfile.EXTENDED
             } else {
@@ -2480,6 +2485,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
     }
 
     private enum class FfmpegEnvironmentProfile(val id: String) {
+        PORTABLE("portable"),
         // Mirrors youtubedl-android's own ProcessBuilder environment.
         UPSTREAM("upstream"),
         // Keeps Harmony's older broader linker path as a fallback for devices
@@ -2500,6 +2506,12 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 .redirectOutput(log)
                 .apply {
                     val env = environment()
+                    if (environmentProfile == FfmpegEnvironmentProfile.PORTABLE) {
+                        env.remove("LD_LIBRARY_PATH")
+                        env.remove("LD_PRELOAD")
+                        env["TMPDIR"] = context.cacheDir.absolutePath
+                        return@apply
+                    }
                     val packagesDir = File(context.noBackupFilesDir, "youtubedl-android/packages")
                     val pythonLib = File(packagesDir, "python/usr/lib")
                     val ffmpegLib = File(packagesDir, "ffmpeg/usr/lib")
@@ -2926,9 +2938,19 @@ class SpotiFlacDownloadEngine @Inject constructor(
     ): File = withContext(Dispatchers.IO) {
         verifyFlacSignature(source)
 
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val portableExecutable = File(nativeDir, "libharmony_flac.so")
+        val hasPortableConverter = portableExecutable.isFile
+        val environmentProfile = if (hasPortableConverter) {
+            FfmpegEnvironmentProfile.PORTABLE
+        } else {
+            FfmpegEnvironmentProfile.UPSTREAM
+        }
         val initFailure = runCatching {
-            YoutubeDL.getInstance().init(context)
-            FFmpeg.getInstance().init(context)
+            if (!hasPortableConverter) {
+                YoutubeDL.getInstance().init(context)
+                FFmpeg.getInstance().init(context)
+            }
         }.exceptionOrNull()
         if (initFailure != null) {
             throw SpotiFlacException(
@@ -2939,8 +2961,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
             )
         }
 
-        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
         val executable = listOf(
+            portableExecutable,
             File(nativeDir, "libffmpeg.so"),
             File(nativeDir, "libffmpeg.bin.so"),
         ).firstOrNull { it.isFile }
@@ -2974,6 +2996,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             log = artworkLog,
             nativeDir = nativeDir,
             timeoutSeconds = MP3_ENCODER_TIMEOUT_SECONDS,
+            environmentProfile = environmentProfile,
         )
         diagnostics.put(artworkAttempt.toJson("mp3-320-with-artwork"))
         runCatching { artworkLog.delete() }
@@ -3002,6 +3025,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             log = audioLog,
             nativeDir = nativeDir,
             timeoutSeconds = MP3_ENCODER_TIMEOUT_SECONDS,
+            environmentProfile = environmentProfile,
         )
         diagnostics.put(audioAttempt.toJson("mp3-320-audio-only"))
         runCatching { audioLog.delete() }

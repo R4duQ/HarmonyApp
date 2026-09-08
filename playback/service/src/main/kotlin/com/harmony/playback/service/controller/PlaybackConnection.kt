@@ -182,6 +182,10 @@ class PlaybackConnection @Inject constructor(
             syncState()
         }
 
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            android.util.Log.e("HarmonyDiag", "onPlayerError code=${error.errorCode} ${error.errorCodeName}", error)
+        }
+
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             oldPosition.mediaItem?.mediaId?.let { id ->
                 val range = listeningClock.sample(id, oldPosition.positionMs, SystemClock.elapsedRealtime(), false,

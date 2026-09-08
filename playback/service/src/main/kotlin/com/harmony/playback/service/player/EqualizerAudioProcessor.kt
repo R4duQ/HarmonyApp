@@ -6,6 +6,7 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.harmony.core.model.EqSettings
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -86,6 +87,10 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     private var targetPreamp = 1f
 
     /** Current smoothed pre-amp, owned by the audio thread only. */
+    /** See ReplayGainAudioProcessor.scratch — private copy of the input. */
+    private var scratch: ByteBuffer =
+        ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
+
     private var currentPreamp = 1f
 
     // Volatile because onConfigure runs on the audio thread while apply()
@@ -164,6 +169,20 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         val localStages = stages
         val channels = channelCount
         val remaining = inputBuffer.remaining()
+
+        // Drain the caller's buffer BEFORE asking for an output buffer. Media3
+        // can hand a processor the same object replaceOutputBuffer() returns,
+        // and that call clears it — so `output.put(inputBuffer)` below used to
+        // be able to throw "The source buffer is this buffer" exactly the way
+        // ReplayGainAudioProcessor did, taking the whole player down with it.
+        // Same fix, same reason; see the note on `scratch` there.
+        if (scratch.capacity() < remaining) {
+            scratch = ByteBuffer.allocateDirect(remaining).order(ByteOrder.nativeOrder())
+        }
+        scratch.clear()
+        scratch.put(inputBuffer)
+        scratch.flip()
+
         val output = replaceOutputBuffer(remaining)
 
         // Pass through untouched rather than risk an out-of-bounds read on
@@ -172,7 +191,7 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         // ArrayIndexOutOfBoundsException here kills the whole process. A few
         // unequalised buffers during a format switch is the cheaper failure.
         if (channels <= 0 || localStages.any { !it.fits(channels) }) {
-            output.put(inputBuffer)
+            output.put(scratch)
             output.flip()
             return
         }
@@ -184,17 +203,17 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         val ease = PREAMP_EASE
 
         if (encoding == C.ENCODING_PCM_FLOAT) {
-            while (inputBuffer.remaining() >= 4) {
+            while (scratch.remaining() >= 4) {
                 if (frameCh == 0) preamp += (target - preamp) * ease
-                var sample = inputBuffer.float
+                var sample = scratch.float
                 for (stage in localStages) sample = stage.process(sample, frameCh)
                 output.putFloat(softLimit(sample * preamp))
                 frameCh = (frameCh + 1) % channels
             }
         } else {
-            while (inputBuffer.remaining() >= 2) {
+            while (scratch.remaining() >= 2) {
                 if (frameCh == 0) preamp += (target - preamp) * ease
-                var sample = inputBuffer.short / 32768f
+                var sample = scratch.short / 32768f
                 for (stage in localStages) sample = stage.process(sample, frameCh)
                 output.putShort(
                     (softLimit(sample * preamp) * 32767f).roundToInt().toShort()

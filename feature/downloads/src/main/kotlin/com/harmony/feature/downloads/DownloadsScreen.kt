@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -43,6 +45,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -442,6 +446,7 @@ private fun SpotiFlacDownloadsLayout(
     onCheckVerificationAndRetry: () -> Unit,
     onToggleErrorDetails: () -> Unit,
 ) {
+    val clipboard = LocalClipboardManager.current
     // Check provider readiness early, without holding public metadata search
     // hostage to a browser callback. Verification is enforced by the engine
     // when an actual provider download starts.
@@ -909,16 +914,21 @@ private fun SpotiFlacDownloadsLayout(
                     TextButton(onClick = onToggleErrorDetails) {
                         Text(if (state.showErrorDetails) "Hide details" else "Details")
                     }
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(state.errorDetails)) }) {
+                        Text("Copy details")
+                    }
                 }
                 if (state.showErrorDetails) {
-                    Text(
-                        state.errorDetails,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        color = Color(0xFFB3261E),
-                        maxLines = 18,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    SelectionContainer {
+                        Text(
+                            state.errorDetails,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                            color = Color(0xFFB3261E),
+                            modifier = Modifier.heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
                 }
             }
         }

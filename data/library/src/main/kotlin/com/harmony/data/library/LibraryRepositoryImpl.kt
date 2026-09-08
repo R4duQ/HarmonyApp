@@ -93,6 +93,15 @@ class LibraryRepositoryImpl @Inject constructor(
         val match = FtsQuery.sanitize(trimmed) ?: return flowOf(SearchResults())
         val foldedQuery = SearchTextNormalizer.foldForSearch(trimmed)
         if (foldedQuery.isEmpty()) return flowOf(SearchResults())
+        // The LIKE queries wrap this in '%' || :q || '%', so the wildcards
+        // have to be neutralised first: typing a single '%' otherwise matched
+        // the entire library, and '_' matched any character at all. Matches
+        // the ESCAPE '\' clauses in SongDao and CollectionDao — the backslash
+        // itself goes first, or it would double-escape the ones added after.
+        val likeQuery = foldedQuery
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
         return combine(
             songDao.search(match, limit = 100),
             // Substring hits, merged in behind the FTS ones. FTS alone only
@@ -105,9 +114,9 @@ class LibraryRepositoryImpl @Inject constructor(
             // appear once the slowest of them finished. Seeding them lets the
             // prefix hits paint on the current keystroke; the scans then fill
             // in the infix matches, albums and artists a moment later.
-            songDao.searchLike(foldedQuery, limit = 100).onStart { emit(emptyList()) },
-            collectionDao.searchAlbums(foldedQuery, limit = 25).onStart { emit(emptyList()) },
-            collectionDao.searchArtists(foldedQuery, limit = 25).onStart { emit(emptyList()) },
+            songDao.searchLike(likeQuery, limit = 100).onStart { emit(emptyList()) },
+            collectionDao.searchAlbums(likeQuery, limit = 25).onStart { emit(emptyList()) },
+            collectionDao.searchArtists(likeQuery, limit = 25).onStart { emit(emptyList()) },
         ) { ftsSongs, likeSongs, albums, artists ->
             // FTS first: a prefix hit is a better match than an infix one,
             // and distinctBy keeps that order while dropping duplicates.

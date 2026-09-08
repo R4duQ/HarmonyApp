@@ -108,8 +108,7 @@ internal object SpotiFlacNativeRuntime {
     }.getOrNull()
 
     private fun apkHint(primaryAbi: String): String = when (primaryAbi) {
-        "x86_64" -> "Install the Harmony x86_64 emulator APK."
-        "arm64-v8a" -> "Install the Harmony arm64-v8a phone APK."
+        "x86_64", "arm64-v8a" -> "Install the Harmony universal APK, which includes both supported architectures."
         else -> "Use a 64-bit ARM device or a 64-bit x86 Android emulator."
     }
 

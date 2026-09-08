@@ -1,0 +1,31 @@
+{
+  "file": "gobackend-4.9.5.aar",
+  "mode": "aar",
+  "abis": [
+    "arm64-v8a",
+    "x86_64"
+  ],
+  "libraries": {
+    "jni/arm64-v8a/libgojni.so": {
+      "machine": 183,
+      "load_alignment": 16384,
+      "needed": [
+        "liblog.so",
+        "libandroid.so",
+        "libdl.so",
+        "libc.so"
+      ]
+    },
+    "jni/x86_64/libgojni.so": {
+      "machine": 62,
+      "load_alignment": 16384,
+      "needed": [
+        "liblog.so",
+        "libandroid.so",
+        "libdl.so",
+        "libc.so"
+      ]
+    }
+  },
+  "sha256": "7f0fba577070912c7c970d467e150204aa4bd6ac65855611ed5f5092b66574cd"
+}

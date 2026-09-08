@@ -56,6 +56,9 @@ class PlaybackService : MediaLibraryService() {
     private var crossfade: CrossfadeController? = null
     private var albumListening: AlbumListeningMonitor? = null
 
+    /** Last snapshot actually written, so the periodic save can skip no-ops. */
+    private var lastSavedState: Triple<List<Long>, Int, Long>? = null
+
     override fun onCreate() {
         super.onCreate()
         mediaSession = MediaLibrarySession.Builder(this, harmonyPlayer.exoPlayer, callback)
@@ -107,8 +110,17 @@ class PlaybackService : MediaLibraryService() {
             while (isActive) {
                 delay(SAVE_INTERVAL_MS)
                 val snap = snapshot() ?: continue
+                // A DataStore write is a whole-file rewrite plus an fsync.
+                // Doing that every five seconds for as long as the service
+                // lives — including while paused, when nothing moves, and the
+                // service can sit paused for hours — is pure battery and flash
+                // wear. Only write when the stored state would actually
+                // differ; while playing the position moves every tick, so the
+                // guard costs nothing where the saving matters.
+                if (snap == lastSavedState) continue
                 val (ids, index, position) = snap
                 settingsRepository.saveLastPlaybackState(ids, index, position)
+                lastSavedState = snap
             }
         }
     }

@@ -807,6 +807,16 @@ class SoulseekClient @Inject constructor(
             // still writing into the shared partial file.
             abortAttempt(pending)
 
+            // Cancellation is not a failed source. cancelActiveDownload
+            // completes the deferred with a CancellationException, and the
+            // caller's own scope can cancel us at any point; wrapping either
+            // one into a SoulseekException told the ViewModel "this peer did
+            // not work out", which is its cue to walk to the NEXT source. So
+            // pressing Cancel started another download instead of stopping,
+            // and navigating away did the same in the background. Rethrow it
+            // unchanged, after the teardown above has run.
+            if (t is kotlinx.coroutines.CancellationException) throw t
+
             // Keep the content-keyed partial so the next matching source can resume it.
             _transferProgress.value = _transferProgress.value?.copy(
                 status = "Download failed: ${t.message ?: "connection error"}",
@@ -1071,6 +1081,12 @@ class SoulseekClient @Inject constructor(
                     }
                 }
         }
+
+        // Upload offers nobody ever answered. The downloader has long since
+        // moved on by this point; if it comes back it simply re-queues.
+        pendingUploads.entries
+            .filter { now - it.value.offeredAt > PENDING_UPLOAD_OFFER_TIMEOUT_MS }
+            .forEach { pendingUploads.remove(it.key, it.value) }
 
         // Retire per-peer mutexes too, but only unlocked ones. Removing a held
         // mutex would let two builders run concurrently again; the worst case
@@ -2520,7 +2536,11 @@ class SoulseekClient @Inject constructor(
                 throw SoulseekException("Peer requested an out-of-range resume offset.")
             }
 
-            runCatching { socket.receiveBufferSize = FILE_TRANSFER_RECEIVE_BUFFER_BYTES }
+            // sendBufferSize, not receiveBufferSize: this socket is pushing
+            // bytes out. The receive setting was copied from the download path
+            // and tuned the wrong direction, so shared uploads never got the
+            // larger window they were meant to have.
+            runCatching { socket.sendBufferSize = FILE_TRANSFER_SEND_BUFFER_BYTES }
             runCatching { socket.soTimeout = FILE_TRANSFER_STALL_TIMEOUT_MS.toInt() }
 
             val pfd = context.contentResolver.openFileDescriptor(Uri.parse(upload.entry.documentUri), "r")
@@ -2713,7 +2733,20 @@ class SoulseekClient @Inject constructor(
 
             val verificationError = verifyAudioContainer(
                 file = partial,
-                expectedSize = actual.pending.candidate.sizeBytes,
+                // The size the peer declared in its TransferRequest, which is
+                // what this transfer was actually run against: it bounds the
+                // read loop above, it is what the oversized-partial reset at
+                // the top compares to, and it is what gets reported on
+                // completion. The verifier used candidate.sizeBytes instead —
+                // the size from the SEARCH response, recorded whenever that
+                // peer last indexed the file. The two disagree routinely (a
+                // re-tag changes the length and the share index lags), and
+                // every such download was rejected as "size mismatch" and its
+                // partial deleted, despite having transferred perfectly. The
+                // check is worth keeping — it catches a truncated or
+                // externally modified partial — but only against the number
+                // the transfer was governed by.
+                expectedSize = actual.sizeBytes,
                 extension = actual.pending.candidate.extension,
             )
             if (verificationError != null) {
@@ -2732,7 +2765,7 @@ class SoulseekClient @Inject constructor(
                     filename = actual.pending.candidate.fileNameOnly,
                     status = "Download rejected: $verificationError",
                     downloadedBytes = 0L,
-                    totalBytes = actual.pending.candidate.sizeBytes,
+                    totalBytes = actual.sizeBytes,
                     speedBytesPerSecond = 0L,
                 )
                 actual.pending.completion.completeExceptionally(error)
@@ -3375,15 +3408,35 @@ class SoulseekClient @Inject constructor(
         return 0L
     }
 
+    /**
+     * Retires abandoned partials, in PAIRS.
+     *
+     * The two files that make up one partial download age differently: the
+     * .part is touched on every write, while the .owner is written once when
+     * the download starts and never again. Sweeping them independently meant a
+     * long-lived download could lose its .owner to the cutoff while the .part
+     * stayed fresh — and [prepareResumePoint] reads a missing owner as "a
+     * different peer", so it deleted the partial and restarted from zero.
+     * Losing megabytes to bookkeeping is worse than keeping a stale pair one
+     * sweep longer, so a pair is now retired only when BOTH sides are stale.
+     */
     private fun sweepStalePartials() {
         val cacheDir = File(context.cacheDir, "harmony-soulseek")
         if (!cacheDir.isDirectory) return
         val cutoff = System.currentTimeMillis() - STALE_PARTIAL_MAX_AGE_MS
-        cacheDir.listFiles()?.forEach { file ->
-            val sweepable = file.name.endsWith(".part", ignoreCase = true) ||
-                file.name.endsWith(".owner", ignoreCase = true)
-            if (file.isFile && sweepable && file.lastModified() < cutoff) {
-                runCatching { file.delete() }
+        val byContentKey = cacheDir.listFiles()
+            ?.filter {
+                it.isFile && (
+                    it.name.endsWith(".part", ignoreCase = true) ||
+                        it.name.endsWith(".owner", ignoreCase = true)
+                    )
+            }
+            ?.groupBy { it.name.substringBeforeLast('.') }
+            ?: return
+
+        byContentKey.values.forEach { pair ->
+            if (pair.all { it.lastModified() < cutoff }) {
+                pair.forEach { runCatching { it.delete() } }
             }
         }
     }
@@ -3647,6 +3700,15 @@ class SoulseekClient @Inject constructor(
         val token: Long,
         val peerUsername: String,
         val entry: SharedEntry,
+        /**
+         * When Harmony offered this file. Only removed on TransferResponse,
+         * so without an expiry a peer that queues an upload and then vanishes
+         * — the common case, since a downloader walking sources abandons most
+         * of the peers it asks — leaves the entry behind forever. The map
+         * grows for the whole session, and isPeerInUse keeps reporting that
+         * peer as busy, so its inbound connections are never turned away.
+         */
+        val offeredAt: Long = System.currentTimeMillis(),
     )
 
     private inner class PeerConnection(
@@ -3985,12 +4047,23 @@ class SoulseekClient @Inject constructor(
         private const val PEER_SOCKET_SEND_BUFFER_BYTES = 64 * 1024
         private const val FILE_TRANSFER_RECEIVE_BUFFER_BYTES = 1024 * 1024
 
+        /**
+         * Same window, opposite direction, for the sockets Harmony uploads a
+         * shared file over. Its own constant so the upload path cannot be read
+         * as accidentally reusing the download one — which is exactly how it
+         * came to be setting receiveBufferSize on a socket that only sends.
+         */
+        private const val FILE_TRANSFER_SEND_BUFFER_BYTES = 1024 * 1024
+
         // Peer connections were cached forever. Each one is a socket, a live
         // coroutine and its buffers, so a long session on the search page grew
         // without bound until the process died.
         private const val MAX_CACHED_PEER_CONNECTIONS = 12
         private const val PEER_CONNECTION_IDLE_TIMEOUT_MS = 90_000L
         private const val PEER_JANITOR_INTERVAL_MS = 20_000L
+
+        /** How long an unanswered shared-upload offer is kept before expiry. */
+        private const val PENDING_UPLOAD_OFFER_TIMEOUT_MS = 5L * 60_000L
         private const val FILE_TRANSFER_BUFFER_BYTES = 512 * 1024
         private const val FILE_TRANSFER_STALL_TIMEOUT_MS = 20_000
         /**
