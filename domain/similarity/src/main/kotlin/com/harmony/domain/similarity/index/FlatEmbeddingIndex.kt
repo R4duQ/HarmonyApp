@@ -53,6 +53,18 @@ class FlatEmbeddingIndex(private val dim: Int) {
         positionBySongId[songId]?.let { pos -> bpms[pos].takeUnless(Float::isNaN) }
     }
 
+    /**
+     * A copy of a song's stored embedding, or null if it is not indexed.
+     *
+     * A copy, not a view into [vectors]: handing out a slice would let a
+     * caller mutate the index, and swap-remove can move another song into
+     * those exact slots at any time.
+     */
+    fun vectorOf(songId: Long): FloatArray? = synchronized(lock) {
+        val pos = positionBySongId[songId] ?: return null
+        vectors.copyOfRange(pos * dim, pos * dim + dim)
+    }
+
     fun upsert(entry: IndexEntry) {
         require(entry.vector.size == dim) { "Expected dim $dim, got ${entry.vector.size}" }
         require(entry.perceptual.size == PERCEPTUAL_DIM) {

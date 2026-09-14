@@ -34,8 +34,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -84,20 +87,151 @@ data class EditorialPalette(
     val onAccent: Color,
 )
 
+/**
+ * The single light-mode field every section now sits on.
+ *
+ * The palettes used to each own a saturated full-bleed field — amber for
+ * Library, green for Playlists, blue for EQ — which made the section
+ * identity impossible to miss but also meant the app had no neutral ground
+ * anywhere in light mode. Everything on screen had to fight a shouting
+ * background.
+ *
+ * Section identity now lives in [EditorialPalette.accent] instead: the
+ * background is constant and quiet, and each section colours its own
+ * controls, chips and progress. Dark mode is untouched — the dark palettes
+ * still carry their own tinted fields, where a near-black field reads as
+ * depth rather than as noise.
+ */
+private val HarmonyLightField = Color(0xFFF4FDFF)
+
+/** Titles and primary icons on [HarmonyLightField]. */
+private val HarmonyLightInk = Color(0xFF16232B)
+
+/** Subtitles, counts, inactive controls. */
+private val HarmonyLightMuted = Color(0x9916232B)
+
+/**
+ * Hairline outlines. Much softer than the old light palettes, which used
+ * solid ink for [EditorialPalette.line] — a full-strength border was legible
+ * against a saturated field but draws as harsh boxing on a near-white one.
+ */
+private val HarmonyLightLine = Color(0x2916232B)
+
+/**
+ * The single dark-mode field every section now sits on, matching the light
+ * side's HarmonyLightField above. #15121F is not a new colour invented for
+ * this: it's exactly what LavenderDark (the EQ section) already used, and
+ * what the Now Playing screen's own separate PlayerPalette uses for its
+ * dark background — this just makes every OTHER dark section match a
+ * background that two parts of the app were already independently using.
+ */
+private val HarmonyDarkField = Color(0xFF15121F)
+
+/** Titles and primary icons on [HarmonyDarkField] — also matches PlayerPalette's dark ink. */
+private val HarmonyDarkInk = Color(0xFFF1EEFF)
+
+/** Subtitles, counts, inactive controls. Matches PlayerPalette's dark muted. */
+private val HarmonyDarkMuted = Color(0xFF9E98BF)
+
+/** Hairline outlines on [HarmonyDarkField]. */
+private val HarmonyDarkLine = Color(0x29F1EEFF)
+
+/**
+ * How much bottom clearance a screen's scrollable content needs to leave so
+ * its last items can scroll fully clear of the floating mini player + nav
+ * bar.
+ *
+ * That chrome is no longer reserved as layout space by Scaffold — it now
+ * floats as a transparent overlay on top of the content (see HarmonyApp),
+ * which is what lets its glass show real content through it. The trade is
+ * that nothing pushes a screen's own LazyColumn/LazyVerticalGrid content up
+ * out of the way anymore; each screen has to reserve this itself via
+ * contentPadding, or its last rows sit permanently behind the mini player's
+ * opaque yellow and are impossible to scroll into full view.
+ *
+ * ~190dp covers the mini player (~74dp incl. its own vertical inset), the
+ * 10dp gap, the nav bar (~78dp incl. its own vertical inset), plus a margin
+ * — tune if either component's own height changes.
+ */
+val FloatingChromeClearance = 190.dp
+
+/**
+ * Clearance for screens that show the mini player but NOT the nav bar —
+ * detail pages, Settings, the equalizer, anything reached by pushing onto
+ * the back stack rather than by tapping a tab.
+ *
+ * Separate from [FloatingChromeClearance] because reusing that here would
+ * reserve the nav bar's height on screens that never draw one, leaving an
+ * obvious dead gap under the last item.
+ */
+val MiniPlayerClearance = 96.dp
+
+/**
+ * The mini player's own surface. Fixed per light/dark theme rather than the
+ * section palette: the player is the one piece of chrome that persists
+ * across every screen, so giving it a constant colour (per theme) is what
+ * makes it read as a single object following you around instead of a strip
+ * that recolours itself whenever you change tabs.
+ *
+ * Bright gold in light mode; a deeper mustard gold in dark mode — the same
+ * warm hue carried at a tone that reads as "gold on a night sky" rather
+ * than as a light-mode colour that just got dimmed.
+ *
+ * Held below full opacity so the list scrolling underneath stays visible
+ * through it, the same way the nav bar's glass does. 0.86 rather than the
+ * bar's 0.72: this pill carries dark ink over a bright fill, and the text
+ * loses contrast against passing artwork much faster than the bar's
+ * icons do.
+ */
+@Composable
+fun miniPlayerField(): Color =
+    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) {
+        Color(0xFFE1BE1F).copy(alpha = 0.86f)
+    } else {
+        Color(0xFFFFD54F).copy(alpha = 0.86f)
+    }
+
+/**
+ * The lit rim along the mini player's edge, matching the nav bar's.
+ *
+ * Once the surface below it is translucent the pill needs an edge of its
+ * own, or it stops reading as an object sitting on top of the page and
+ * starts looking like the page is simply tinted yellow in that band.
+ */
+val MiniPlayerRim = Color(0x73FFFFFF)
+
+/** Ink on [MiniPlayerField] — dark, since the yellow is bright. */
+val MiniPlayerInk = Color(0xFF2A2206)
+
+/** Secondary text on [MiniPlayerField]. */
+val MiniPlayerMuted = Color(0xA62A2206)
+
+/** Selected segment in the Songs / Albums / Artists control. */
+val SegmentSelectedField = Color(0xFF574F63)
+val SegmentSelectedInk = Color(0xFFFFFFFF)
+
+/** Unselected segments — a light lavender chip. */
+val SegmentField = Color(0xFFEDE7F6)
+val SegmentInk = Color(0xFF3F3A4A)
+
+/** The quietest segment tier, for a tab with nothing in it yet. */
+val SegmentFieldMuted = Color(0xFFF4F0FA)
+val SegmentInkMuted = Color(0xFF8A8496)
+
 private val AmberLight = EditorialPalette(
-    field = Color(0xFFF3A311),
-    ink = Color(0xFF1A1403),
-    muted = Color(0xB31A1403),
-    line = Color(0xFF1A1403),
-    accent = Color(0xFF1A1403),
-    onAccent = Color(0xFFF3A311),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
+    accent = Color(0xFFF3A311),
+    onAccent = Color(0xFF1A1403),
 )
 
 private val AmberDark = EditorialPalette(
-    field = Color(0xFF241A05),
-    ink = Color(0xFFF3D391),
-    muted = Color(0x99F3D391),
-    line = Color(0x80F3D391),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFFF3A311),
     onAccent = Color(0xFF1A1403),
 )
@@ -110,109 +244,109 @@ private val AmberDark = EditorialPalette(
 // palettes accent with their dark ink, dark palettes with the family's bright
 // hue.
 private val GreenLight = EditorialPalette(
-    field = Color(0xFF27A15C),
-    ink = Color(0xFF07130C),
-    muted = Color(0xA607130C),
-    line = Color(0xFF07130C),
-    accent = Color(0xFF07130C),
-    onAccent = Color(0xFFCDEDDA),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
+    accent = Color(0xFF1E9153),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val GreenDark = EditorialPalette(
-    field = Color(0xFF0B2115),
-    ink = Color(0xFFCDEDDA),
-    muted = Color(0x99CDEDDA),
-    line = Color(0x80CDEDDA),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFF3FBF77),
     onAccent = Color(0xFF07130C),
 )
 
 private val BlueLight = EditorialPalette(
-    field = Color(0xFF4FA3E3),
-    ink = Color(0xFF06131F),
-    muted = Color(0xA606131F),
-    line = Color(0xFF06131F),
-    accent = Color(0xFF06131F),
-    onAccent = Color(0xFFDCEEFB),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
+    accent = Color(0xFF2C87CE),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val BlueDark = EditorialPalette(
-    field = Color(0xFF0A1826),
-    ink = Color(0xFFC3E0F7),
-    muted = Color(0x99C3E0F7),
-    line = Color(0x80C3E0F7),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFF4FA3E3),
     onAccent = Color(0xFF06131F),
 )
 
 private val StoneLight = EditorialPalette(
-    field = Color(0xFFEDE4D3),
-    ink = Color(0xFF1E1A12),
-    muted = Color(0x991E1A12),
-    line = Color(0xFF1E1A12),
-    accent = Color(0xFF1E1A12),
-    onAccent = Color(0xFFEDE4D3),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
+    accent = Color(0xFF6E6A5F),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val StoneDark = EditorialPalette(
-    field = Color(0xFF17150F),
-    ink = Color(0xFFE6DDCB),
-    muted = Color(0x99E6DDCB),
-    line = Color(0x80E6DDCB),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFFE6DDCB),
     onAccent = Color(0xFF17150F),
 )
 
 private val TealLight = EditorialPalette(
-    field = Color(0xFF1FA6A0),
-    ink = Color(0xFF04211F),
-    muted = Color(0xB304211F),
-    line = Color(0xFF04211F),
-    accent = Color(0xFF04211F),
-    onAccent = Color(0xFFDFF7F5),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
+    accent = Color(0xFF128F8A),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val TealDark = EditorialPalette(
-    field = Color(0xFF0C1F1E),
-    ink = Color(0xFF9FE0DA),
-    muted = Color(0x999FE0DA),
-    line = Color(0x809FE0DA),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFF3FBFB6),
     onAccent = Color(0xFF04211F),
 )
 
 private val CoralLight = EditorialPalette(
-    field = Color(0xFFE9573F),
-    ink = Color(0xFF210A05),
-    muted = Color(0xB3210A05),
-    line = Color(0xFF210A05),
-    accent = Color(0xFF210A05),
-    onAccent = Color(0xFFFFE7DF),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
+    accent = Color(0xFFDA4A31),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val CoralDark = EditorialPalette(
-    field = Color(0xFF221009),
-    ink = Color(0xFFF7C9B9),
-    muted = Color(0x99F7C9B9),
-    line = Color(0x80F7C9B9),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFFE9573F),
     onAccent = Color(0xFF210A05),
 )
 
 private val LavenderLight = EditorialPalette(
-    field = Color(0xFFDCD7FA),
-    ink = Color(0xFF17142B),
-    muted = Color(0xFF5D5878),
-    line = Color(0x2917142B),
+    field = HarmonyLightField,
+    ink = HarmonyLightInk,
+    muted = HarmonyLightMuted,
+    line = HarmonyLightLine,
     accent = Color(0xFF6C4BE8),
     onAccent = Color(0xFFFFFFFF),
 )
 
 private val LavenderDark = EditorialPalette(
-    field = Color(0xFF15121F),
-    ink = Color(0xFFF1EEFF),
-    muted = Color(0xFF9E98BF),
-    line = Color(0x33F1EEFF),
+    field = HarmonyDarkField,
+    ink = HarmonyDarkInk,
+    muted = HarmonyDarkMuted,
+    line = HarmonyDarkLine,
     accent = Color(0xFF9B85FF),
     onAccent = Color(0xFF17142B),
 )
@@ -326,7 +460,160 @@ fun EditorialCard(
     }
 }
 
-/** The outline-only circle: play on cards, search / add / back in headers. */
+/**
+ * A [EditorialCard] drop-in for the iOS-glass sections (currently
+ * Downloads): same signature, a lifted translucent pane instead of a flat
+ * field with a hairline border.
+ *
+ * Deliberately its own composable rather than a parameter on EditorialCard:
+ * a card that lets real content show through it only makes sense where
+ * that content is worth seeing. EditorialCard's other callers (Playlists,
+ * EQ, Settings) have nothing behind them worth revealing, and their opaque
+ * fill is doing real work — it's what keeps the swipe-to-queue affordance
+ * from bleeding through a song row's card. Glass only where translucency
+ * earns something.
+ *
+ * The depth comes from three cues stacked, which is what separates a pane
+ * of glass from a tinted rectangle:
+ *
+ * A cast shadow, tinted with the section's own ink rather than black, so
+ * the card sits above the page instead of being painted onto it. Black
+ * shadows over a coloured field read as grime; an ink-tinted one reads as
+ * the card's own shadow.
+ *
+ * A vertical fill gradient, lighter at the top. This is the whole "2.5D"
+ * effect in one modifier: a flat fill tells you nothing about which way is
+ * up, while a fill that brightens toward the top implies a light source
+ * above and therefore a surface with a thickness facing it.
+ *
+ * A rim that is bright along the top edge and fades to almost nothing at
+ * the bottom — the lit edge of the pane catching that same light. A rim of
+ * even brightness all the way round would flatten the other two cues back
+ * out, because a real edge is never equally lit on every side.
+ */
+@Composable
+fun GlassCard(
+    palette: EditorialPalette,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(EDITORIAL_CARD_RADIUS)
+    val onDarkField = palette.field.luminance() < 0.5f
+    // A narrow range. 0.76 -> 0.44 was wide enough that the bottom of the
+    // card drifted noticeably dirtier than the top, which reads as a
+    // smudge rather than as a lit surface.
+    val surface = Brush.verticalGradient(
+        listOf(glassFill(palette, strength = 0.72f), glassFill(palette, strength = 0.58f)),
+    )
+    val rim = BorderStroke(
+        1.dp,
+        Brush.verticalGradient(
+            if (onDarkField) {
+                listOf(
+                    Color.White.copy(alpha = 0.20f),
+                    Color.White.copy(alpha = 0.06f),
+                    Color.Black.copy(alpha = 0.18f),
+                )
+            } else {
+                listOf(
+                    Color.White.copy(alpha = 0.78f),
+                    Color.White.copy(alpha = 0.20f),
+                    palette.ink.copy(alpha = 0.07f),
+                )
+            },
+        ),
+    )
+    val lifted = modifier.shadow(
+        elevation = 14.dp,
+        shape = shape,
+        clip = false,
+        // Opaque, deliberately. Compose applies its own alpha curve to
+        // these based on elevation, so passing an already-faded colour
+        // multiplies the two and the shadow disappears entirely — which is
+        // exactly what happened when these were set to 0.22/0.28 alpha.
+        ambientColor = if (onDarkField) Color.Black else palette.ink,
+        spotColor = if (onDarkField) Color.Black else palette.ink,
+    )
+    // Surface carries the shape, border and (when clickable) the ripple;
+    // its own colour is transparent so the gradient Box inside is what
+    // actually fills the card. Setting a colour here as well would paint a
+    // flat layer over the gradient and undo it.
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            modifier = lifted,
+            shape = shape,
+            color = Color.Transparent,
+            contentColor = palette.ink,
+            border = rim,
+        ) { Box(Modifier.background(surface)) { content() } }
+    } else {
+        Surface(
+            modifier = lifted,
+            shape = shape,
+            color = Color.Transparent,
+            contentColor = palette.ink,
+            border = rim,
+        ) { Box(Modifier.background(surface)) { content() } }
+    }
+}
+
+/**
+ * A recessed panel for content nested INSIDE a [GlassCard] — the provider
+ * blurb, a login block, a search well.
+ *
+ * The lighting is deliberately the inverse of [GlassCard]'s. A raised pane
+ * is bright along its top edge and casts a shadow below; something pressed
+ * into that pane is shadowed along its top edge and catches light along
+ * its bottom. Getting that backwards is what makes a nested panel read as
+ * a second card sitting on the first rather than as a recess in it, and
+ * two stacked raised cards is exactly the muddle this avoids. Note there
+ * is no shadow here at all — an inset does not cast one.
+ */
+@Composable
+fun GlassInsetPanel(
+    palette: EditorialPalette,
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(14.dp),
+    content: @Composable () -> Unit,
+) {
+    // On a dark field, "recessed" cannot mean "more ink" — ink IS the light
+    // colour there, so tinting with it lightens the well and closes the gap
+    // to the text sitting in it. A recess in a dark surface is darker, so
+    // the tint has to flip to black.
+    val onDarkField = palette.field.luminance() < 0.5f
+    val well = if (onDarkField) Color.Black else palette.ink
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = Color.Transparent,
+        contentColor = palette.ink,
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(
+                listOf(
+                    well.copy(alpha = if (onDarkField) 0.34f else 0.14f),
+                    well.copy(alpha = 0.04f),
+                    Color.White.copy(alpha = if (onDarkField) 0.10f else 0.42f),
+                ),
+            ),
+        ),
+    ) {
+        Box(
+            Modifier.background(
+                Brush.verticalGradient(
+                    listOf(
+                        well.copy(alpha = if (onDarkField) 0.22f else 0.075f),
+                        well.copy(alpha = if (onDarkField) 0.08f else 0.015f),
+                    ),
+                ),
+            ),
+        ) { content() }
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorialCircleButton(
@@ -389,7 +676,16 @@ fun EditorialPill(
 }
 
 /** One entry in [EditorialTabs]. Count is optional — omit rather than show 0-lies. */
-data class EditorialTab(val label: String, val count: Int? = null)
+data class EditorialTab(
+    val label: String,
+    val count: Int? = null,
+    /**
+     * Optional leading glyph, used by [GlassSegmentedTabs]. Defaulted so
+     * every existing call site that passes only a label and count still
+     * compiles unchanged.
+     */
+    val icon: ImageVector? = null,
+)
 
 /**
  * Digits sitting dead-center in a small circle need three things that aren't

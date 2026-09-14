@@ -27,22 +27,19 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,10 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,10 +68,13 @@ import com.harmony.core.ui.component.Artwork
 import com.harmony.core.ui.component.EditorialCard
 import com.harmony.core.ui.component.EditorialCircleButton
 import com.harmony.core.ui.component.EditorialPalette
-import com.harmony.core.ui.component.EditorialSongCard
 import com.harmony.core.ui.component.EditorialTab
-import com.harmony.core.ui.component.EditorialTabs
 import com.harmony.core.ui.component.EmptyState
+import com.harmony.core.ui.component.FloatingChromeClearance
+import com.harmony.core.ui.component.GlassCircleButton
+import com.harmony.core.ui.component.GlassSearchBar
+import com.harmony.core.ui.component.GlassSegmentedTabs
+import com.harmony.core.ui.component.GlassSongCard
 import com.harmony.core.ui.component.VinylAlbumCover
 import com.harmony.core.ui.component.amberPalette
 
@@ -115,6 +112,15 @@ fun LibraryScreen(
      */
     openSearchSignal: Int = 0,
     requestedSearchQuery: String? = null,
+    /**
+     * Incremented by the shell on an ORDINARY entry into Library — tapping
+     * the Library tab, or Discover's "browse library" — as opposed to a
+     * search request or popping back from Now Playing. Closes search if it
+     * was left open, so it doesn't stay stuck open forever the way it used
+     * to when searchActive was itself saveable; see the note on
+     * [handledResetSignal].
+     */
+    resetSearchSignal: Int = 0,
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -186,6 +192,19 @@ fun LibraryScreen(
     // Songs (and out of search) every time you came back. Saveable state is
     // held by the nav back stack entry and restored on pop.
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // rememberSaveable so that going Library -> Now Playing -> back keeps
+    // whatever search state you left behind — that round trip doesn't pop
+    // this screen off the back stack, so its saved state naturally
+    // survives.
+    //
+    // The trade this reintroduces: on its own, rememberSaveable can't tell
+    // "returning from Now Playing" apart from "switching tabs away and
+    // back" — both restore Library's saved state through the exact same
+    // mechanism, so a search left open would come back in EITHER case,
+    // which is what caused the original "keyboard reappears every time you
+    // enter Library" bug. [resetSearchSignal] below is what breaks that
+    // tie: it only fires on an ordinary tab entry, never on a Now Playing
+    // return, so search only survives the case you actually want it to.
     var searchActive by rememberSaveable { mutableStateOf(false) }
     // Saveable, so navigating away and back doesn't replay an old request:
     // the signal only counts if it is newer than the one already handled.
@@ -195,6 +214,16 @@ fun LibraryScreen(
             handledSearchSignal = openSearchSignal
             requestedSearchQuery?.let(viewModel::onSearchQueryChange)
             searchActive = true
+        }
+    }
+    // Same replay-guard pattern as handledSearchSignal above, for the
+    // reset signal.
+    var handledResetSignal by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(resetSearchSignal) {
+        if (resetSearchSignal > handledResetSignal) {
+            handledResetSignal = resetSearchSignal
+            searchActive = false
+            viewModel.onSearchQueryChange("")
         }
     }
     // Songs can be browsed as a plain list or as the arc wheel. Both exist
@@ -215,71 +244,28 @@ fun LibraryScreen(
             .fillMaxSize()
             .background(palette.field),
     ) {
-        // ---- Header: big title + circled search / active search field ----
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (searchActive) {
-                // Tapping the search circle should put a cursor in the field
-                // and raise the keyboard. Without this the field opened
-                // unfocused and nothing happened until you tapped it a second
-                // time, which reads as "search is broken".
-                val focusRequester = remember { FocusRequester() }
-                LaunchedEffect(Unit) { focusRequester.requestFocus() }
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = viewModel::onSearchQueryChange,
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    placeholder = { Text("Search songs, artists, albums", color = palette.muted) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(18.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = palette.line,
-                        unfocusedBorderColor = palette.line,
-                        focusedTextColor = palette.ink,
-                        unfocusedTextColor = palette.ink,
-                        cursorColor = palette.ink,
-                        focusedLeadingIconColor = palette.ink,
-                        unfocusedLeadingIconColor = palette.ink,
-                        focusedTrailingIconColor = palette.ink,
-                        unfocusedTrailingIconColor = palette.ink,
-                    ),
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = {
-                        IconButton(
-                            onClick = {
-                                if (searchQuery.isEmpty()) {
-                                    searchActive = false
-                                } else {
-                                    viewModel.onSearchQueryChange("")
-                                }
-                            },
-                        ) { Icon(Icons.Rounded.Close, contentDescription = "Clear search") }
-                    },
-                )
-            } else {
-                Text(
-                    "Library",
-                    fontSize = 40.sp,
-                    lineHeight = 44.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-1).sp,
-                    color = palette.ink,
-                    modifier = Modifier.weight(1f),
-                )
-                if (selectedTab == 0) {
-                    EditorialCircleButton(
+        // ---- Header: glass search pill, with the wheel toggle trailing it
+        // on the Songs tab ----
+        GlassSearchBar(
+            active = searchActive,
+            value = searchQuery,
+            onValueChange = viewModel::onSearchQueryChange,
+            onFieldClick = { searchActive = true },
+            onClear = {
+                if (searchQuery.isEmpty()) {
+                    searchActive = false
+                } else {
+                    viewModel.onSearchQueryChange("")
+                }
+            },
+            palette = palette,
+            trailing = if (!searchActive && selectedTab == 0) {
+                {
+                    GlassCircleButton(
                         onClick = { arcMode = !arcMode },
                         contentDescription = if (arcMode) "Switch to list view" else "Switch to wheel view",
                         palette = palette,
                         filled = arcMode,
-                        modifier = Modifier.padding(end = 10.dp),
                     ) {
                         Icon(
                             if (arcMode) Icons.Rounded.ViewList else Icons.Rounded.Album,
@@ -288,15 +274,8 @@ fun LibraryScreen(
                         )
                     }
                 }
-                EditorialCircleButton(
-                    onClick = { searchActive = true },
-                    contentDescription = "Search library",
-                    palette = palette,
-                ) {
-                    Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(19.dp))
-                }
-            }
-        }
+            } else null,
+        )
 
         // ---- Search results OR the normal tabbed browser ----
         AnimatedContent(
@@ -308,16 +287,28 @@ fun LibraryScreen(
                 SearchResultsContent(viewModel, palette, onAlbumClick, onArtistClick)
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    EditorialTabs(
+                    GlassSegmentedTabs(
                         tabs = listOf(
-                            EditorialTab("Songs", pagedSongs.itemCount.takeIf { it > 0 }),
-                            EditorialTab("Albums", albums.size.takeIf { it > 0 }),
-                            EditorialTab("Artists"),
+                            EditorialTab(
+                                "Songs",
+                                pagedSongs.itemCount.takeIf { it > 0 },
+                                Icons.Rounded.MusicNote,
+                            ),
+                            EditorialTab(
+                                "Albums",
+                                albums.size.takeIf { it > 0 },
+                                Icons.Rounded.Album,
+                            ),
+                            EditorialTab(
+                                "Artists",
+                                artists.size.takeIf { it > 0 },
+                                Icons.Rounded.Person,
+                            ),
                         ),
                         selected = selectedTab,
                         onSelect = { selectedTab = it },
                         palette = palette,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                     // Tab content slides in the direction of travel, so
                     // switching tabs reads as horizontal movement between
@@ -436,7 +427,7 @@ private fun SongsTab(
     }
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = 16.dp),
+        contentPadding = PaddingValues(top = 6.dp, bottom = FloatingChromeClearance),
     ) {
         items(
             count = songs.itemCount,
@@ -444,7 +435,7 @@ private fun SongsTab(
         ) { index ->
             val song = songs[index]
             if (song != null) {
-                EditorialSongCard(
+                GlassSongCard(
                     song = song,
                     palette = palette,
                     onClick = { viewModel.onPagedSongClick(song) },
@@ -452,6 +443,7 @@ private fun SongsTab(
                     onAddToPlaylist = { addToPlaylistSongId = song.id },
                     onRemove = { viewModel.deleteSong(song) },
                     removeLabel = "Delete from phone",
+                    onSwipeToQueue = { viewModel.addToQueue(song) },
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -477,7 +469,9 @@ private fun AlbumsTab(
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 160.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(14.dp),
+        contentPadding = PaddingValues(
+            start = 14.dp, end = 14.dp, top = 14.dp, bottom = FloatingChromeClearance,
+        ),
     ) {
         items(albums, key = { it.id }) { album ->
             EditorialCard(
@@ -534,7 +528,7 @@ private fun ArtistsTab(
     }
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = 16.dp),
+        contentPadding = PaddingValues(top = 6.dp, bottom = FloatingChromeClearance),
     ) {
         // Keyed on the name, not the id. GROUP BY names.name in
         // CollectionDao.observeArtists guarantees one row per name, so the
@@ -640,11 +634,11 @@ private fun SearchResultsContent(
                 EmptyState("No matches", "Try a different spelling or a shorter search.")
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = FloatingChromeClearance)) {
                 if (results.songs.isNotEmpty()) {
                     item { sectionHeader("Songs") }
                     itemsIndexed(results.songs) { index, song ->
-                        EditorialSongCard(
+                        GlassSongCard(
                             song = song,
                             palette = palette,
                             onClick = { viewModel.onSongClick(results.songs, index) },
@@ -652,6 +646,7 @@ private fun SearchResultsContent(
                             onAddToPlaylist = { addToPlaylistSongId = song.id },
                             onRemove = { viewModel.deleteSong(song) },
                             removeLabel = "Delete from phone",
+                            onSwipeToQueue = { viewModel.addToQueue(song) },
                         )
                     }
                 }

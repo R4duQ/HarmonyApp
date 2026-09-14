@@ -18,8 +18,15 @@ enum class SpotiFlacOutputFormat(
     val isLosslessOutput: Boolean,
 ) {
     FLAC_LOSSLESS(
-        label = "FLAC lossless",
-        summary = "Native lossless FLAC with selected album tags and embedded cover artwork.",
+        label = "FLAC CD",
+        summary = "FLAC up to 16-bit / 44.1 kHz, with album tags and cover artwork. Lower native resolutions are preserved.",
+        extension = "flac",
+        historyLabel = "FLAC",
+        isLosslessOutput = true,
+    ),
+    FLAC_HI_RES_96(
+        label = "FLAC max 24/96",
+        summary = "Best available lossless source, up to 24-bit / 96 kHz per track. Lower resolutions stay native; higher ones are reduced to the limit.",
         extension = "flac",
         historyLabel = "FLAC",
         isLosslessOutput = true,

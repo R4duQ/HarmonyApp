@@ -111,6 +111,7 @@ class SmartQueueCoordinator @Inject constructor(
         val size: Int,
         val currentSongId: Long?,
         val playNextCount: Int,
+        val advancedAutomatically: Boolean,
     )
 
     fun start(scope: CoroutineScope) {
@@ -124,6 +125,7 @@ class SmartQueueCoordinator @Inject constructor(
                         it.queue.size,
                         it.currentSong?.id,
                         it.playNextCount,
+                        it.advancedAutomatically,
                     )
                 }
                 .distinctUntilChanged()
@@ -203,6 +205,15 @@ class SmartQueueCoordinator @Inject constructor(
         val id = signal.currentSongId ?: return
         if (id in sessionPicks) return          // we queued it: normal smart flow
         if (id == lastHandoverSongId) return    // already handled this selection
+        // Rolling into the next queue entry is not a decision. Handover
+        // exists for "the user chose something else"; treating an automatic
+        // advance as one deletes whatever they had queued behind it, which
+        // is precisely what happened to manually queued songs after the
+        // first played.
+        if (signal.advancedAutomatically) {
+            lastHandoverSongId = id
+            return
+        }
         // A manual song choice is an intentional vibe change. Snapshot the
         // user's current order, then drop every non-Play-Next tail item even
         // when that tail is short. That lets Smart Shuffle pivot immediately

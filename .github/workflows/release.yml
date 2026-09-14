@@ -22,7 +22,7 @@ env:
 
 jobs:
   release:
-    name: Signed universal + architecture APKs
+    name: Signed phone + emulator APKs
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -73,12 +73,6 @@ jobs:
           SPOTIFLAC_TAG: ${{ env.SPOTIFLAC_TAG }}
           EXPECTED_GO_VERSION: ${{ env.GO_VERSION }}
         run: bash ./scripts/ci/build-spotiflac-backend.sh
-
-      - name: Build portable FLAC and MP3 converters
-        run: bash ./scripts/ci/build-audio-converter.sh
-
-      - name: Test native packaging checks
-        run: python3 scripts/ci/test-native-package.py
 
       - name: Restore release signing key
         shell: bash
@@ -151,29 +145,15 @@ jobs:
       - name: Verify and package x86_64 emulator APK
         run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" x86_64
 
-      - name: Build signed universal APK
-        env:
-          HARMONY_KEYSTORE_FILE: release.keystore
-          HARMONY_KEYSTORE_PASSWORD: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
-          HARMONY_KEY_ALIAS: ${{ secrets.HARMONY_KEY_ALIAS }}
-          HARMONY_KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
-        run: >-
-          ./gradlew :app:clean :app:assembleRelease --no-daemon --stacktrace
-
-      - name: Verify and package universal APK
-        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" universal
-
       - name: Upload signed APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Harmony-v${{ steps.version.outputs.version_name }}-release-apks
           path: |
-            dist/Harmony-v${{ steps.version.outputs.version_name }}.apk
             dist/Harmony-v${{ steps.version.outputs.version_name }}-arm64-v8a.apk
             dist/Harmony-v${{ steps.version.outputs.version_name }}-x86_64.apk
             dist/SHA256SUMS.txt
-            dist/APK-SIGNATURE-*.txt
-            dist/NATIVE-*.json
+            dist/APK-SIGNATURE.txt
             vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.source.txt
             vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.sha256.txt
           if-no-files-found: error
@@ -194,20 +174,18 @@ jobs:
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" --title "$RELEASE_TITLE" --notes-file "$NOTES"
             gh release upload "${GITHUB_REF_NAME}" --clobber \
-              "dist/Harmony-v${VERSION_NAME}.apk#Harmony v${VERSION_NAME} — Universal Android APK" \
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
               "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
-              dist/APK-SIGNATURE-*.txt dist/NATIVE-*.json
+              "dist/APK-SIGNATURE.txt#APK signing certificate details"
           else
             gh release create "${GITHUB_REF_NAME}" \
               --title "$RELEASE_TITLE" \
               --notes-file "$NOTES" \
-              "dist/Harmony-v${VERSION_NAME}.apk#Harmony v${VERSION_NAME} — Universal Android APK" \
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
               "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
-              dist/APK-SIGNATURE-*.txt dist/NATIVE-*.json
+              "dist/APK-SIGNATURE.txt#APK signing certificate details"
           fi
 
       - name: Remove signing material

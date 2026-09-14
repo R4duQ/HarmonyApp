@@ -78,6 +78,7 @@ import com.harmony.core.ui.component.EmptyState
 import com.harmony.core.ui.component.greenPalette
 import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
+import com.harmony.core.ui.component.FloatingChromeClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -301,7 +302,7 @@ fun PlaylistsScreen(
             when (tab) {
                 0 -> LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 2.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
                 ) {
                     items(SmartPlaylistType.entries, key = { it.name }) { type ->
                         SmartPlaylistRow(
@@ -321,7 +322,7 @@ fun PlaylistsScreen(
                     } else {
                         LazyColumn(
                             Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 2.dp, bottom = 24.dp),
+                            contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
                         ) {
                             items(cards, key = { it.id }) { card ->
                                 PlaylistRow(

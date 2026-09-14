@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,6 +75,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -98,8 +101,11 @@ import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ShuffleMode
 import com.harmony.core.model.Song
 import com.harmony.core.ui.component.formatDuration
+import com.harmony.domain.playback.AudioLevel
+import com.harmony.domain.playback.AudioLevels
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /**
  * The full-screen player.
@@ -181,11 +187,68 @@ fun NowPlayingScreen(
     val targetProgress = if (state.durationMs > 0) {
         (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
     } else 0f
-    val animatedProgress by animateFloatAsState(
-        targetValue = targetProgress,
-        animationSpec = tween(durationMillis = 500),
-        label = "seek-progress",
-    )
+    // Two motions share this value and they want opposite curves, which a
+    // single animateFloatAsState cannot express — hence the Animatable.
+    //
+    // Between position ticks the playhead should advance at a CONSTANT rate:
+    // the old tween's default FastOutSlowIn eased in and out inside every
+    // 500ms window, so the bar sped up and slowed down twice a second. At
+    // this scale that reads as a stutter, not as easing. Linear is the only
+    // curve that matches the thing being represented — time passing evenly.
+    //
+    // A jump is the opposite case: a seek, or a loop back to the start.
+    // Crawling linearly across most of the bar looks broken, and snapping is
+    // the harshness being complained about, so those settle on a spring
+    // instead.
+    //
+    // A TRACK CHANGE is a third case again, handled before either, because
+    // running it through the jump path sweeps the playhead backwards across
+    // the whole bar — the new song's zero animated from the old song's
+    // position, which reads as the bar rewinding rather than as one track
+    // handing over to the next.
+    val progressAnim = remember { Animatable(0f) }
+    var lastSongId by remember { mutableStateOf(song?.id) }
+    LaunchedEffect(song?.id, targetProgress) {
+        if (song?.id != lastSongId) {
+            lastSongId = song?.id
+            // Only carry the outgoing bar to the end when it was ALREADY
+            // near the end, i.e. the track finished on its own. A manual
+            // skip from the middle should not pretend the rest played —
+            // that would show progress the listener never heard.
+            if (progressAnim.value > 0.5f) {
+                progressAnim.animateTo(
+                    1f,
+                    tween(durationMillis = 220, easing = LinearEasing),
+                )
+            }
+            // Straight to zero rather than animated: the fill has just run
+            // off the right-hand end, so there is nothing on screen to
+            // travel back from, and the waveform is morphing to the new
+            // track's shape over the same moment.
+            progressAnim.snapTo(0f)
+            return@LaunchedEffect
+        }
+        val delta = abs(targetProgress - progressAnim.value)
+        if (delta > 0.05f) {
+            progressAnim.animateTo(
+                targetProgress,
+                spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            )
+        } else {
+            // Slightly longer than the 500ms tick interval so the animation
+            // is still running when the next position arrives. Matching it
+            // exactly leaves a gap at the end of each window where the bar
+            // sits still, which is the stutter this is meant to remove.
+            progressAnim.animateTo(
+                targetProgress,
+                tween(durationMillis = 560, easing = LinearEasing),
+            )
+        }
+    }
+    val animatedProgress = progressAnim.value
 
     val playScale by animateFloatAsState(
         targetValue = if (state.isPlaying) 1f else 0.97f,
@@ -210,12 +273,21 @@ fun NowPlayingScreen(
         label = "repeat-tint",
     )
 
-    val waveform = rememberWaveform(song?.id)
+    val waveform = rememberMorphingWaveform(song?.id)
 
     val onSeekCommit: (Float) -> Unit = { fraction ->
-        dragFraction = null
         if (state.durationMs > 0) {
             viewModel.onSeek((fraction * state.durationMs).toLong())
+        }
+        // Move the animated value to where the finger left it BEFORE
+        // clearing dragFraction. Clearing first hands the bar back to
+        // animatedProgress while that still holds the PRE-seek position, so
+        // for the few frames until the player reports its new one the
+        // playhead snaps backwards and then jumps forward again — the jolt
+        // on release. Snapping first means the handover is invisible.
+        gestureScope.launch {
+            progressAnim.snapTo(fraction)
+            dragFraction = null
         }
     }
 
@@ -225,6 +297,21 @@ fun NowPlayingScreen(
             .onSizeChanged { containerHeight = it.height }
             .graphicsLayer { translationY = dragOffsetY.value.coerceAtLeast(0f) }
             .background(palette.background)
+            // Applied AFTER background, deliberately: this only pushes the
+            // column's own content up above the system nav bar, it doesn't
+            // shrink what area the background paints — otherwise the strip
+            // under the system bar would show through to whatever sits
+            // behind this screen instead of this screen's own tint.
+            //
+            // This screen never sat behind the floating mini player/nav
+            // bar — it's a full-screen destination with its own bottom
+            // transport controls. It used to get its bottom clearance for
+            // free from NavHost's shared padding, but that padding was
+            // deliberately dropped so Library and friends could scroll
+            // behind the floating chrome; this screen was never meant to
+            // lose its own clearance in the process, so it claims its own
+            // inset here instead.
+            .navigationBarsPadding()
             .pointerInput(Unit) {
                 var totalDrag = 0f
                 detectVerticalDragGestures(
@@ -877,6 +964,28 @@ private fun SeekBlock(
     onScrubCancel: () -> Unit,
     waveformHeight: Int,
 ) {
+    // Collected here rather than inside WaveformSeekBar so the bar stays a
+    // pure drawing component that can be previewed and reused without a
+    // running audio chain behind it.
+    val audio by AudioLevels.current.collectAsStateWithLifecycle()
+    // Only react while actually playing: paused on a loud peak would
+    // otherwise leave the bars frozen mid-swell, which reads as a stuck UI.
+    val live = if (state.isPlaying) audio else AudioLevel()
+    // The meter already smooths on the audio side; this second, slower pass
+    // is against the display, absorbing the gap between the ~40ms
+    // measurement window and the frame rate so motion is continuous rather
+    // than stepped.
+    val animatedLevel by animateFloatAsState(
+        targetValue = live.level,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f),
+        label = "waveform-level",
+    )
+    val animatedBrightness by animateFloatAsState(
+        targetValue = live.brightness,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 140f),
+        label = "waveform-brightness",
+    )
+
     WaveformSeekBar(
         progress = progress,
         waveform = waveform,
@@ -888,6 +997,8 @@ private fun SeekBlock(
         modifier = Modifier
             .fillMaxWidth()
             .height(waveformHeight.dp),
+        level = animatedLevel,
+        brightness = animatedBrightness,
     )
     Row(
         Modifier

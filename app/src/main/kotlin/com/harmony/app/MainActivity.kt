@@ -1,11 +1,14 @@
 package com.harmony.app
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.app.navigation.HarmonyApp
@@ -46,6 +49,30 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
+            }
+            // enableEdgeToEdge()'s own default (SystemBarStyle.auto) picks
+            // status/nav bar icon colour from the OS's OWN dark-mode flag,
+            // not from `dark` above — those two can disagree whenever the
+            // user picks LIGHT or DARK here regardless of the phone's
+            // system setting, which is exactly what left the clock/battery/
+            // signal icons invisible: light-coloured icons meant for a dark
+            // background, drawn over this app's near-white #F4FDFF light
+            // field. Re-asserting the style explicitly, keyed to our own
+            // `dark`, keeps the icons correct regardless of what the OS
+            // itself is set to.
+            SideEffect {
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) {
+                        SystemBarStyle.dark(Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                    },
+                    navigationBarStyle = if (dark) {
+                        SystemBarStyle.dark(Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                    },
+                )
             }
             val returnSignal by verificationReturnSignal.collectAsStateWithLifecycle()
             val albumReturnSignal by albumVerificationReturnSignal.collectAsStateWithLifecycle()

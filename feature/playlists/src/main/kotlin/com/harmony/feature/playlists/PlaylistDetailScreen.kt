@@ -11,9 +11,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -61,6 +61,8 @@ import com.harmony.core.ui.component.formatLongDuration
 import com.harmony.core.ui.component.greenPalette
 import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
+import com.harmony.core.ui.component.MiniPlayerClearance
+import com.harmony.core.ui.component.DetailCardScaffold
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -191,11 +193,24 @@ fun PlaylistDetailScreen(viewModel: PlaylistDetailViewModel = hiltViewModel()) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val totalMs = remember(songs) { songs.sumOf { it.durationMs } }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(palette.field),
-    ) {
+    // Hoisted out of the (former) else-branch: `display` needs remember,
+    // which cannot be called from inside a LazyListScope block.
+    val display = remember(songs, dragFrom, dragTo) {
+        if (dragFrom < 0 || dragTo < 0 || dragFrom == dragTo) {
+            songs
+        } else {
+            songs.toMutableList().apply { add(dragTo, removeAt(dragFrom)) }
+        }
+    }
+
+    DetailCardScaffold(
+        title = title,
+        palette = palette,
+        modifier = Modifier.background(palette.field),
+        listState = listState,
+        contentPadding = PaddingValues(top = 10.dp, bottom = MiniPlayerClearance),
+        header = {
+        Column {
         // ---- Header ----
         Row(
             modifier = Modifier
@@ -279,14 +294,23 @@ fun PlaylistDetailScreen(viewModel: PlaylistDetailViewModel = hiltViewModel()) {
             }
         }
 
+        }
+        },
+    ) {
         if (songs.isEmpty()) {
             // Message depends on the playlist KIND — the energy-analysis text
             // is nonsense for a user playlist you just created and explains
             // nothing about how to fill it.
+            item {
             if (viewModel.isEditable) {
                 Column(
                     Modifier
-                        .fillMaxSize()
+                        // fillMaxWidth + a fixed height, NOT fillMaxSize:
+                        // this now lives inside a LazyColumn item, where the
+                        // height constraint is unbounded and fillMaxSize
+                        // throws.
+                        .fillMaxWidth()
+                        .height(320.dp)
                         .padding(32.dp),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -316,22 +340,8 @@ fun PlaylistDetailScreen(viewModel: PlaylistDetailViewModel = hiltViewModel()) {
                     "Energy-based playlists fill in as audio analysis completes in the background.",
                 )
             }
-        } else {
-            // What the user sees while dragging: the real list with the
-            // dragged song moved to its provisional slot.
-            val display = remember(songs, dragFrom, dragTo) {
-                if (dragFrom < 0 || dragTo < 0 || dragFrom == dragTo) {
-                    songs
-                } else {
-                    songs.toMutableList().apply { add(dragTo, removeAt(dragFrom)) }
-                }
             }
-
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
-            ) {
+        } else {
                 itemsIndexed(display, key = { _, s -> s.id }) { index, song ->
                     val isDragging = index == dragTo && dragFrom >= 0
                     // The gesture must read the row's CURRENT index and the
@@ -436,7 +446,6 @@ fun PlaylistDetailScreen(viewModel: PlaylistDetailViewModel = hiltViewModel()) {
                             },
                     )
                 }
-            }
         }
     }
 

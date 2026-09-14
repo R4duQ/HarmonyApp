@@ -88,6 +88,9 @@ class PlaybackConnection @Inject constructor(
      * insertions stack in order (see [addNext]) instead of each one jumping
      * ahead of the last.
      */
+    /** See PlayerState.advancedAutomatically. */
+    private var lastAdvanceWasAutomatic = false
+
     private var playNextAnchorId: String? = null
     private var playNextRunLength = 0
     private val pendingLookups = mutableSetOf<String>()
@@ -174,6 +177,18 @@ class PlaybackConnection @Inject constructor(
     }
 
     private val playerListener = object : Player.Listener {
+        override fun onMediaItemTransition(
+            mediaItem: androidx.media3.common.MediaItem?,
+            reason: Int,
+        ) {
+            // Captured here rather than in onEvents because only this
+            // callback carries the reason, and AUTO vs. everything else is
+            // exactly the distinction Smart Shuffle's handover needs.
+            lastAdvanceWasAutomatic =
+                reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+        }
+
         override fun onEvents(player: Player, events: Player.Events) {
             if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                 onTrackTransition(player.currentMediaItem?.mediaId)
@@ -241,6 +256,40 @@ class PlaybackConnection @Inject constructor(
         trackingSongId = newMediaId
         trackingListenedMs = 0
         listeningClock.reset()
+        carryPlayNextRun(newMediaId)
+    }
+
+    /**
+     * Moves the play-next run's anchor onto the track that just started, if
+     * that track was itself the head of the run.
+     *
+     * Without this the run evaporates the moment the first queued song
+     * begins: the anchor still names the song that was playing when you
+     * queued, so [playerState]'s playNextCount validates to 0. That number
+     * is what SmartQueueCoordinator's handover uses to decide how much of
+     * the tail to keep, so under Smart Shuffle it would keep nothing, delete
+     * the rest of the run, and carry on with its own picks — i.e. queue four
+     * songs by hand, hear the first, and shuffle takes back over. Re-anchoring
+     * keeps the remaining run addressable for exactly as long as it lasts.
+     */
+    private fun carryPlayNextRun(newMediaId: String?) {
+        if (playNextRunLength <= 0 || newMediaId == null) return
+        val c = controller ?: return
+        // Only advance when playback moved FORWARD into the run's first
+        // entry. Any other transition — a skip back, or the user picking
+        // something else out of the queue — means the run no longer
+        // describes what's coming, so it ends here rather than being
+        // re-pointed at an unrelated track.
+        val anchorIndex = (0 until c.mediaItemCount)
+            .firstOrNull { c.getMediaItemAt(it).mediaId == playNextAnchorId }
+        if (anchorIndex == null || c.currentMediaItemIndex != anchorIndex + 1) {
+            playNextAnchorId = null
+            playNextRunLength = 0
+            return
+        }
+        playNextAnchorId = newMediaId
+        playNextRunLength -= 1
+        if (playNextRunLength <= 0) playNextAnchorId = null
     }
 
     private fun resolveMissing(ids: List<String>) {
@@ -307,6 +356,7 @@ class PlaybackConnection @Inject constructor(
             replayGainMode = localReplayGain,
             upcomingSong = upcomingSong,
             playNextCount = playNextCount,
+            advancedAutomatically = lastAdvanceWasAutomatic,
             audioOutput = audioOutputMonitor.output.value,
         )
     }

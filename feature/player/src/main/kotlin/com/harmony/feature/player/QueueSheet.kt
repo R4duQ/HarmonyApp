@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -441,6 +442,14 @@ private fun QueueRow(
                 if (isDragging) palette.control
                 else androidx.compose.ui.graphics.Color.Transparent,
             )
+            // This was missing: onClick was accepted as a parameter and
+            // wired correctly at the call site, but nothing in this row
+            // ever attached it to a gesture — so tapping a queued song did
+            // nothing. The drag handle's own long-press-and-drag detector
+            // lives on its own small Box below and only reacts to a long
+            // press, so a plain tap here reaches this instead without the
+            // two competing.
+            .clickable(onClick = onClick)
             .semantics {
                 contentDescription = "$title by $artist"
                 // Reordering by drag is impossible with a screen reader, so

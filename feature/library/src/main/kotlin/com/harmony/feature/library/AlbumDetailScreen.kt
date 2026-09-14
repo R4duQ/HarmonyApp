@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,6 +43,8 @@ import com.harmony.core.ui.component.amberPalette
 import com.harmony.core.ui.component.formatLongDuration
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
+import com.harmony.core.ui.component.MiniPlayerClearance
+import com.harmony.core.ui.component.DetailCardScaffold
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -100,13 +101,12 @@ fun AlbumDetailScreen(viewModel: AlbumDetailViewModel = hiltViewModel()) {
     val first = songs.firstOrNull()
     val totalMs = remember(songs) { songs.sumOf { it.durationMs } }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(palette.field),
-        contentPadding = PaddingValues(bottom = 24.dp),
-    ) {
-        item {
+    DetailCardScaffold(
+        title = first?.album ?: "Album",
+        palette = palette,
+        modifier = Modifier.background(palette.field),
+        contentPadding = PaddingValues(bottom = MiniPlayerClearance),
+        header = {
             Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 8.dp)) {
                 Text(
                     "ALBUM",
@@ -182,8 +182,8 @@ fun AlbumDetailScreen(viewModel: AlbumDetailViewModel = hiltViewModel()) {
                     }
                 }
             }
-        }
-
+        },
+    ) {
         if (songs.isEmpty()) {
             item {
                 EmptyState("Nothing here", "This album has no tracks in your library.")

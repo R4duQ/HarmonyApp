@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.harmony.core.ui.component.EditorialCard
+import com.harmony.core.ui.component.GlassCard
 import com.harmony.core.ui.component.EditorialChoiceChips
 import com.harmony.core.ui.component.EditorialCircleButton
 import com.harmony.core.ui.component.EditorialPalette
@@ -208,7 +208,7 @@ fun SpotifyPlaylistTransferScreen(
             }
             state.resultPlaylistId?.let { playlistId ->
                 item {
-                    EditorialCard(
+                    GlassCard(
                         palette = palette,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                     ) {
@@ -334,7 +334,7 @@ private fun SpotifyConnectionCard(
     onCopyRedirect: () -> Unit,
     onConnectionHelp: () -> Unit,
 ) {
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
     ) {
@@ -442,7 +442,7 @@ private fun ConnectedControls(
     onRefresh: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -475,7 +475,7 @@ private fun PlaylistLinkCard(
     onImport: () -> Unit,
     palette: EditorialPalette,
 ) {
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("Or paste a playlist link", color = palette.ink, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(
@@ -505,7 +505,7 @@ private fun SpotifyPlaylistRow(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    EditorialCard(
+    GlassCard(
         palette = palette,
         onClick = onClick.takeIf { enabled && playlist.canImportItems },
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -567,7 +567,7 @@ private fun ImportedPlaylistCard(
     onOpenSpotify: () -> Unit,
 ) {
     val playlist = state.selectedPlaylist ?: return
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 PlaylistArtwork(playlist.imageUrl, playlist.name, palette)
@@ -601,7 +601,7 @@ private fun DownloadMethodCard(
     onSelectFormat: (SpotiFlacOutputFormat) -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             EditorialSectionLabel("Download method", palette)
             Text(
@@ -612,19 +612,30 @@ private fun DownloadMethodCard(
                 modifier = Modifier.padding(top = 5.dp),
             )
             EditorialChoiceChips(
-                options = DownloadSource.entries.map { it.displayName },
-                selectedIndex = DownloadSource.entries.indexOf(state.source),
-                onSelect = { onSelectSource(DownloadSource.entries[it]) },
+                // TransferCapableSources, not DownloadSource.entries: YT
+                // Converter resolves a track from a URL you paste, and a
+                // Spotify playlist arrives as names with no links, so it
+                // cannot take part in a batch transfer. Listing it here
+                // would offer a chip that fails on use.
+                options = TransferCapableSources.map { it.displayName },
+                selectedIndex = TransferCapableSources.indexOf(state.source).coerceAtLeast(0),
+                onSelect = { onSelectSource(TransferCapableSources[it]) },
                 palette = palette,
                 modifier = Modifier.padding(top = 12.dp),
             )
             if (state.source == DownloadSource.SPOTIFLAC) {
-                Text("Output", color = palette.ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 15.dp))
+                Text("Output & maximum quality", color = palette.ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 15.dp))
                 EditorialChoiceChips(
                     options = SpotiFlacOutputFormat.entries.map { it.label },
                     selectedIndex = SpotiFlacOutputFormat.entries.indexOf(state.spotiFlacOutputFormat),
                     onSelect = { onSelectFormat(SpotiFlacOutputFormat.entries[it]) },
                     palette = palette,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    state.spotiFlacOutputFormat.summary,
+                    color = palette.muted,
+                    fontSize = 12.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             } else {
@@ -661,7 +672,7 @@ private fun SelectionAndTransferCard(
     onRetry: () -> Unit,
     onTransfer: () -> Unit,
 ) {
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -706,7 +717,7 @@ private fun TransferTrackRow(
     enabled: Boolean,
     onToggle: () -> Unit,
 ) {
-    EditorialCard(
+    GlassCard(
         palette = palette,
         onClick = onToggle.takeIf { enabled && row.localSongId == null },
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -784,7 +795,7 @@ private fun VerificationCard(
     onCheck: () -> Unit,
 ) {
     val challenge = state.verificationChallenge
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.HourglassTop, null, tint = palette.ink)
@@ -825,7 +836,7 @@ private fun TransferProgressCard(
     palette: EditorialPalette,
     onCancel: () -> Unit,
 ) {
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.CloudDownload, null, tint = palette.ink)
@@ -877,7 +888,7 @@ private fun TransferProgressCard(
 
 @Composable
 private fun NoticeCard(text: String, icon: ImageVector, palette: EditorialPalette) {
-    EditorialCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.Top) {
             Icon(icon, null, tint = palette.ink, modifier = Modifier.size(19.dp))
             Text(
