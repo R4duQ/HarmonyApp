@@ -54,6 +54,7 @@ import com.harmony.core.ui.component.coralPalette
 import com.harmony.core.ui.network.InternetNotice
 import com.harmony.feature.discover.model.*
 import com.harmony.feature.discover.provider.*
+import com.harmony.core.ui.component.FloatingChromeClearance
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
@@ -121,7 +122,7 @@ fun DiscoverScreen(
     }
 
     Box(Modifier.fillMaxSize().background(palette.field)) {
-        LazyColumn(state = scroll, contentPadding = PaddingValues(bottom = 28.dp),
+        LazyColumn(state = scroll, contentPadding = PaddingValues(bottom = FloatingChromeClearance),
             modifier = Modifier.align(Alignment.TopCenter).widthIn(max = 600.dp).fillMaxSize()) {
             item(key = "heading") {
                 Column(Modifier.padding(horizontal = 22.dp, vertical = 14.dp)) {

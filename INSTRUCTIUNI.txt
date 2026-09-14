@@ -1,11 +1,7 @@
-HARMONY 1.0.1-universal - SPOTIFLAC PENTRU AMBELE ARHITECTURI
+HARMONY 1.0.0 - AUDIT SI CORECTURI
 
 Arhiva contine proiectul complet, inclusiv SpotiFLAC, Soulseek si Discovery.
-Este un pachet de SURSE, nu un APK. versionCode: 85.
-Pastrate: corectiile audio din arhiva ta 1.0.1-audiofix.
-Compatibilitate: Android 10+ pe ARM64 sau x86_64, cu sistem Android pe 64 biti.
-APK-ul implicit este universal; Android alege automat codul potrivit.
-Backendul Go si convertorul FLAC/MP3 sunt incluse pentru ambele arhitecturi.
+Este un pachet de SURSE, nu un APK. versionCode: 83.
 
 ACTUALIZARE PE PC
 1. Inchide Android Studio daca are proiectul deschis.
@@ -19,32 +15,17 @@ ACTUALIZARE PE PC
 
    D:\Harmony\Instaleaza-Harmony-pe-telefon.cmd
 
-5. Verifica versiunea 1.0.1-universal in Settings sau in informatiile Android.
+5. Verifica versiunea 1.0.0 in informatiile Android despre aplicatie.
 
 Daca aplicatia de pe telefon este un RELEASE semnat, foloseste aceeasi cheie
 si un build release. In PowerShell:
 
    cd D:\Harmony
-   .\gradlew.bat :app:assembleRelease
+   .\gradlew.bat :app:assembleRelease -PharmonyAbi=arm64-v8a
    D:\Android\platform-tools\adb.exe install -r .\app\build\outputs\apk\release\app-release.apk
 
 Nu dezinstala aplicatia si nu sterge datele pentru a rezolva o eroare de semnare.
 O actualizare trebuie semnata cu cheia versiunii instalate.
-
-NDK: daca Gradle il solicita, instaleaza 29.0.14206865 din SDK Manager >
-SDK Tools > NDK (Side by side). Sunt necesare si SDK 35, Build Tools,
-CMake 3.22.1 si Java 17. SDK-ul tau ramane D:\Android.
-Go si FFmpeg nu trebuie instalate pe telefon sau compilate pe Windows:
-componentele necesare SpotiFLAC sunt deja incluse in aceasta arhiva.
-
-RELEASE PENTRU ALTE TELEFOANE
-Foloseste APK-ul universal semnat cu cheia ta: Harmony-v1.0.1-universal.apk.
-Testeaza pe telefonul care avea eroarea: FLAC, MP3 cu coperta, album,
-anulare si redare cu EQ/ReplayGain. La erori SpotiFLAC foloseste Copy details.
-Convertorul nu depinde de codecurile producatorului; descarcarile necesita
-in continuare internet, sursa disponibila si autentificarea furnizorului.
-Nu a fost certificata functionarea pe toate modelele fizice de telefon.
-Verificarile exacte sunt in docs\UNIVERSAL-VERIFICATION.md.
 
 PRIMELE VERIFICARI
 - Discovery: Refresh pe All sounds schimba lotul; dupa intoarcerea dintr-un

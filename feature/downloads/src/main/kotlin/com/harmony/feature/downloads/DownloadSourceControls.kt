@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -34,12 +35,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
+import com.harmony.core.ui.component.GlassInsetPanel
+import com.harmony.core.ui.component.glassFill
 
 private val SegmentShape = RoundedCornerShape(18.dp)
 private val DownloadMethodShape = RoundedCornerShape(28.dp)
@@ -67,7 +71,10 @@ fun DownloadMethodCard(
     modifier: Modifier = Modifier,
 ) {
     val identity = selected.identity()
-    val halo = identity.brand.copy(alpha = 0.18f)
+    // Opaque: Compose scales shadow colour by its own elevation-derived
+    // alpha, so pre-fading this multiplies the two and the shadow
+    // vanishes. Tint only, no alpha.
+    val halo = identity.brand
     val outline = palette.line.copy(alpha = 0.78f)
 
     Surface(
@@ -80,18 +87,34 @@ fun DownloadMethodCard(
                 spotColor = halo,
             ),
         shape = DownloadMethodShape,
-        color = palette.field,
+        // Transparent, with the frosted fill applied to the Column below —
+        // an opaque colour here would paint over the gradient and flatten
+        // the pane back out. The brand halo in the shadow above is kept:
+        // it tints the card's cast shadow with whichever engine is armed.
+        color = Color.Transparent,
         contentColor = palette.ink,
-        border = BorderStroke(1.5.dp, outline),
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.72f),
+                    Color.White.copy(alpha = 0.16f),
+                    outline.copy(alpha = 0.30f),
+                ),
+            ),
+        ),
     ) {
         Column(
             Modifier
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            identity.brand.copy(alpha = 0.045f),
-                            Color.Transparent,
-                            palette.ink.copy(alpha = 0.018f),
+                            // Frosted, brightest at the top so the pane
+                            // reads as lit from above, with a trace of the
+                            // armed engine's brand warming the top edge.
+                            lerp(glassFill(palette, strength = 0.74f), identity.brand, 0.05f),
+                            glassFill(palette, strength = 0.62f),
+                            glassFill(palette, strength = 0.56f),
                         ),
                     ),
                 )
@@ -122,7 +145,7 @@ fun DownloadMethodCard(
                 modifier = Modifier.padding(top = 9.dp),
             )
 
-            DownloadSourceSelector(
+            DownloadSourceRail(
                 selected = selected,
                 onSelect = onSelect,
                 palette = palette,
@@ -149,6 +172,17 @@ fun DownloadSourceSelector(
     palette: EditorialPalette,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /**
+     * Which engines this particular picker may offer.
+     *
+     * Defaults to all of them, but it has to be restrictable: this same
+     * component backs the Spotify playlist transfer screen, and YT Converter
+     * cannot do a transfer — it resolves a track from a URL you paste, and
+     * Harmony has no YouTube search to turn a playlist of names into links.
+     * Iterating DownloadSource.entries unconditionally would put a segment
+     * there that throws the moment it's used.
+     */
+    sources: List<DownloadSource> = DownloadSource.entries,
 ) {
     Row(
         modifier
@@ -160,7 +194,7 @@ fun DownloadSourceSelector(
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        DownloadSource.entries.forEach { source ->
+        sources.forEach { source ->
             SourceSegment(
                 source = source,
                 selected = source == selected,
@@ -172,6 +206,10 @@ fun DownloadSourceSelector(
         }
     }
 }
+
+/** The engines that can resolve a track from metadata alone. */
+val TransferCapableSources: List<DownloadSource> =
+    listOf(DownloadSource.SPOTIFLAC, DownloadSource.SOULSEEK)
 
 @Composable
 private fun SourceSegment(
@@ -247,14 +285,16 @@ private fun SourceInfoPanel(
             "Verified provider downloads with FLAC lossless or MP3 320 output."
         DownloadSource.SOULSEEK ->
             "Peer-to-peer search with explicit peer and file selection for accurate results."
+        DownloadSource.YTCONVERTER ->
+            "Paste a YouTube link and Harmony converts it to FLAC or MP3 on your phone."
     }
 
-    Surface(
+    // Inset, not another card: this sits inside DownloadMethodCard, and a
+    // second raised pane on top of the first would double the shadow.
+    GlassInsetPanel(
+        palette = palette,
         modifier = modifier.fillMaxWidth(),
         shape = SourceInfoShape,
-        color = palette.ink.copy(alpha = 0.035f),
-        contentColor = palette.ink,
-        border = BorderStroke(1.dp, palette.line.copy(alpha = 0.34f)),
     ) {
         Row(
             Modifier.padding(horizontal = 18.dp, vertical = 17.dp),
@@ -312,7 +352,16 @@ private fun SourceRoundIcon(
 private fun DownloadSource.selectorIcon(): ImageVector = when (this) {
     DownloadSource.SPOTIFLAC -> Icons.Rounded.GraphicEq
     DownloadSource.SOULSEEK -> Icons.Rounded.Share
+    DownloadSource.YTCONVERTER -> Icons.Rounded.Link
 }
+
+/**
+ * Same glyph mapping as [selectorIcon], exposed for [DownloadSourceRail],
+ * which lives in another file. Kept as a thin delegate rather than making
+ * [selectorIcon] public so there is still exactly one place that decides
+ * which icon means which engine.
+ */
+internal fun DownloadSource.railIcon(): ImageVector = selectorIcon()
 
 /**
  * Compact marker kept for dialogs/debug surfaces that still want a terse

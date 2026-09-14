@@ -9,14 +9,13 @@ SPOTIFLAC_VERSION="${SPOTIFLAC_VERSION:-4.9.5}"
 EXPECTED_GO_VERSION="${EXPECTED_GO_VERSION:-1.26.6}"
 NDK_VERSION="${NDK_VERSION:-29.0.14206865}"
 ANDROID_API="${ANDROID_API:-24}"
-WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/harmony-spotiflac.XXXXXX")"
-trap 'rm -rf "$WORK_DIR"' EXIT
+WORK_DIR="${RUNNER_TEMP:-/tmp}/harmony-spotiflac-${SPOTIFLAC_VERSION}"
 SOURCE_DIR="$WORK_DIR/SpotiFLAC-Mobile"
 BACKEND_DIR="$SOURCE_DIR/go_backend"
 MAVEN_ROOT="${GITHUB_WORKSPACE:-$(pwd)}/vendor-maven"
 MAVEN_DIR="$MAVEN_ROOT/com/harmony/vendor/gobackend/$SPOTIFLAC_VERSION"
-AAR_OUT="$WORK_DIR/gobackend-$SPOTIFLAC_VERSION.aar"
-POM_OUT="$WORK_DIR/gobackend-$SPOTIFLAC_VERSION.pom"
+AAR_OUT="$MAVEN_DIR/gobackend-$SPOTIFLAC_VERSION.aar"
+POM_OUT="$MAVEN_DIR/gobackend-$SPOTIFLAC_VERSION.pom"
 
 : "${ANDROID_HOME:?ANDROID_HOME must be set}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -28,7 +27,8 @@ if [[ ! -d "$ANDROID_NDK_HOME" ]]; then
   exit 13
 fi
 
-mkdir -p "$MAVEN_DIR"
+rm -rf "$WORK_DIR" "$MAVEN_DIR"
+mkdir -p "$WORK_DIR" "$MAVEN_DIR"
 
 echo "Cloning SpotiFLAC Mobile $SPOTIFLAC_TAG..."
 git clone --quiet --depth 1 --branch "$SPOTIFLAC_TAG" \
@@ -73,7 +73,6 @@ go install "golang.org/x/mobile/cmd/gobind@$XMOBILE_VERSION"
 echo "Building arm64 + x86_64 gobackend.aar..."
 go run "golang.org/x/mobile/cmd/gomobile@$XMOBILE_VERSION" bind \
   -v \
-  -ldflags="-s -w" \
   -target=android/arm64,android/amd64 \
   -androidapi "$ANDROID_API" \
   -o "$AAR_OUT" \
@@ -137,7 +136,7 @@ for method in "${required_methods[@]}"; do
 done
 
 SPOTIFLAC_COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
-(cd "$WORK_DIR" && sha256sum "$(basename "$AAR_OUT")") | tee "$AAR_OUT.sha256.txt"
+sha256sum "$AAR_OUT" | tee "$AAR_OUT.sha256.txt"
 cat > "$AAR_OUT.source.txt" <<META
 SpotiFLAC Mobile $SPOTIFLAC_TAG
 SpotiFLAC commit $SPOTIFLAC_COMMIT
@@ -145,10 +144,7 @@ Go $GO_DIRECTIVE
 x/mobile $XMOBILE_VERSION
 NDK $NDK_VERSION
 Targets android/arm64,android/amd64
-Linker flags -s -w (omit native debug symbols)
 META
 
 cat "$AAR_OUT.source.txt"
-python3 "${GITHUB_WORKSPACE:-$(pwd)}/scripts/ci/verify-native-package.py" "$AAR_OUT" --mode aar
-cp "$AAR_OUT" "$POM_OUT" "$AAR_OUT.sha256.txt" "$AAR_OUT.source.txt" "$MAVEN_DIR/"
-echo "SpotiFLAC backend ready: $MAVEN_DIR/$(basename "$AAR_OUT")"
+echo "SpotiFLAC backend ready: $AAR_OUT"

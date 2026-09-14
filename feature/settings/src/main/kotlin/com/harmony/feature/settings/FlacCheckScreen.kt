@@ -39,6 +39,7 @@ import com.harmony.core.ui.component.EditorialPill
 import com.harmony.core.ui.component.EditorialSectionLabel
 import com.harmony.core.ui.component.stonePalette
 import com.harmony.domain.analysis.model.SpectralReport
+import com.harmony.core.ui.component.MiniPlayerClearance
 
 /**
  * "Check a FLAC": pick a file, see its spectrum, and get a judgement on
@@ -82,7 +83,8 @@ fun FlacCheckScreen(viewModel: FlacCheckViewModel = hiltViewModel()) {
         Modifier
             .fillMaxSize()
             .background(palette.field)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = MiniPlayerClearance),
     ) {
         Text(
             "Check a file",

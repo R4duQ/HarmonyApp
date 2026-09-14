@@ -27,7 +27,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.harmony.core.ui.component.coralPalette
 import com.harmony.core.ui.network.InternetNotice
+import com.harmony.core.ui.component.MiniPlayerClearance
+import com.harmony.core.ui.component.GlassInsetPanel
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AlbumDownloadScreen(
     albumId: String, title: String, artist: String, onBack: () -> Unit, onOpenDownloads: () -> Unit,
@@ -56,7 +59,7 @@ fun AlbumDownloadScreen(
         if (album == null) viewModel.search(albumId, title, artist, artistAliases)
     }
 
-    LazyColumn(Modifier.fillMaxSize().background(palette.field), contentPadding = PaddingValues(22.dp),
+    LazyColumn(Modifier.fillMaxSize().background(palette.field), contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 22.dp, bottom = MiniPlayerClearance),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -72,7 +75,7 @@ fun AlbumDownloadScreen(
             }
         }
         if (message != null || browserError != null) item {
-            Surface(color = palette.ink.copy(alpha = 0.07f), shape = RoundedCornerShape(14.dp)) {
+            GlassInsetPanel(palette = palette, shape = RoundedCornerShape(14.dp)) {
                 Text(browserError ?: message.orEmpty(), Modifier.fillMaxWidth().padding(14.dp), color = palette.ink)
             }
         }
@@ -80,12 +83,27 @@ fun AlbumDownloadScreen(
         if (album == null && internet.ready) {
             item { Text("Choose an edition. You'll see its complete tracklist before downloading.", color = palette.muted) }
             items(editions, key = { it.id }) { edition ->
-                OutlinedButton(onClick = { viewModel.choose(albumId, edition) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-                        Text(edition.title, fontWeight = FontWeight.Bold)
-                        Text(edition.artist)
-                    }
-                }
+                // Was a bare OutlinedButton wrapping a Column, which gave
+                // each edition a full-width outlined slab and no artwork —
+                // the covers are the fastest way to tell two editions of
+                // the same album apart, and AlbumEdition carries one.
+                NotificationPill(
+                    title = edition.title,
+                    detail = edition.artist,
+                    palette = palette,
+                    coverUrl = edition.cover,
+                    enabled = !busy,
+                    onClick = { viewModel.choose(albumId, edition) },
+                    action = {
+                        PillAction(
+                            icon = Icons.Rounded.ChevronRight,
+                            contentDescription = "Choose ${edition.title}",
+                            palette = palette,
+                            enabled = !busy,
+                            onClick = { viewModel.choose(albumId, edition) },
+                        )
+                    },
+                )
             }
             item {
                 if (busy) CircularProgressIndicator(color = palette.ink)
@@ -99,18 +117,28 @@ fun AlbumDownloadScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp), color = palette.ink)
             }
             item {
-                DownloadSourceSelector(DownloadSource.valueOf(sourceName), { sourceName = it.name }, palette, enabled = internet.ready && active == null && !busy)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SpotiFlacOutputFormat.entries.forEach { format ->
+                // TransferCapableSources: an album download resolves each
+                // track from metadata, which the converter can't do — it
+                // needs a pasted URL per track.
+                DownloadSourceSelector(DownloadSource.valueOf(sourceName), {
+                    sourceName = it.name
+                    if (it == DownloadSource.SOULSEEK && formatName == SpotiFlacOutputFormat.FLAC_HI_RES_96.name) {
+                        formatName = SpotiFlacOutputFormat.FLAC_LOSSLESS.name
+                    }
+                }, palette, enabled = internet.ready && active == null && !busy, sources = TransferCapableSources)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SpotiFlacOutputFormat.entries.filter {
+                        sourceName == "SPOTIFLAC" || it != SpotiFlacOutputFormat.FLAC_HI_RES_96
+                    }.forEach { format ->
                         FilterChip(selected = formatName == format.name, onClick = { formatName = format.name },
                             enabled = internet.ready && active == null && !busy,
-                            label = { Text(if (format == SpotiFlacOutputFormat.MP3_320 && sourceName == "SOULSEEK") "MP3" else format.label) })
+                            label = { Text(if (sourceName == "SOULSEEK") format.historyLabel.removeSuffix(" 320 kbps") else format.label) })
                     }
                 }
                 Text(if (sourceName == "SPOTIFLAC" && formatName == "MP3_320")
                     "Smaller files on your phone. SpotiFLAC downloads lossless audio first, then converts it to MP3."
                     else if (sourceName == "SOULSEEK") "Fast available peers first. Connect your Soulseek account in Downloads."
-                    else "Original lossless audio. One track at a time keeps temporary storage and battery use bounded.", color = palette.muted, fontSize = 13.sp)
+                    else SpotiFlacOutputFormat.fromName(formatName).summary, color = palette.muted, fontSize = 13.sp)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(wifiOnly, { wifiOnly = it }, enabled = internet.ready && active == null && !busy)
                     Text("Unmetered network only", color = palette.ink)
@@ -164,7 +192,7 @@ fun AlbumDownloadScreen(
                 }
             }
             items(album.tracks, key = { it.id }) { track ->
-                Surface(color = palette.ink.copy(alpha = 0.055f), shape = RoundedCornerShape(14.dp)) {
+                GlassInsetPanel(palette = palette, shape = RoundedCornerShape(14.dp)) {
                     Row(Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (track.uri == null) Checkbox(track.selectedForDownload,
                             onCheckedChange = { viewModel.select(albumId, track.id, it) }, enabled = !thisActive && !busy && internet.ready,

@@ -52,6 +52,7 @@ import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.stonePalette
 import com.harmony.domain.library.model.ScanEvent
 import com.harmony.domain.library.usecase.ScanLibraryUseCase
+import com.harmony.core.ui.component.MiniPlayerClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -154,10 +155,6 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val appVersion = remember(context) {
-        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
-            .getOrNull().orEmpty().ifBlank { "Unknown" }
-    }
     val palette = stonePalette()
 
     val folderPicker = rememberLauncherForActivityResult(
@@ -179,7 +176,8 @@ fun SettingsScreen(
         Modifier
             .fillMaxSize()
             .background(palette.field)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = MiniPlayerClearance),
     ) {
         Row(
             Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 14.dp),
@@ -496,7 +494,7 @@ fun SettingsScreen(
                     color = palette.ink,
                 )
                 Text(
-                    "Version $appVersion",
+                    "Version 1.0.0",
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = palette.muted,

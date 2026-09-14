@@ -29,7 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.harmony.core.ui.component.EditorialCard
+import com.harmony.core.ui.component.GlassCard
 import com.harmony.core.ui.component.EditorialPalette
 
 private val ErrorRed = Color(0xFFB3261E)
@@ -61,7 +61,7 @@ fun SoulseekConnectCard(
     val failed = connection.status == SoulseekConnectionStatus.ERROR
     val canSubmit = username.isNotBlank() && password.isNotBlank() && !connecting
 
-    EditorialCard(palette = palette, modifier = modifier) {
+    GlassCard(palette = palette, modifier = modifier) {
         Column(Modifier.padding(16.dp)) {
             ConnectionStatusRow(connection = connection, palette = palette)
 

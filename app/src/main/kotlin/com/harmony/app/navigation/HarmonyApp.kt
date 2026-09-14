@@ -1,9 +1,18 @@
 package com.harmony.app.navigation
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Equalizer
@@ -12,7 +21,6 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.PlaylistPlay
-import androidx.compose.foundation.background
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -23,6 +31,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -53,13 +63,13 @@ import com.harmony.core.ui.component.coralPalette
 import com.harmony.core.ui.component.greenPalette
 import com.harmony.core.ui.component.lavenderPalette
 import com.harmony.core.ui.component.stonePalette
-import com.harmony.core.ui.component.tealPalette
 import com.harmony.feature.player.NowPlayingScreen
 import com.harmony.feature.playlists.PlaylistDetailScreen
 import com.harmony.feature.playlists.PlaylistsScreen
 import com.harmony.feature.settings.FlacCheckScreen
 import com.harmony.feature.settings.SettingsScreen
 import com.harmony.feature.settings.TagEditorScreen
+import com.harmony.core.ui.component.FloatingChromeClearance
 
 object Routes {
     const val LIBRARY = "library"
@@ -131,7 +141,7 @@ fun HarmonyApp(
         currentRoute == Routes.EQUALIZER -> bluePalette()
         currentRoute == Routes.DISCOVER || currentRoute == Routes.ALBUM_DOWNLOAD -> coralPalette()
         currentRoute == Routes.HOME -> amberPalette()
-        currentRoute == Routes.DOWNLOADS -> tealPalette()
+        currentRoute == Routes.DOWNLOADS -> amberPalette()
         currentRoute == Routes.SETTINGS -> stonePalette()
         // Any destination added later without a palette still gets sane
         // chrome instead of an arbitrary section's colors.
@@ -153,6 +163,15 @@ fun HarmonyApp(
     // so simply returning to Library later doesn't re-open search.
     var librarySearchSignal by rememberSaveable { mutableIntStateOf(0) }
     var librarySearchText by rememberSaveable { mutableStateOf<String?>(null) }
+    // A separate counter, not reused from librarySearchSignal: this one
+    // means "you arrived at Library through an ordinary entry, not a
+    // search request — close search if it was left open." It's bumped only
+    // by plain entries into Library (the nav bar tab, onOpenLibrary), never
+    // by the search-handoff paths above, and never by popping back from Now
+    // Playing — which is exactly what lets search stay open across a trip
+    // to Now Playing and back, while still closing on an ordinary return to
+    // the tab.
+    var librarySearchResetSignal by rememberSaveable { mutableIntStateOf(0) }
 
     fun goTo(route: String) {
         navController.navigate(route) {
@@ -186,48 +205,42 @@ fun HarmonyApp(
 
     Scaffold(
         containerColor = palette.field,
-        bottomBar = {
-            Column(
-                Modifier
-                    .background(palette.field)
-                    .windowInsetsPadding(WindowInsets.navigationBars),
-            ) {
-                // Above the mini player so a running download stays visible on
-                // every screen. Suppressed on download workflow pages, which
-                // already render richer progress, and on Now Playing, which is
-                // a full-screen surface with its own chrome.
-                DownloadStatusBanner(
-                    palette = palette,
-                    onOpenDownloads = { goTo(Routes.DOWNLOADS) },
-                    suppressed = currentRoute == Routes.DOWNLOADS ||
-                        currentRoute == Routes.ALBUM_DOWNLOAD ||
-                        currentRoute == Routes.SPOTIFY_TRANSFER ||
-                        currentRoute == Routes.NOW_PLAYING,
-                )
-                if (currentRoute != Routes.NOW_PLAYING) {
-                    MiniPlayer(
-                        onExpand = { navController.navigate(Routes.NOW_PLAYING) },
-                        palette = palette,
-                    )
-                }
-                val topLevelIndex = topLevel.indexOfFirst { it.route == currentRoute }
-                if (topLevelIndex >= 0) {
-                    EditorialNavBar(
-                        items = topLevel.map { NavItem(it.label, it.icon) },
-                        selectedIndex = topLevelIndex,
-                        onSelect = { index -> goTo(topLevel[index].route) },
-                        palette = palette,
-                    )
-                }
-            }
-        },
+        // Only the TOP side, deliberately: Scaffold's default is
+        // WindowInsets.safeDrawing, which — with no bottomBar to claim it —
+        // reserves the bottom system-bar inset for itself and marks it
+        // consumed for everything inside the content slot. That's exactly
+        // why the floating chrome below ended up sitting flush against the
+        // physical bottom edge under the phone's own nav bar: its own
+        // .windowInsetsPadding(WindowInsets.navigationBars) was reading an
+        // inset Scaffold had already zeroed out. Restricting Scaffold to
+        // only the top here leaves the bottom inset untouched, so that
+        // Column's own windowInsetsPadding gets the real value.
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top),
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = Routes.HOME,
-            modifier = Modifier.padding(innerPadding),
-            // Motion defaults for every destination: a quick fade with a
-            // small upward drift, matched by a subtle fade-out. Visual
+        Box(Modifier.fillMaxSize()) {
+            NavHost(
+                navController = navController,
+                startDestination = Routes.HOME,
+                // Only the TOP inset from Scaffold is applied here. The
+                // bottom inset is deliberately dropped: this is what makes
+                // the nav bar's glass show real content through it instead
+                // of an opaque rectangle. Previously the chrome below lived
+                // in Scaffold's bottomBar slot, which made Scaffold reserve
+                // that slot's full height as bottom padding — NavHost's
+                // content never existed in that region at all, so there
+                // was nothing for the glass to show no matter how
+                // transparent its fill was.
+                //
+                // Each screen's own scrollable content is responsible for
+                // leaving enough room at the bottom (LazyColumn/
+                // LazyVerticalGrid contentPadding) that its last items can
+                // still scroll clear of the floating chrome — see
+                // LibraryScreen's SongsTab/AlbumsTab/ArtistsTab.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = innerPadding.calculateTopPadding()),
+                // Motion defaults for every destination: a quick fade with a
+                // small upward drift, matched by a subtle fade-out. Visual
             // identity is untouched — screens just stop teleporting.
             enterTransition = {
                 androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(250)) +
@@ -254,10 +267,15 @@ fun HarmonyApp(
                     onArtistClick = { navController.navigate("artist/${android.net.Uri.encode(it)}") },
                     openSearchSignal = librarySearchSignal,
                     requestedSearchQuery = librarySearchText,
+                    resetSearchSignal = librarySearchResetSignal,
                 )
             }
             composable(Routes.HOME) {
                 HomeScreen(
+                    // The shell no longer reserves this space via Scaffold's
+                    // bottomBar, so the floating chrome's height has to be
+                    // handed down explicitly — HomeScreen already takes it.
+                    contentPadding = PaddingValues(bottom = FloatingChromeClearance),
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenSearch = {
                         librarySearchText = null
@@ -267,7 +285,7 @@ fun HarmonyApp(
                     onOpenDownloads = { goTo(Routes.DOWNLOADS) },
                     onOpenDiscover = { goTo(Routes.DISCOVER) },
                     onOpenFlacCheck = { navController.navigate(Routes.FLAC_CHECK) },
-                    onOpenLibrary = { goTo(Routes.LIBRARY) },
+                    onOpenLibrary = { librarySearchResetSignal++; goTo(Routes.LIBRARY) },
                 )
             }
             composable(Routes.DISCOVER) {
@@ -369,6 +387,75 @@ fun HarmonyApp(
                 )
             }
         }
+
+        // The floating bottom chrome, drawn ON TOP of NavHost's content
+        // rather than reserved as Scaffold layout space. This is what lets
+        // the nav bar's glass show real content moving underneath it: this
+        // Column used to carry its own opaque `.background(palette.field)`
+        // and sit in Scaffold's bottomBar slot, which made Scaffold push
+        // NavHost's content up out of this entire region — there was
+        // nothing behind the glass to see, no matter how transparent its
+        // fill was.
+        //
+        // The nav bar and the mini player still block taps to whatever is
+        // now visible underneath them: LiquidGlassNavBar's whole capsule
+        // already carries a pointerInput for its swipe gesture, and
+        // MiniPlayer's whole row is clickable — both consume touches over
+        // their full footprint regardless of the fill's transparency. Only
+        // the gap between them (the Spacer) has no touch handler of its
+        // own, so a tap that lands exactly there reaches whatever is
+        // visible underneath — which is correct, since that gap isn't part
+        // of either control.
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars),
+        ) {
+            // Above the mini player so a running download stays visible on
+            // every screen. Suppressed on download workflow pages, which
+            // already render richer progress, and on Now Playing, which is
+            // a full-screen surface with its own chrome.
+            DownloadStatusBanner(
+                palette = palette,
+                onOpenDownloads = { goTo(Routes.DOWNLOADS) },
+                suppressed = currentRoute == Routes.DOWNLOADS ||
+                    currentRoute == Routes.ALBUM_DOWNLOAD ||
+                    currentRoute == Routes.SPOTIFY_TRANSFER ||
+                    currentRoute == Routes.NOW_PLAYING,
+            )
+            if (currentRoute != Routes.NOW_PLAYING) {
+                MiniPlayer(
+                    onExpand = { navController.navigate(Routes.NOW_PLAYING) },
+                    palette = palette,
+                )
+                // A deliberate gap, not just the two components' own edge
+                // insets touching: at 6dp+6dp those two floating pills read
+                // as one stacked block. This makes them two independent
+                // things sitting near each other, which is what they
+                // actually are — nothing ties the mini player's visibility
+                // to the nav bar's.
+                Spacer(Modifier.height(10.dp))
+            }
+            val topLevelIndex = topLevel.indexOfFirst { it.route == currentRoute }
+            if (topLevelIndex >= 0) {
+                LiquidGlassNavBar(
+                    items = topLevel.map { NavItem(it.label, it.icon) },
+                    selectedIndex = topLevelIndex,
+                    onSelect = { index ->
+                        val route = topLevel[index].route
+                        // Only an ordinary tab tap resets search — this
+                        // does NOT run when popping back from Now Playing,
+                        // since that uses navController.popBackStack()
+                        // directly and never goes through this handler.
+                        if (route == Routes.LIBRARY) librarySearchResetSignal++
+                        goTo(route)
+                    },
+                    palette = palette,
+                )
+            }
+        }
+    }
     }
     LibraryActionsHost(libraryActions)
 }

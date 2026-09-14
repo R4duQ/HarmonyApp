@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.harmony.core.ui.component.EditorialCard
+import com.harmony.core.ui.component.GlassCard
 import com.harmony.core.ui.component.EditorialPalette
 import androidx.compose.ui.graphics.Color
 import java.util.Locale
@@ -50,7 +50,7 @@ fun SoulseekSharingCard(
     palette: EditorialPalette,
     modifier: Modifier = Modifier,
 ) {
-    EditorialCard(palette = palette, modifier = modifier) {
+    GlassCard(palette = palette, modifier = modifier) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(

@@ -52,13 +52,25 @@ object PlaybackProvidesModule {
 
     @Provides
     @ServiceScoped
+    fun provideLevelMeterProcessor(): com.harmony.playback.service.player.LevelMeterAudioProcessor =
+        com.harmony.playback.service.player.LevelMeterAudioProcessor()
+
+    @Provides
+    @ServiceScoped
     fun provideHarmonyPlayer(
         @ApplicationContext context: Context,
         replayGainProcessor: ReplayGainAudioProcessor,
         equalizerProcessor: com.harmony.playback.service.player.EqualizerAudioProcessor,
+        levelMeterProcessor: com.harmony.playback.service.player.LevelMeterAudioProcessor,
         artworkCache: ArtworkCache,
     ): HarmonyPlayer =
-        HarmonyPlayer(context, replayGainProcessor, equalizerProcessor, artworkCache)
+        HarmonyPlayer(
+            context,
+            replayGainProcessor,
+            equalizerProcessor,
+            levelMeterProcessor,
+            artworkCache,
+        )
 
 }
 

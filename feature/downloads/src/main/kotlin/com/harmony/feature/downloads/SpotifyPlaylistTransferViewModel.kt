@@ -510,6 +510,18 @@ class SpotifyPlaylistTransferViewModel @Inject constructor(
                         val song = when (_state.value.source) {
                             DownloadSource.SPOTIFLAC -> downloadWithSpotiFlac(row.remote)
                             DownloadSource.SOULSEEK -> downloadWithSoulseek(row.remote)
+                            // Unreachable via the UI — the transfer screen's
+                            // source picker is restricted to the two engines
+                            // that can resolve a track from metadata alone.
+                            // The converter needs a YouTube URL per track and
+                            // Harmony has no YouTube *search*, only oEmbed
+                            // identification of a link you already have, so a
+                            // playlist of names is not something it can act
+                            // on. Throwing rather than returning null keeps
+                            // this honest if the picker is ever widened.
+                            DownloadSource.YTCONVERTER -> throw IllegalStateException(
+                                "YT Converter needs a link per track and can't transfer a playlist.",
+                            )
                         }
                         updateTrack(
                             key = key,
@@ -662,6 +674,9 @@ class SpotifyPlaylistTransferViewModel @Inject constructor(
         when (_state.value.source) {
             DownloadSource.SPOTIFLAC -> spotiFlacEngine.cancelCurrentDownload()
             DownloadSource.SOULSEEK -> soulseekClient.cancelActiveDownload()
+            // Never selectable for a transfer, so there is no converter
+            // process to cancel here.
+            DownloadSource.YTCONVERTER -> Unit
         }
         spotiFlacEngine.clearPendingVerificationTrackFor(SpotiFlacRequestOwner.PLAYLIST_TRANSFER)
         transferJob?.cancel()
@@ -682,11 +697,11 @@ class SpotifyPlaylistTransferViewModel @Inject constructor(
             }
             staged = downloaded.tempFile
             val validation = when (downloaded.outputFormat) {
-                SpotiFlacOutputFormat.FLAC_LOSSLESS -> downloadRepository.validateStagedFlac(downloaded.tempFile)
+                SpotiFlacOutputFormat.FLAC_LOSSLESS, SpotiFlacOutputFormat.FLAC_HI_RES_96 -> downloadRepository.validateStagedFlac(downloaded.tempFile)
                 SpotiFlacOutputFormat.MP3_320 -> downloadRepository.validateStagedMp3(downloaded.tempFile)
             }
             val saved = when (downloaded.outputFormat) {
-                SpotiFlacOutputFormat.FLAC_LOSSLESS ->
+                SpotiFlacOutputFormat.FLAC_LOSSLESS, SpotiFlacOutputFormat.FLAC_HI_RES_96 ->
                     downloadRepository.publishStagedFlac(downloaded.tempFile, downloaded.suggestedFileName)
                 SpotiFlacOutputFormat.MP3_320 ->
                     downloadRepository.publishStagedMp3(downloaded.tempFile, downloaded.suggestedFileName)
@@ -1007,6 +1022,7 @@ class SpotifyPlaylistTransferViewModel @Inject constructor(
             when (_state.value.source) {
                 DownloadSource.SPOTIFLAC -> spotiFlacEngine.cancelCurrentDownload()
                 DownloadSource.SOULSEEK -> soulseekClient.cancelActiveDownload()
+                DownloadSource.YTCONVERTER -> Unit
             }
         }
         spotiFlacEngine.clearPendingVerificationTrackFor(SpotiFlacRequestOwner.PLAYLIST_TRANSFER)

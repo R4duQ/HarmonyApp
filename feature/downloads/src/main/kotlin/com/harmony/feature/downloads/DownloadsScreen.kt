@@ -8,19 +8,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -45,8 +47,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,12 +59,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.harmony.core.ui.component.EditorialCard
+import com.harmony.core.ui.component.GlassCard
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.EditorialPill
 import com.harmony.core.ui.component.EditorialSectionLabel
 import com.harmony.core.ui.component.animatedEditorialPalette
 import com.harmony.domain.analysis.model.SpectralReport
+import com.harmony.core.ui.component.FloatingChromeClearance
 
 @Composable
 fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsViewModel = hiltViewModel()) {
@@ -75,7 +76,11 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
     // Soulseek is peer-to-peer and keeps its login-gated layout. SpotiFLAC
     // checks its provider session in parallel, while public metadata search is
     // always available; only an actual provider download needs verification.
+    // Three engines now, so these can't be a soulseek/not-soulseek pair:
+    // YT Converter used to fall through to the SpotiFLAC layout, which is
+    // why it showed an artist/song search box instead of a URL field.
     val soulseekArmed = state.preferredDownloadSource == DownloadSource.SOULSEEK
+    val converterArmed = state.preferredDownloadSource == DownloadSource.YTCONVERTER
     val context = LocalContext.current
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -114,7 +119,8 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
         Modifier
             .fillMaxSize()
             .background(palette.field)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = FloatingChromeClearance),
     ) {
         Text(
             "Downloads",
@@ -145,7 +151,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
             modifier = Modifier.padding(horizontal = 20.dp),
         )
 
-        AlbumDownloadsShelf(onOpenAlbum)
+        AlbumDownloadsShelf(onOpenAlbum, palette)
 
         if (soulseekArmed) {
             SoulseekDownloadsLayout(
@@ -171,7 +177,19 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
             )
         }
 
-        if (!soulseekArmed) {
+        if (converterArmed) {
+            YtConverterLayout(
+                state = state,
+                palette = palette,
+                identity = identity,
+                onUrlChange = viewModel::setQuery,
+                onIdentify = viewModel::searchSelectedSource,
+                onConvert = viewModel::downloadYouTubeAsFlac,
+                onToggleErrorDetails = viewModel::toggleErrorDetails,
+            )
+        }
+
+        if (!soulseekArmed && !converterArmed) {
             SpotiFlacDownloadsLayout(
                 state = state,
                 palette = palette,
@@ -202,7 +220,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
         }
         if (soulseekArmed) state.error?.let { error ->
             Spacer(Modifier.height(14.dp))
-            EditorialCard(
+            GlassCard(
                 palette = palette,
                 modifier = Modifier.padding(horizontal = 20.dp),
             ) {
@@ -428,6 +446,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
 
 
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SpotiFlacDownloadsLayout(
     state: DownloadsViewModel.State,
@@ -446,7 +465,6 @@ private fun SpotiFlacDownloadsLayout(
     onCheckVerificationAndRetry: () -> Unit,
     onToggleErrorDetails: () -> Unit,
 ) {
-    val clipboard = LocalClipboardManager.current
     // Check provider readiness early, without holding public metadata search
     // hostage to a browser callback. Verification is enforced by the engine
     // when an actual provider download starts.
@@ -465,7 +483,7 @@ private fun SpotiFlacDownloadsLayout(
         palette,
         Modifier.padding(start = 22.dp, bottom = 8.dp),
     )
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -573,7 +591,7 @@ private fun SpotiFlacDownloadsLayout(
         palette,
         Modifier.padding(start = 22.dp, bottom = 8.dp),
     )
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -596,13 +614,13 @@ private fun SpotiFlacDownloadsLayout(
                 modifier = Modifier.padding(top = 4.dp),
             )
             Text(
-                "Audio format",
+                "Audio format & maximum quality",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = palette.muted,
                 modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
             )
-            Row(
+            FlowRow(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -665,7 +683,7 @@ private fun SpotiFlacDownloadsLayout(
         palette,
         Modifier.padding(start = 22.dp, bottom = 8.dp),
     )
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -864,7 +882,7 @@ private fun SpotiFlacDownloadsLayout(
             palette = palette,
             onCancel = onCancelDownload,
         )
-    } ?: EditorialCard(
+    } ?: GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -914,21 +932,16 @@ private fun SpotiFlacDownloadsLayout(
                     TextButton(onClick = onToggleErrorDetails) {
                         Text(if (state.showErrorDetails) "Hide details" else "Details")
                     }
-                    TextButton(onClick = { clipboard.setText(AnnotatedString(state.errorDetails)) }) {
-                        Text("Copy details")
-                    }
                 }
                 if (state.showErrorDetails) {
-                    SelectionContainer {
-                        Text(
-                            state.errorDetails,
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp,
-                            color = Color(0xFFB3261E),
-                            modifier = Modifier.heightIn(max = 320.dp)
-                                .verticalScroll(rememberScrollState()),
-                        )
-                    }
+                    Text(
+                        state.errorDetails,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                        color = Color(0xFFB3261E),
+                        maxLines = 18,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
@@ -944,7 +957,7 @@ private fun SpotiFlacDownloadsLayout(
     if (spotiFlacReport != null) {
         SpectralResultCard(spotiFlacReport, palette)
     } else {
-        EditorialCard(
+        GlassCard(
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
         ) {
@@ -1025,7 +1038,7 @@ private fun SoulseekDownloadsLayout(
         Modifier.padding(start = 22.dp, bottom = 8.dp),
     )
     if (connected) {
-        EditorialCard(
+        GlassCard(
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
         ) {
@@ -1070,7 +1083,7 @@ private fun SoulseekDownloadsLayout(
             palette,
             Modifier.padding(start = 22.dp, bottom = 8.dp),
         )
-        EditorialCard(
+        GlassCard(
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
         ) {
@@ -1198,7 +1211,7 @@ private fun SoulseekDownloadsLayout(
             palette,
             Modifier.padding(start = 22.dp, bottom = 8.dp),
         )
-        EditorialCard(
+        GlassCard(
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
         ) {
@@ -1325,7 +1338,7 @@ private fun SoulseekDownloadsLayout(
             palette,
             Modifier.padding(start = 22.dp, bottom = 8.dp),
         )
-        EditorialCard(
+        GlassCard(
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
         ) {
@@ -1463,7 +1476,7 @@ private fun SoulseekFlacCheckerCard(
     transfer: SoulseekTransferProgress?,
     palette: EditorialPalette,
 ) {
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -1558,27 +1571,51 @@ private fun openProviderVerificationBrowser(context: Context, authUrl: String): 
     }
 }
 
+/**
+ * A completed download, rendered with the shared [NotificationPill].
+ *
+ * Deliberately NOT an [EditorialCard] like the rest of this screen: a
+ * finished download is a receipt, not a control. The section's own amber
+ * card treatment made it compete with the live search results and the
+ * in-progress rows directly above it, which are the things you actually
+ * act on. A dark pill with a check reads as "done, nothing to do here".
+ *
+ * Note on the detail line: the reference design also showed track duration
+ * and a kbps figure. [DownloadHistoryItem] carries neither — there is no
+ * duration field, and bitrate can't be derived from
+ * [DownloadHistoryItem.fileSizeBytes] without one. File size stands in for
+ * the bitrate slot; add `durationMs` to the model and both can be shown
+ * properly. Same for artwork: no artworkUri on the item, so the pill falls
+ * back to its glyph.
+ */
 @Composable
 private fun DownloadHistoryCard(item: DownloadHistoryItem, palette: EditorialPalette) {
-    EditorialCard(palette = palette, modifier = Modifier.padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(12.dp)) {
-            Text(item.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (item.artist.isNotBlank()) Text(item.artist, fontSize = 11.sp, color = palette.muted)
-            val origin = buildList {
-                add(item.source.displayName)
-                item.provider?.let(::add)
-                item.soulseekUsername?.let { add("Peer: $it") }
-            }.joinToString(" · ")
-            Text(origin, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = palette.muted, modifier = Modifier.padding(top = 4.dp))
-            val quality = listOfNotNull(
-                item.format,
-                item.bitDepth?.let { "$it-bit" },
-                item.sampleRateHz?.takeIf { it > 0 }?.let { "%.1f kHz".format(it / 1000.0) },
-            ).joinToString(" · ")
-            if (quality.isNotBlank()) Text(quality, fontSize = 10.sp, color = palette.muted, modifier = Modifier.padding(top = 2.dp))
-        }
-    }
+    val details = listOfNotNull(
+        item.format?.takeIf { it.isNotBlank() },
+        item.bitDepth?.let { "$it bit" },
+        item.sampleRateHz?.takeIf { it > 0 }?.let { "%.1f kHz".format(it / 1000.0) },
+        item.fileSizeBytes.takeIf { it > 0 }?.let { formatBytes(it) },
+    ).joinToString(" | ")
+
+    NotificationPill(
+        title = item.title,
+        detail = details.ifBlank { item.artist.ifBlank { item.source.displayName } },
+        palette = palette,
+        modifier = Modifier.padding(horizontal = 20.dp),
+        trailingLabel = remember(item.downloadedAt) {
+            java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+                .format(java.util.Date(item.downloadedAt))
+        },
+        action = {
+            PillAction(
+                icon = Icons.Rounded.Check,
+                contentDescription = "Download complete",
+                palette = palette,
+            )
+        },
+    )
 }
+
 
 @Composable
 private fun SoulseekResultCard(
@@ -1590,7 +1627,7 @@ private fun SoulseekResultCard(
     palette: EditorialPalette,
     onDownload: () -> Unit,
 ) {
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -1664,7 +1701,7 @@ private fun SpotiFlacTransferCard(
     palette: EditorialPalette,
     onCancel: () -> Unit,
 ) {
-    EditorialCard(palette = palette, modifier = Modifier.padding(horizontal = 20.dp)) {
+    GlassCard(palette = palette, modifier = Modifier.padding(horizontal = 20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text(
                 "SpotiFLAC",
@@ -1727,7 +1764,7 @@ private fun SoulseekTransferCard(
         speedBytesPerSecond = transfer.speedBytesPerSecond,
     )
 
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -1980,7 +2017,7 @@ private fun DownloadProgressCard(
     download: HarmonyDownloadProgress,
     palette: EditorialPalette,
 ) {
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {
@@ -2027,7 +2064,7 @@ private fun SpectralResultCard(
         SpectralReport.Verdict.LOSSY_AS_LABELLED -> "Lossy, as labelled" to Color(0xFF8A6D1F)
         SpectralReport.Verdict.INCONCLUSIVE -> "Inconclusive" to palette.muted
     }
-    EditorialCard(
+    GlassCard(
         palette = palette,
         modifier = Modifier.padding(horizontal = 20.dp),
     ) {

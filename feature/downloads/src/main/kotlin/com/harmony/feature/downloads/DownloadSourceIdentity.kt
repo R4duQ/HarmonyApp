@@ -1,11 +1,10 @@
 package com.harmony.feature.downloads
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import com.harmony.core.ui.component.EditorialPalette
+import com.harmony.core.ui.component.amberPalette
 
 /**
  * Everything the Downloads screen needs to know about "which engine am I on",
@@ -48,81 +47,28 @@ data class DownloadSourceIdentity(
     /** Badge over a result row. */
     val resultBadge: String,
     /**
-     * The saturated hue that identifies this engine, IDENTICAL in light and dark.
-     *
-     * [palette] flips construction between themes — in light the accent is
-     * near-black and the field carries the hue, in dark it is the other way
-     * round — so neither of its members is a stable brand colour. The selector
-     * needs one that never moves, or the two segments stop being distinguishable
-     * by colour in one of the two themes.
+     * The saturated hue that identifies this engine in the source selector.
+     * Fixed regardless of theme or which engine is currently armed — since
+     * [palette] now always renders as the same amber as Library (the
+     * Downloads screen is meant to look like Library, not like a
+     * differently-branded screen per engine), this is the only remaining
+     * way to tell SpotiFLAC and Soulseek apart by colour at all.
      */
     val brand: Color,
     /** Text/icon colour that reads on [brand]. */
     val onBrand: Color,
-    /** The screen's field colors while this engine is armed. */
+    /** The screen's field colors while this engine is armed — always Library's amber. */
     val palette: EditorialPalette,
 )
 
-// ---------------------------------------------------------------------------
-// Palettes
-//
-// Same construction rule as EditorialLook.kt: light = saturated field with
-// near-black same-hue ink; dark = very low-register field of the same hue with
-// light same-hue ink, muted at 0x99 and line at 0x80. Rose and teal are
-// complementary and sit clear of amber (library), green (playlists), blue
-// (equalizer), stone (settings) and lavender (player), so neither source can
-// be mistaken for another section of the app.
-// ---------------------------------------------------------------------------
-
-private val RoseLight = EditorialPalette(
-    field = Color(0xFFE8654F),
-    ink = Color(0xFF1F0A06),
-    muted = Color(0xA61F0A06),
-    line = Color(0xFF1F0A06),
-    accent = Color(0xFF1F0A06),
-    onAccent = Color(0xFFE8654F),
-)
-
-private val RoseDark = EditorialPalette(
-    field = Color(0xFF24100C),
-    ink = Color(0xFFF7C9BE),
-    muted = Color(0x99F7C9BE),
-    line = Color(0x80F7C9BE),
-    accent = Color(0xFFE8654F),
-    onAccent = Color(0xFF1F0A06),
-)
-
-private val TealLight = EditorialPalette(
-    field = Color(0xFF17A2A2),
-    ink = Color(0xFF041717),
-    muted = Color(0xA6041717),
-    line = Color(0xFF041717),
-    accent = Color(0xFF041717),
-    onAccent = Color(0xFF17A2A2),
-)
-
-private val TealDark = EditorialPalette(
-    field = Color(0xFF06201F),
-    ink = Color(0xFFBFE9E7),
-    muted = Color(0x99BFE9E7),
-    line = Color(0x80BFE9E7),
-    accent = Color(0xFF17A2A2),
-    onAccent = Color(0xFF041717),
-)
-
-@Composable
-private fun isDark(): Boolean =
-    MaterialTheme.colorScheme.background.luminance() < 0.5f
-
 /**
- * Resolve the identity for a source against the current light/dark scheme.
+ * Resolve the identity for a source.
  *
  * Call this ONCE at the top of DownloadsScreen and pass it down. Calling it
  * per-widget is harmless but pointless.
  */
 @Composable
 fun DownloadSource.identity(): DownloadSourceIdentity {
-    val dark = isDark()
     return when (this) {
         DownloadSource.SPOTIFLAC -> DownloadSourceIdentity(
             source = this,
@@ -141,7 +87,7 @@ fun DownloadSource.identity(): DownloadSourceIdentity {
             resultBadge = "Verified track",
             brand = Color(0xFFE8654F),
             onBrand = Color(0xFF1F0A06),
-            palette = if (dark) RoseDark else RoseLight,
+            palette = amberPalette(),
         )
 
         DownloadSource.SOULSEEK -> DownloadSourceIdentity(
@@ -161,7 +107,26 @@ fun DownloadSource.identity(): DownloadSourceIdentity {
             resultBadge = "Detected",
             brand = Color(0xFF17A2A2),
             onBrand = Color(0xFF041717),
-            palette = if (dark) TealDark else TealLight,
+            palette = amberPalette(),
+        )
+        DownloadSource.YTCONVERTER -> DownloadSourceIdentity(
+            source = this,
+            displayName = "YT Converter",
+            monogram = "YT",
+            tagline = "Converts a YouTube link to FLAC or MP3 on your phone with yt-dlp and FFmpeg.",
+            searchSectionLabel = "Convert a YouTube link",
+            searchHelp = "Paste the YouTube URL of the track you want to convert.",
+            queryFieldLabel = "YouTube URL",
+            queryPlaceholder = "https://www.youtube.com/watch?v=…",
+            queryFooter = "Nothing leaves your phone except the request to YouTube itself — " +
+                "the conversion runs locally. Only convert material you're permitted to.",
+            downloadActionLabel = "Convert and save",
+            searchActionLabel = "Identify link",
+            searchingLabel = "Identifying…",
+            resultBadge = "Identified",
+            brand = Color(0xFF6C4BE8),
+            onBrand = Color(0xFFFFFFFF),
+            palette = amberPalette(),
         )
     }
 }
@@ -170,4 +135,20 @@ fun DownloadSource.identity(): DownloadSourceIdentity {
 fun DownloadSource.alternative(): DownloadSource = when (this) {
     DownloadSource.SPOTIFLAC -> DownloadSource.SOULSEEK
     DownloadSource.SOULSEEK -> DownloadSource.SPOTIFLAC
+    // The converter's failures are almost never "this engine can't get it" —
+    // they're a bad link or a yt-dlp/YouTube protocol break, which no other
+    // engine fixes. SpotiFLAC is the closest thing to a useful fallback
+    // since it takes an artist/title rather than a URL.
+    DownloadSource.YTCONVERTER -> DownloadSource.SPOTIFLAC
 }
+
+/**
+ * True when this source works from a pasted URL rather than a text search.
+ *
+ * Worth a named helper rather than `== YTCONVERTER` scattered around: it's
+ * the distinction that decides whether the query box holds a link or a
+ * search term, and inlining the comparison makes every one of those call
+ * sites silently wrong the day a second URL-based source appears.
+ */
+val DownloadSource.isUrlBased: Boolean
+    get() = this == DownloadSource.YTCONVERTER

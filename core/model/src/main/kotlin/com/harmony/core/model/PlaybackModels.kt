@@ -44,6 +44,18 @@ data class PlayerState(
      * no distinction between prioritized and ordinary queue entries.
      */
     val playNextCount: Int = 0,
+    /**
+     * True when the current song began because the previous one ended and
+     * playback rolled into it, rather than because the user chose it.
+     *
+     * Smart Shuffle's handover treats "a song it did not queue started" as
+     * an intentional change of direction and clears the tail. Advancing
+     * normally into a song the user had queued looks identical from the
+     * queue's point of view, so without this flag the handover deletes the
+     * rest of what they queued — the reason manually queued songs stopped
+     * after the first one.
+     */
+    val advancedAutomatically: Boolean = false,
     /** Where audio is currently being routed (speaker / wired / Bluetooth…). */
     val audioOutput: AudioOutput = AudioOutput(),
     /**

@@ -325,6 +325,10 @@ class DownloadsViewModel @Inject constructor(
                 is PendingDownload.Identified -> findSoulseekSourcesForTrack(pending.track)
                 is PendingDownload.SoulseekCandidate -> startSoulseekDownload(pending.candidate)
             }
+            // The converter has no source-resolution step: the URL in the
+            // query box IS the source, so confirming goes straight to
+            // conversion regardless of how `pending` was produced.
+            DownloadSource.YTCONVERTER -> downloadYouTubeAsFlac()
         }
     }
 
@@ -369,6 +373,7 @@ class DownloadsViewModel @Inject constructor(
                     lastSpotiFlacTrack?.let(::startSpotiFlacDownload)
                 }
             }
+            DownloadSource.YTCONVERTER -> downloadYouTubeAsFlac()
             null -> Unit
         }
     }
@@ -706,7 +711,8 @@ class DownloadsViewModel @Inject constructor(
                 error = null,
                 errorDetails = null,
                 message = when (format) {
-                    SpotiFlacOutputFormat.FLAC_LOSSLESS -> "SpotiFLAC output set to native FLAC lossless."
+                    SpotiFlacOutputFormat.FLAC_LOSSLESS -> "SpotiFLAC output set to FLAC up to 16-bit / 44.1 kHz."
+                    SpotiFlacOutputFormat.FLAC_HI_RES_96 -> "SpotiFLAC will request the best available lossless quality, up to 24-bit / 96 kHz per track."
                     SpotiFlacOutputFormat.MP3_320 -> "SpotiFLAC output set to MP3 320 kbps. Harmony will encode it locally from the verified lossless source."
                 },
             )
@@ -1274,7 +1280,7 @@ class DownloadsViewModel @Inject constructor(
                 spotiFlacVerificationChallenge = null,
                 isCheckingSpotiFlacVerification = false,
                 message = when (requestedFormat) {
-                    SpotiFlacOutputFormat.FLAC_LOSSLESS -> "SpotiFLAC selected. Preparing a verified lossless FLAC download…"
+                    SpotiFlacOutputFormat.FLAC_LOSSLESS, SpotiFlacOutputFormat.FLAC_HI_RES_96 -> "SpotiFLAC selected. Preparing ${requestedFormat.label}…"
                     SpotiFlacOutputFormat.MP3_320 -> "SpotiFLAC selected. Preparing a lossless source for local MP3 320 kbps encoding…"
                 },
             )
@@ -1296,13 +1302,13 @@ class DownloadsViewModel @Inject constructor(
                         spotiFlacTransfer = (it.spotiFlacTransfer ?: SpotiFlacTransferProgress(SpotiFlacStage.VALIDATING))
                             .copy(stage = SpotiFlacStage.VALIDATING, fraction = 1f, provider = downloaded.provider),
                         message = when (downloaded.outputFormat) {
-                            SpotiFlacOutputFormat.FLAC_LOSSLESS -> "SpotiFLAC download complete. Validating the FLAC before import…"
+                            SpotiFlacOutputFormat.FLAC_LOSSLESS, SpotiFlacOutputFormat.FLAC_HI_RES_96 -> "SpotiFLAC download complete. Validating the FLAC before import…"
                             SpotiFlacOutputFormat.MP3_320 -> "MP3 encoding complete. Validating the MPEG audio before import…"
                         },
                     )
                 }
                 val validation = when (downloaded.outputFormat) {
-                    SpotiFlacOutputFormat.FLAC_LOSSLESS -> repository.validateStagedFlac(downloaded.tempFile)
+                    SpotiFlacOutputFormat.FLAC_LOSSLESS, SpotiFlacOutputFormat.FLAC_HI_RES_96 -> repository.validateStagedFlac(downloaded.tempFile)
                     SpotiFlacOutputFormat.MP3_320 -> repository.validateStagedMp3(downloaded.tempFile)
                 }
                 repository.validateSpotiFlacIdentity(
@@ -1318,7 +1324,7 @@ class DownloadsViewModel @Inject constructor(
                     )
                 }
                 val saved = when (downloaded.outputFormat) {
-                    SpotiFlacOutputFormat.FLAC_LOSSLESS -> repository.publishStagedFlac(downloaded.tempFile, downloaded.suggestedFileName)
+                    SpotiFlacOutputFormat.FLAC_LOSSLESS, SpotiFlacOutputFormat.FLAC_HI_RES_96 -> repository.publishStagedFlac(downloaded.tempFile, downloaded.suggestedFileName)
                     SpotiFlacOutputFormat.MP3_320 -> repository.publishStagedMp3(downloaded.tempFile, downloaded.suggestedFileName)
                 }
                 recordDownload(
@@ -1485,10 +1491,13 @@ class DownloadsViewModel @Inject constructor(
         if (searchText.isBlank()) {
             _state.update {
                 it.copy(
-                    error = if (current.preferredDownloadSource == DownloadSource.SPOTIFLAC) {
-                        "Enter an artist and song first, for example: The Weeknd - Blinding Lights."
-                    } else {
-                        "Enter an artist, album or song first."
+                    error = when (current.preferredDownloadSource) {
+                        DownloadSource.SPOTIFLAC ->
+                            "Enter an artist and song first, for example: The Weeknd - Blinding Lights."
+                        DownloadSource.YTCONVERTER ->
+                            "Paste a YouTube link first."
+                        DownloadSource.SOULSEEK ->
+                            "Enter an artist, album or song first."
                     },
                 )
             }
@@ -1507,6 +1516,18 @@ class DownloadsViewModel @Inject constructor(
                     )
                 }
                 searchSoulseek()
+            }
+            // "Searching" for the converter means resolving the pasted link
+            // to a title/artist via oEmbed — there is no result list to
+            // choose from, so identify() is the whole step.
+            DownloadSource.YTCONVERTER -> {
+                if (!repository.isYouTubeUrl(searchText)) {
+                    _state.update {
+                        it.copy(error = "That doesn't look like a YouTube link. Paste the full URL.")
+                    }
+                    return
+                }
+                identify()
             }
         }
     }
@@ -1556,6 +1577,8 @@ class DownloadsViewModel @Inject constructor(
                                     "Track ready. Tap Download with SpotiFLAC, confirm the source, and Harmony will resolve it through the enabled lossless providers."
                                 DownloadSource.SOULSEEK ->
                                     "Track identified. Continue with Soulseek to search the peer network."
+                                DownloadSource.YTCONVERTER ->
+                                    "Link identified. Tap Convert and save to run yt-dlp and FFmpeg on your phone."
                             },
                         )
                     }
@@ -1615,6 +1638,7 @@ class DownloadsViewModel @Inject constructor(
                     sizeBytes = result.sizeBytes,
                     fileNameOverride = result.displayName,
                     convertedFromYouTube = true,
+                    source = DownloadSource.YTCONVERTER,
                 )
             } catch (t: Throwable) {
                 val known = t as? HarmonyDownloadException
@@ -1789,6 +1813,33 @@ class DownloadsViewModel @Inject constructor(
                     fileName = fileName,
                     fileSizeBytes = sizeBytes.coerceAtLeast(0L),
                     durationMs = 0L,
+                )
+            }
+
+            // The converter's history entry is written HERE rather than at
+            // its own call site, because this is the first point where the
+            // file's real format, bit depth and sample rate are known —
+            // yt-dlp/FFmpeg report none of that back, so recording earlier
+            // would mean writing a row with the metadata line blank or,
+            // worse, guessed. SpotiFLAC and Soulseek record at their own
+            // call sites because their engines hand back those values
+            // directly.
+            if (source == DownloadSource.YTCONVERTER) {
+                val identified = _state.value.identifiedTrack
+                recordDownload(
+                    uri = uriString,
+                    // Prefer the oEmbed title when the link was identified;
+                    // fall back to the saved file's name, minus extension.
+                    title = identified?.title
+                        ?.takeIf { it.isNotBlank() }
+                        ?: fileName.substringBeforeLast('.'),
+                    artist = identified?.artist.orEmpty(),
+                    source = DownloadSource.YTCONVERTER,
+                    format = fileName.substringAfterLast('.', "").uppercase()
+                        .takeIf { it.isNotBlank() },
+                    bitDepth = report.bitDepth.takeIf { it > 0 },
+                    sampleRateHz = report.sampleRate.takeIf { it > 0 },
+                    fileSizeBytes = sizeBytes.coerceAtLeast(0L),
                 )
             }
             _state.update {

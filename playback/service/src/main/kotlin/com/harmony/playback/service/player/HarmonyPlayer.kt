@@ -47,6 +47,7 @@ class HarmonyPlayer(
     context: Context,
     private val replayGainProcessor: ReplayGainAudioProcessor,
     private val equalizerProcessor: EqualizerAudioProcessor,
+    private val levelMeterProcessor: LevelMeterAudioProcessor,
     private val artworkCache: ArtworkCache,
 ) {
 
@@ -79,7 +80,12 @@ class HarmonyPlayer(
                     // run; both processors convert to float internally for
                     // their math, so quality is preserved where it matters.
                     .setEnableFloatOutput(false)
-                    .setAudioProcessors(arrayOf(replayGainProcessor, equalizerProcessor))
+                    // Meter LAST: it should report what actually reaches the
+                    // speaker, so it has to sit after ReplayGain's scaling and
+                    // the EQ's filtering rather than measuring the raw decode.
+                    .setAudioProcessors(
+                        arrayOf(replayGainProcessor, equalizerProcessor, levelMeterProcessor),
+                    )
                     .build()
             }
         }.apply {
