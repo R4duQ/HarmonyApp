@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to build/publish (e.g. v1.0.1-audiofix). Must match app/build.gradle.kts versionName.'
+        required: true
 
 permissions:
   contents: write
@@ -32,9 +37,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "release_tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Verify tag matches Android version
         id: version
-        run: bash ./scripts/ci/verify-release-version.sh app/build.gradle.kts "${GITHUB_REF_NAME}"
+        run: bash ./scripts/ci/verify-release-version.sh app/build.gradle.kts "${{ steps.tag.outputs.release_tag }}"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -164,6 +179,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
         run: |
           set -euo pipefail
           RELEASE_TITLE="Harmony v${VERSION_NAME}"
@@ -171,17 +187,18 @@ jobs:
           if [[ ! -f "$NOTES" ]]; then
             NOTES="docs/RELEASE-v1.0.0-STABLE.md"
           fi
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release edit "${GITHUB_REF_NAME}" --title "$RELEASE_TITLE" --notes-file "$NOTES"
-            gh release upload "${GITHUB_REF_NAME}" --clobber \
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" --title "$RELEASE_TITLE" --notes-file "$NOTES"
+            gh release upload "${RELEASE_TAG}" --clobber \
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
               "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
               "dist/APK-SIGNATURE.txt#APK signing certificate details"
           else
-            gh release create "${GITHUB_REF_NAME}" \
+            gh release create "${RELEASE_TAG}" \
               --title "$RELEASE_TITLE" \
               --notes-file "$NOTES" \
+              --target "${GITHUB_SHA}" \
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
               "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
