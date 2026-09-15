@@ -4,6 +4,7 @@ plugins {
 
 android {
     namespace = "com.harmony.core.dsp"
+    ndkVersion = "29.0.14206865"
 
     val requestedAbi = providers.gradleProperty("harmonyAbi").orNull
 
@@ -11,6 +12,9 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                // FFmpeg's bundled dependencies need libc++_shared.so too.
+                // Static STL (the CMake default) does not package that file.
+                arguments += "-DANDROID_STL=c++_shared"
             }
         }
         ndk {

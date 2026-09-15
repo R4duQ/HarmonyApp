@@ -21,6 +21,15 @@ if [[ ! -f "$APK_IN" ]]; then
   exit 2
 fi
 
+# Direct FFmpeg is launched from nativeLibraryDir. An APK missing its shared
+# C++ runtime or either archive must never be published as a working FLAC build.
+for LIBRARY in libgojni.so libffmpeg.so libffmpeg.zip.so libpython.zip.so libc++_shared.so; do
+  if ! unzip -t "$APK_IN" "lib/$ABI/$LIBRARY" >/dev/null; then
+    echo "ERROR: required FLAC runtime missing/corrupt for $ABI: $LIBRARY" >&2
+    exit 6
+  fi
+done
+
 mkdir -p "$DIST_DIR"
 cp "$APK_IN" "$APK_OUT"
 sha256sum "$DIST_DIR"/Harmony-v"${VERSION_NAME}"-*.apk > "$DIST_DIR/SHA256SUMS.txt"

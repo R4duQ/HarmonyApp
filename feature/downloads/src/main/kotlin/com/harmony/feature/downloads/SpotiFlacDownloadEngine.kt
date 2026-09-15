@@ -9,8 +9,6 @@ import android.os.Build
 import android.os.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import gobackend.Gobackend
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +55,7 @@ import javax.inject.Singleton
  *  - detect and redact SpotiFLAC's decryption descriptor before local format probing;
  *  - never implement protected-stream decryption or provider access-control bypasses;
  *  - reproduce the unencrypted lossless container finalization policy;
- *  - initialize yt-dlp + FFmpeg exactly as the Android wrapper documents, and use a two-stage
+ *  - initialize the bundled FFmpeg independently of yt-dlp, and use a two-stage
  *    FLAC-in-MP4 finalizer (bit-exact remux first, official-style FLAC encode fallback);
  *  - accept native FLAC immediately, and convert M4A/MP4 to native FLAC only when
  *    the provider/backend codec probe proves the source audio is lossless FLAC/ALAC;
@@ -109,6 +107,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
     @Volatile private var initialized = false
     @Volatile private var activeItemId: String? = null
     @Volatile private var activeJobDir: File? = null
+    @Volatile private var nativeTransferActive = false
+    @Volatile private var ffmpegPackagesDir: File? = null
     @Volatile private var activeRegistrySummary: String = "provider registry not initialized"
     @Volatile private var providerQualityOptions: Map<String, List<SpotiFlacQualityOption>> = emptyMap()
     // Persist only the provider ID (never auth/session material) so an Android
@@ -149,7 +149,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
         val poller: Job = launch(Dispatchers.IO) {
             while (isActive) {
-                runCatching { readProgress(itemId) }
+                runCatching { if (nativeTransferActive) readProgress(itemId) else null }
                     .getOrNull()
                     ?.let(onProgress)
                 delay(PROGRESS_POLL_MS)
@@ -293,6 +293,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             }
             activeItemId = null
             activeJobDir = null
+            nativeTransferActive = false
         }
     }
 
@@ -663,6 +664,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val diagnostics = JSONArray()
         val blockedForThisDownload = linkedSetOf<String>()
         var lastFailure: JSONObject? = null
+        var lastConversionFailure: SpotiFlacException? = null
         var gatewayRateLimitRetries = 0
 
         try {
@@ -723,12 +725,17 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     put("extension_fallback_provider_ids", JSONArray(listOf(currentProvider)))
                 }
 
-                val response = callDownloadWithWatchdog(
-                    request = request,
-                    itemId = itemId,
-                    label = label,
-                    timeoutMs = PROVIDER_WATCHDOG_MS,
-                )
+                val response = try {
+                    nativeTransferActive = true
+                    callDownloadWithWatchdog(
+                        request = request,
+                        itemId = itemId,
+                        label = label,
+                        timeoutMs = PROVIDER_WATCHDOG_MS,
+                    )
+                } finally {
+                    nativeTransferActive = false
+                }
                 // With an isolated route, an unlabelled backend failure still
                 // belongs to the provider Harmony explicitly selected.
                 val reportedProvider = verificationProviderId(response) ?: currentProvider
@@ -784,6 +791,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     }
 
                     var probe = file?.let { probeAudioOutput(it, response) }
+                    var usableFile = file
+                    var qualityFailure: SpotiFlacException? = null
                     attemptDiagnostic.apply {
                         put("output_found", file != null)
                         probe?.let { putAudioProbeDiagnostic(this, it) }
@@ -818,28 +827,37 @@ class SpotiFlacDownloadEngine @Inject constructor(
                                 response.put("actual_extension", ".flac")
                                 response.put("actual_container", "flac")
                                 response.put("requires_container_conversion", false)
-                                response.put(HARMONY_VALIDATED_FILE_PATH, finalizedFile.absolutePath)
-                                diagnostics.put(attemptDiagnostic)
-                                rememberSuccessfulProvider(reportedProvider)
-                                return response
+                                usableFile = finalizedFile
                             }
                         }
                     }
 
-                    diagnostics.put(attemptDiagnostic)
-                    if (file != null && probe?.isNativeFlac == true) {
-                        // Pin the exact file validated for this attempt so a later
-                        // directory scan cannot accidentally select a sidecar.
-                        response.put(HARMONY_VALIDATED_FILE_PATH, file.absolutePath)
-                        rememberSuccessfulProvider(reportedProvider)
-                        return response
+                    if (usableFile != null && probe?.isNativeFlac == true) {
+                        try {
+                            // Apply the ceiling inside the provider plan: if this
+                            // device cannot convert a 192 kHz source, another
+                            // provider may offer native FLAC within the ceiling.
+                            val accepted = if (outputFormat.isLosslessOutput) {
+                                enforceFlacQualityLimit(usableFile, jobDir, outputFormat, reportedProvider, onProgress)
+                            } else usableFile
+                            response.put(HARMONY_VALIDATED_FILE_PATH, accepted.absolutePath)
+                            diagnostics.put(attemptDiagnostic)
+                            rememberSuccessfulProvider(reportedProvider)
+                            return response
+                        } catch (failure: SpotiFlacException) {
+                            if (failure.errorType != "flac_quality_limit_failed") throw failure
+                            qualityFailure = failure
+                            attemptDiagnostic.put("quality_limit_error", failure.technicalDetails ?: failure.message)
+                        }
                     }
+                    diagnostics.put(attemptDiagnostic)
 
-                    val failureType = if (file == null) "missing_output" else {
+                    val failureType = qualityFailure?.errorType ?: if (file == null) "missing_output" else {
                         if (probe?.isLosslessSource == true) "lossless_finalization_failed" else "not_lossless_flac"
                     }
                     val formatLabel = probe?.displayName ?: "no usable audio file"
                     val failureReason = when {
+                        qualityFailure != null -> qualityFailure.message
                         file == null -> "Provider reported success but produced no usable audio file."
                         probe?.isLosslessSource == true -> "Provider returned lossless $formatLabel, but Harmony could not finalize it to native FLAC."
                         else -> "Provider returned $formatLabel; its codec is not proven lossless FLAC/ALAC."
@@ -853,10 +871,15 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     }
                     lastFailure = syntheticFailure
 
-                    // A host-side lossless finalizer failure is not a provider
-                    // miss. Surface it directly so the original successful provider
-                    // is not hidden by a later Deezer/Qobuz/Amazon gateway error.
-                    val providerFallbackIsUseful = failureType == "missing_output" || failureType == "not_lossless_flac"
+                    if (failureType == "lossless_finalization_failed" || qualityFailure != null) {
+                        lastConversionFailure = SpotiFlacException(
+                            message = qualityFailure?.message ?: "The lossless download completed, but this phone could not convert it to a FLAC file.",
+                            errorType = failureType,
+                            provider = reportedProvider,
+                            technicalDetails = buildAudioFailureDetails(reportedProvider, probe, diagnostics, activeRegistrySummary),
+                        )
+                    }
+                    val providerFallbackIsUseful = SpotiFlacCompatibilityPolicy.canTryAnotherSource(failureType)
                     if (providerFallbackIsUseful && remaining.size > 1) {
                         blockedForThisDownload += currentProvider
                         remaining.remove(currentProvider)
@@ -866,7 +889,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
                             SpotiFlacTransferProgress(
                                 SpotiFlacStage.PROVIDERS,
                                 provider = reportedProvider,
-                                detail = "${providerDisplay(reportedProvider)} returned $formatLabel without a proven native/lossless FLAC result. Trying the next SpotiFLAC provider…",
+                                detail = if (lastConversionFailure != null) {
+                                    "Local FLAC conversion failed. Trying another lossless source within ${outputFormat.label}…"
+                                } else "${providerDisplay(reportedProvider)} returned no usable lossless FLAC. Trying the next provider…",
                             ),
                         )
                         continue
@@ -874,6 +899,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
                     throw SpotiFlacException(
                         message = when {
+                            qualityFailure != null -> qualityFailure.message ?: "The selected FLAC quality limit could not be applied."
                             file == null -> "SpotiFLAC reported success but no usable audio file was produced."
                             probe?.isLosslessSource == true -> "${providerDisplay(reportedProvider)} returned lossless $formatLabel, but Harmony could not finalize it to native FLAC."
                             else -> "${providerDisplay(reportedProvider)} returned $formatLabel. Harmony refused to transcode a lossy or unverified codec to FLAC."
@@ -988,6 +1014,21 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 // concrete failure instead of replaying the same request.
                 throw friendlyBackendFailure(response, diagnostics)
             }
+        } catch (failure: SpotiFlacException) {
+            val conversion = lastConversionFailure
+            if (conversion != null && SpotiFlacCompatibilityPolicy.preserveConversionFailure(failure.errorType)) {
+                throw SpotiFlacException(
+                    message = "This phone could not finish FLAC conversion, and the other sources did not provide a compatible file. Open Details for the converter error.",
+                    errorType = conversion.errorType,
+                    provider = conversion.provider,
+                    technicalDetails = JSONObject().apply {
+                        put("conversion_failure", conversion.technicalDetails)
+                        put("last_provider_failure", failure.message)
+                        put("attempts", diagnostics)
+                    }.toString(2),
+                )
+            }
+            throw failure
         } finally {
             withContext(NonCancellable) {
                 runCatching { nativeControl { restoreProviderConfiguration() } }
@@ -2314,7 +2355,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             put("source_codec", probe.effectiveCodec)
             put("lossless_source", probe.isLosslessSource)
             put("source_size", source.length())
-            put("host_finalizer", "v1.0.0-device-ffmpeg-compat")
+            put("host_finalizer", "v1.1.0-isolated-ffmpeg-source-fallback")
             put("device_manufacturer", Build.MANUFACTURER)
             put("device_model", Build.MODEL)
             put("android_sdk", Build.VERSION.SDK_INT)
@@ -2327,16 +2368,14 @@ class SpotiFlacDownloadEngine @Inject constructor(
             return@withContext LosslessFinalizationResult(null, diagnostic)
         }
 
-        // youtubedl-android's own README initializes both objects when FFmpeg is
-        // used. YoutubeDL.init establishes the package layout/environment, while
-        // FFmpeg.init expands the bundled FFmpeg dependency libraries.
+        // Direct FFmpeg needs shared libraries from both bundled archives,
+        // but not Python/yt-dlp initialization. Use a verified private layout.
         val initFailure = runCatching {
-            YoutubeDL.getInstance().init(context)
-            FFmpeg.getInstance().init(context)
+            prepareFfmpegRuntime()
         }.exceptionOrNull()
         if (initFailure != null) {
             diagnostic.put("success", false)
-            diagnostic.put("reason", "yt-dlp/FFmpeg initialization failed")
+            diagnostic.put("reason", "FFmpeg initialization failed")
             diagnostic.put("error", initFailure.message ?: initFailure.javaClass.simpleName)
             return@withContext LosslessFinalizationResult(null, diagnostic)
         }
@@ -2365,15 +2404,13 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val attempts = JSONArray()
         diagnostic.put("attempts", attempts)
 
-        // Samsung/One UI and some other Android builds are stricter about the
-        // dynamic-linker environment inherited by an executable launched from
-        // nativeLibraryDir. Test the exact environment used by youtubedl-android
-        // first, then a compatibility environment as a fallback.
+        // Prefer FFmpeg's own libraries. Keep the wrapper's historical linker
+        // environments as bounded fallbacks, not as phone-model assumptions.
         val selfTests = JSONArray()
         diagnostic.put("ffmpeg_self_tests", selfTests)
-        var selectedEnvironment = FfmpegEnvironmentProfile.UPSTREAM
+        var selectedEnvironment = FfmpegEnvironmentProfile.ISOLATED
         var selfTest: FfmpegProcessResult? = null
-        for (profile in listOf(FfmpegEnvironmentProfile.UPSTREAM, FfmpegEnvironmentProfile.EXTENDED)) {
+        for (profile in FfmpegEnvironmentProfile.entries) {
             val selfTestLog = File(jobDir, "harmony-ffmpeg-selftest-${profile.id}.log").also { it.delete() }
             val candidate = runFfmpegProcess(
                 command = listOf(executable.absolutePath, "-hide_banner", "-version"),
@@ -2455,12 +2492,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
             command, log, nativeDir, LOSSLESS_FINALIZER_TIMEOUT_SECONDS, selectedEnvironment,
         )
         var usedEnvironment = selectedEnvironment
-        if (!attempt.success) {
-            val alternate = if (selectedEnvironment == FfmpegEnvironmentProfile.UPSTREAM) {
-                FfmpegEnvironmentProfile.EXTENDED
-            } else {
-                FfmpegEnvironmentProfile.UPSTREAM
-            }
+        for (alternate in FfmpegEnvironmentProfile.entries.filter { it != selectedEnvironment }) {
+            if (attempt.success) break
             val retryLog = File(jobDir, "harmony-ffmpeg-flac-encode-${alternate.id}.log").also { it.delete() }
             val retry = runFfmpegProcess(
                 command, retryLog, nativeDir, LOSSLESS_FINALIZER_TIMEOUT_SECONDS, alternate,
@@ -2525,8 +2558,15 @@ class SpotiFlacDownloadEngine @Inject constructor(
             provider = provider,
             detail = "Reducing ${sourceSpec.label} to ${target.bitDepth}-bit / ${target.sampleRateHz / 1000.0} kHz…",
         ))
-        YoutubeDL.getInstance().init(context)
-        FFmpeg.getInstance().init(context)
+        try {
+            prepareFfmpegRuntime()
+        } catch (failure: Exception) {
+            throw SpotiFlacException(
+                "FFmpeg could not initialize to apply the selected quality limit.",
+                "flac_quality_limit_failed", cause = failure, provider = provider,
+                technicalDetails = failure.stackTraceToString(),
+            )
+        }
         val nativeDir = File(context.applicationInfo.nativeLibraryDir)
         val executable = listOf(File(nativeDir, "libffmpeg.so"), File(nativeDir, "libffmpeg.bin.so"))
             .firstOrNull { it.isFile && it.length() > 0L }
@@ -2585,12 +2625,15 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
     }
 
-    private enum class FfmpegEnvironmentProfile(val id: String) {
-        // Mirrors youtubedl-android's own ProcessBuilder environment.
-        UPSTREAM("upstream"),
-        // Keeps Harmony's older broader linker path as a fallback for devices
-        // where vendor/OS differences require it.
-        EXTENDED("extended"),
+    private fun prepareFfmpegRuntime() {
+        if (ffmpegPackagesDir != null) return
+        check(File(context.applicationInfo.nativeLibraryDir, "libc++_shared.so").isFile) {
+            "The APK is missing libc++_shared.so required by FFmpeg. Rebuild with the shared NDK runtime."
+        }
+        ffmpegPackagesDir = SpotiFlacFfmpegRuntime.prepare(
+            File(context.applicationInfo.nativeLibraryDir),
+            File(context.noBackupFilesDir, "spotiflac/ffmpeg-libraries-v1"),
+        )
     }
 
     private suspend fun runFfmpegProcess(
@@ -2598,44 +2641,18 @@ class SpotiFlacDownloadEngine @Inject constructor(
         log: File,
         nativeDir: File,
         timeoutSeconds: Long,
-        environmentProfile: FfmpegEnvironmentProfile = FfmpegEnvironmentProfile.UPSTREAM,
+        environmentProfile: FfmpegEnvironmentProfile = FfmpegEnvironmentProfile.ISOLATED,
     ): FfmpegProcessResult {
         val process = runCatching {
             ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .redirectOutput(log)
                 .apply {
-                    val env = environment()
-                    val packagesDir = File(context.noBackupFilesDir, "youtubedl-android/packages")
-                    val pythonLib = File(packagesDir, "python/usr/lib")
-                    val ffmpegLib = File(packagesDir, "ffmpeg/usr/lib")
-                    val aria2cLib = File(packagesDir, "aria2c/usr/lib")
-                    val packageLibs = listOf(pythonLib, ffmpegLib, aria2cLib)
-                        .filter { it.isDirectory }
-                        .map { it.absolutePath }
-
-                    val ldParts = packageLibs.toMutableList()
-                    if (environmentProfile == FfmpegEnvironmentProfile.EXTENDED) {
-                        if (nativeDir.isDirectory) ldParts += nativeDir.absolutePath
-                        env["LD_LIBRARY_PATH"].orEmpty()
-                            .takeIf { it.isNotBlank() }
-                            ?.let { ldParts += it }
-                    }
-                    env["LD_LIBRARY_PATH"] = ldParts.distinct().joinToString(":")
-
-                    val systemPath = System.getenv("PATH").orEmpty()
-                    env["PATH"] = listOf(systemPath, nativeDir.absolutePath)
-                        .filter(String::isNotBlank)
-                        .joinToString(":")
-
-                    val pythonHome = File(packagesDir, "python/usr")
-                    if (pythonHome.isDirectory) {
-                        env["PYTHONHOME"] = pythonHome.absolutePath
-                        env["HOME"] = pythonHome.absolutePath
-                        val cert = File(pythonHome, "etc/tls/cert.pem")
-                        if (cert.isFile) env["SSL_CERT_FILE"] = cert.absolutePath
-                    }
-                    env["TMPDIR"] = context.cacheDir.absolutePath
+                    SpotiFlacFfmpegEnvironment.configure(
+                        environment(),
+                        checkNotNull(ffmpegPackagesDir) { "FFmpeg libraries were not prepared" },
+                        nativeDir, context.cacheDir, environmentProfile,
+                    )
                 }
                 .start()
         }.getOrElse { failure ->
@@ -3033,8 +3050,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         verifyFlacSignature(source)
 
         val initFailure = runCatching {
-            YoutubeDL.getInstance().init(context)
-            FFmpeg.getInstance().init(context)
+            prepareFfmpegRuntime()
         }.exceptionOrNull()
         if (initFailure != null) {
             throw SpotiFlacException(

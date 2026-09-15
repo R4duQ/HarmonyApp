@@ -11,8 +11,8 @@ android {
 
     defaultConfig {
         applicationId = "com.harmony.app"
-        versionCode = 84
-        versionName = "1.0.1-audiofix"
+        versionCode = 85
+        versionName = "1.0.2-flac-compat"
 
         // Optional single-ABI build: -PharmonyAbi=arm64-v8a
         //
