@@ -160,6 +160,23 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
+    /**
+     * Drops this process's binding to the session. Called by PlaybackService
+     * when the app is swiped away with no car attached: a service can't be
+     * destroyed while clients are bound, and this controller is otherwise
+     * bound for the life of the process, so without this the service was
+     * left stopped-but-alive instead of ending. [ensureConnected] rebuilds
+     * the connection the next time the Activity starts.
+     */
+    fun releaseConnection() {
+        val c = controller ?: return
+        controller = null
+        onTrackTransition(null)
+        tickerJob?.cancel()
+        _playerState.value = _playerState.value.copy(isPlaying = false, isBuffering = false)
+        c.release()
+    }
+
     private suspend fun restoreLastPlaybackState(c: MediaController) {
         val last = settingsRepository.getLastPlaybackState() ?: return
         val restored = QueueRestoration.restore(last.songIds, last.index, last.positionMs,

@@ -1,12 +1,16 @@
 package com.harmony.playback.service
 
 import android.content.Intent
+import android.os.IBinder
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import com.harmony.playback.service.controller.PlaybackConnection
 import com.harmony.playback.service.player.CrossfadeController
 import com.harmony.playback.service.player.HarmonyPlayer
+import com.harmony.playback.service.session.BrowserBindingTracker
+import com.harmony.playback.service.session.BrowserBindingTracker.TaskRemovedAction
 import com.harmony.playback.service.session.HarmonyMediaLibraryCallback
 import com.harmony.playback.service.timer.SleepTimer
 import dagger.hilt.android.AndroidEntryPoint
@@ -51,6 +55,13 @@ class PlaybackService : MediaLibraryService() {
     @Inject lateinit var settingsRepository: com.harmony.core.datastore.SettingsRepository
     @Inject lateinit var albumJourneys: com.harmony.domain.library.repository.AlbumJourneyRepository
 
+    // Lazy: only touched when the app is swiped away, and the service must
+    // not be the thing that decides when the in-app connection gets built.
+    @Inject lateinit var playbackConnection: dagger.Lazy<PlaybackConnection>
+
+    /** Whether Android Auto (a legacy MediaBrowser) is attached. See the class. */
+    private val browserBindings = BrowserBindingTracker(MEDIA_BROWSER_ACTION)
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var mediaSession: MediaLibrarySession? = null
     private var crossfade: CrossfadeController? = null
@@ -73,6 +84,22 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaSession
+
+    override fun onBind(intent: Intent?): IBinder? {
+        val binder = super.onBind(intent)
+        browserBindings.onBind(intent?.action, bound = binder != null)
+        return binder
+    }
+
+    override fun onRebind(intent: Intent?) {
+        super.onRebind(intent)
+        browserBindings.onRebind(intent?.action)
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        val wantsRebind = browserBindings.onUnbind(intent?.action)
+        return super.onUnbind(intent) || wantsRebind
+    }
 
     /**
      * User swiped the app away from recents: by design (per-user preference,
@@ -131,6 +158,20 @@ class PlaybackService : MediaLibraryService() {
         val ids = snap?.first ?: emptyList()
         val index = snap?.second ?: 0
         val position = snap?.third ?: 0L
+        if (browserBindings.onTaskRemoved() == TaskRemovedAction.KEEP_SESSION) {
+            // Android Auto is attached. Swiping the app away is a gesture on
+            // the PHONE's screen; the car is a separate client of this same
+            // session and is still using it. Tearing the session down here
+            // stopped the car's playback, cleared its queue and dropped the
+            // foreground state out from under the car's connection, leaving
+            // the process for the OS to freeze or kill while the car was
+            // still attached. Save the position and leave the session
+            // exactly as it is; it ends normally after the car disconnects.
+            if (ids.isNotEmpty()) {
+                serviceScope.launch { settingsRepository.saveLastPlaybackState(ids, index, position) }
+            }
+            return
+        }
         player.pause()
         if (ids.isNotEmpty()) {
             // Blocking ON PURPOSE. The original version launched this on
@@ -149,6 +190,39 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         }
+        // pause() alone leaves the player in STATE_READY holding a queue,
+        // and Media3 keeps posting the media notification for exactly that
+        // state — a paused, resumable session. stopSelf() then doesn't
+        // clear it either, because the session is still alive and still
+        // describes something playable. That's why the notification sat
+        // there after the app was swiped away, looking like it was still
+        // running.
+        //
+        // stop() drops the player to STATE_IDLE and clearMediaItems()
+        // leaves it with nothing to describe, which is what actually
+        // retires the notification. Safe to do here only because the
+        // snapshot was taken and written above — and because snapshot()
+        // returns null on an empty queue, so onDestroy's own save below
+        // can't come back and overwrite that good state with an empty one.
+        player.stop()
+        player.clearMediaItems()
+        // Explicit, rather than trusting stopSelf() to tear the foreground
+        // down: the service may be stopped but not yet destroyed, and the
+        // notification outlives that gap. Platform constant rather than
+        // ServiceCompat — androidx.core isn't a declared dependency of this
+        // module, and minSdk is 29, so STOP_FOREGROUND_REMOVE is always
+        // there.
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        // stopSelf() cannot destroy a service that still has clients bound,
+        // and the app's own MediaController (PlaybackConnection) stays bound
+        // for the life of the process. Without letting go of it the service
+        // was never destroyed here — it lingered stopped, empty and out of
+        // the foreground (the "stopped but not yet destroyed" gap above),
+        // and that half-dead session is what Android Auto found the next
+        // time it connected.
+        // Releasing it lets onDestroy run now; the app reconnects on its
+        // own the next time the Activity starts.
+        playbackConnection.get().releaseConnection()
         stopSelf()
     }
 
@@ -183,5 +257,8 @@ class PlaybackService : MediaLibraryService() {
         const val SESSION_ID = "harmony_session"
         const val SAVE_TIMEOUT_MS = 2_000L
         const val SAVE_INTERVAL_MS = 5_000L
+
+        /** The action Android Auto binds with (MediaBrowserServiceCompat.SERVICE_INTERFACE). */
+        const val MEDIA_BROWSER_ACTION = "android.media.browse.MediaBrowserService"
     }
 }
