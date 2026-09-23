@@ -148,6 +148,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
                 .build(),
         )
 
+        AutoDiagnostics.log("connect ${controller.packageName} (version ${controller.controllerVersion}) · accepted")
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(sessionCommands)
             .setCustomLayout(carButtons)
@@ -219,11 +220,16 @@ class HarmonyMediaLibraryCallback @Inject constructor(
 
     // -- Android Auto browse tree -------------------------------------------
 
+    override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        AutoDiagnostics.log("disconnect ${controller.packageName}")
+    }
+
     override fun onGetLibraryRoot(
         session: MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
         params: LibraryParams?,
     ): ListenableFuture<LibraryResult<MediaItem>> {
+        AutoDiagnostics.log("root requested by ${browser.packageName} · recent=${params?.isRecent} offline=${params?.isOffline}")
         val root = BrowseTree.browsable(
             id = BrowseTree.ROOT,
             title = "Harmony",
@@ -245,6 +251,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         pageSize: Int,
         params: LibraryParams?,
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
+      AutoDiagnostics.timed("children of $parentId for ${browser.packageName}") {
         val all: List<MediaItem> = cached(parentId) {
           when (val node = BrowseTree.parse(parentId)) {
             BrowseTree.Node.Root -> rootChildren()
@@ -350,6 +357,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
             all.take(MAX_ITEMS)
         }
         LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
+      }
     }
 
     /**

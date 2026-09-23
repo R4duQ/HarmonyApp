@@ -9,6 +9,7 @@ import androidx.media3.session.MediaSession
 import com.harmony.playback.service.controller.PlaybackConnection
 import com.harmony.playback.service.player.CrossfadeController
 import com.harmony.playback.service.player.HarmonyPlayer
+import com.harmony.playback.service.session.AutoDiagnostics
 import com.harmony.playback.service.session.BrowserBindingTracker
 import com.harmony.playback.service.session.BrowserBindingTracker.TaskRemovedAction
 import com.harmony.playback.service.session.HarmonyMediaLibraryCallback
@@ -71,10 +72,13 @@ class PlaybackService : MediaLibraryService() {
     private var lastSavedState: Triple<List<Long>, Int, Long>? = null
 
     override fun onCreate() {
+        AutoDiagnostics.init(this)
+        val createStart = android.os.SystemClock.elapsedRealtime()
         super.onCreate()
         mediaSession = MediaLibrarySession.Builder(this, harmonyPlayer.exoPlayer, callback)
             .setId(SESSION_ID)
             .build()
+        AutoDiagnostics.log("session ready · ${android.os.SystemClock.elapsedRealtime() - createStart} ms (injection + player + session)")
         crossfade = CrossfadeController(this, harmonyPlayer.exoPlayer, serviceScope).also { it.start() }
         startPeriodicStateSaving()
         albumListening = AlbumListeningMonitor(harmonyPlayer.exoPlayer, albumJourneys).also { it.start() }
@@ -88,16 +92,19 @@ class PlaybackService : MediaLibraryService() {
     override fun onBind(intent: Intent?): IBinder? {
         val binder = super.onBind(intent)
         browserBindings.onBind(intent?.action, bound = binder != null)
+        AutoDiagnostics.log("bind ${intent?.action} · binder=${binder != null}")
         return binder
     }
 
     override fun onRebind(intent: Intent?) {
         super.onRebind(intent)
         browserBindings.onRebind(intent?.action)
+        AutoDiagnostics.log("rebind ${intent?.action}")
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         val wantsRebind = browserBindings.onUnbind(intent?.action)
+        AutoDiagnostics.log("unbind ${intent?.action}")
         return super.onUnbind(intent) || wantsRebind
     }
 
@@ -158,6 +165,7 @@ class PlaybackService : MediaLibraryService() {
         val ids = snap?.first ?: emptyList()
         val index = snap?.second ?: 0
         val position = snap?.third ?: 0L
+        AutoDiagnostics.log("app swiped away · car bound=${browserBindings.carBrowserBound}")
         if (browserBindings.onTaskRemoved() == TaskRemovedAction.KEEP_SESSION) {
             // Android Auto is attached. Swiping the app away is a gesture on
             // the PHONE's screen; the car is a separate client of this same
@@ -227,6 +235,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        AutoDiagnostics.log("service destroyed")
         // Last-chance save for the path where the service is destroyed
         // WITHOUT onTaskRemoved (system reclaiming memory, stopSelf from
         // elsewhere). Blocking is acceptable here for the same reason as in
