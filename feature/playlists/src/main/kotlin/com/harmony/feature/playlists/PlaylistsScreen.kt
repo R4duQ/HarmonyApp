@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -294,6 +295,12 @@ fun PlaylistsScreen(
             modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
         )
 
+        // Hoisted out of AnimatedContent, one per tab: created inside it,
+        // each list's state lived and died with the tab's content, so the
+        // scroll position was not reliably there when coming back from a
+        // playlist. Both are saveable and belong to this back stack entry.
+        val smartListState = rememberLazyListState()
+        val yoursListState = rememberLazyListState()
         AnimatedContent(
             targetState = selectedTab,
             transitionSpec = { fadeIn().togetherWith(fadeOut()) },
@@ -302,6 +309,7 @@ fun PlaylistsScreen(
             when (tab) {
                 0 -> LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = smartListState,
                     contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
                 ) {
                     items(SmartPlaylistType.entries, key = { it.name }) { type ->
@@ -322,6 +330,7 @@ fun PlaylistsScreen(
                     } else {
                         LazyColumn(
                             Modifier.fillMaxSize(),
+                            state = yoursListState,
                             contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
                         ) {
                             items(cards, key = { it.id }) { card ->

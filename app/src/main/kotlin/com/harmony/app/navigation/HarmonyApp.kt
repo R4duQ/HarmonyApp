@@ -90,6 +90,21 @@ object Routes {
     const val TAG_EDITOR = "tag_editor"
 }
 
+/**
+ * Pops [entry] only if it is still the top of the back stack.
+ *
+ * The playlist page can ask to leave from its Back button and from its
+ * swipe-down gesture, and the system back gesture can race either of them.
+ * A bare popBackStack() from a page that is already on its way out pops the
+ * page UNDER it too — the user lands two screens back. Checking the entry
+ * makes every request after the first a no-op, and popping (rather than
+ * navigating somewhere) is what returns to the real previous page with its
+ * tab, scroll position and state as they were left.
+ */
+private fun androidx.navigation.NavController.popIfCurrent(
+    entry: androidx.navigation.NavBackStackEntry,
+): Boolean = currentBackStackEntry?.id == entry.id && popBackStack()
+
 private data class TopLevel(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 /**
@@ -334,11 +349,15 @@ fun HarmonyApp(
             composable(
                 Routes.PLAYLIST,
                 arguments = listOf(navArgument("playlistId") { type = NavType.LongType }),
-            ) { PlaylistDetailScreen() }
+            ) { entry ->
+                PlaylistDetailScreen(onBack = { navController.popIfCurrent(entry) })
+            }
             composable(
                 Routes.SMART_PLAYLIST,
                 arguments = listOf(navArgument("smartType") { type = NavType.StringType }),
-            ) { PlaylistDetailScreen() }
+            ) { entry ->
+                PlaylistDetailScreen(onBack = { navController.popIfCurrent(entry) })
+            }
             composable(Routes.EQUALIZER) {
                 EqualizerScreen(onBack = { navController.popBackStack() })
             }
