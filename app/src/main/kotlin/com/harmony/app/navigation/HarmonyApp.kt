@@ -301,6 +301,13 @@ fun HarmonyApp(
                     onOpenDiscover = { goTo(Routes.DISCOVER) },
                     onOpenFlacCheck = { navController.navigate(Routes.FLAC_CHECK) },
                     onOpenLibrary = { librarySearchResetSignal++; goTo(Routes.LIBRARY) },
+                    // Albums and playlists open ON TOP of Home, so Back (or
+                    // a playlist's swipe-down) returns to Home exactly where
+                    // it was scrolled to.
+                    onOpenAlbum = { navController.navigate("album/$it") },
+                    onOpenPlaylist = { navController.navigate("playlist/$it") },
+                    onOpenPlaylists = { goTo(Routes.PLAYLISTS) },
+                    onOpenNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
                 )
             }
             composable(Routes.DISCOVER) {
