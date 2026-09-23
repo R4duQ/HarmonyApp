@@ -102,6 +102,13 @@ class SmartQueueCoordinator @Inject constructor(
      */
     private var sessionAnchor: FloatArray? = null
 
+    /**
+     * Shuffle mode as of the previous signal, tracked separately from
+     * [lastShuffleMode] because that one is consumed (and overwritten) by
+     * the restore path before the handover ever runs.
+     */
+    private var lastHandoverMode: ShuffleMode? = null
+
     /** Last song already folded into [sessionAnchor], so it is counted once. */
     private var lastAnchoredSongId: Long? = null
 
@@ -131,7 +138,7 @@ class SmartQueueCoordinator @Inject constructor(
                 .distinctUntilChanged()
                 .collect { signal ->
                     endJourneyIfUserNavigatedAway(signal.currentSongId)
-                    restoreOriginalOrderIfLeavingSmart(signal.mode)
+                    restoreOriginalOrderIfLeavingSmart(signal)
                     handOverToSmartShuffle(signal)
                     // After the handover, so a manual song choice reseeds the
                     // anchor from that song rather than folding it into the
@@ -156,11 +163,18 @@ class SmartQueueCoordinator @Inject constructor(
      * it doesn't (it was a Smart Shuffle pick from elsewhere in the
      * library), the original list simply follows it.
      */
-    private suspend fun restoreOriginalOrderIfLeavingSmart(mode: ShuffleMode) {
+    private suspend fun restoreOriginalOrderIfLeavingSmart(signal: QueueSignal) {
+        val mode = signal.mode
         val previous = lastShuffleMode
         lastShuffleMode = mode
         val wasSmart = previous == ShuffleMode.SMART || previous == ShuffleMode.JOURNEY
-        if (!wasSmart) return
+        if (!wasSmart) {
+            // Shuffle was already off: no session is running, so any
+            // snapshot still held is stale and must not be restored into a
+            // later session. (A fresh one is taken on activation.)
+            if (mode == ShuffleMode.OFF || mode == ShuffleMode.RANDOM) preShuffleQueue = null
+            return
+        }
         // Restore when leaving Smart for OFF *or* RANDOM: plain random
         // shuffles the queue that exists, and Smart Shuffle has trimmed
         // that queue down to a couple of tracks — so without putting the
@@ -172,12 +186,46 @@ class SmartQueueCoordinator @Inject constructor(
         val currentId = state.currentSong?.id
         val position = original.indexOfFirst { it.id == currentId }
         val tail = if (position >= 0) original.drop(position + 1) else original
+
+        // Anything the USER put in the queue while Smart Shuffle was on has
+        // to survive this restore. Without it, turning shuffle off wiped
+        // those songs — the same complaint as turning it on, from the other
+        // direction.
+        //
+        // Two kinds, identified differently because they are tracked
+        // differently:
+        //  - the "play next" run, which is counted explicitly, and
+        //  - songs appended to the end, which are not tracked at all, so
+        //    they are recognised by elimination: present in the queue now,
+        //    absent from the pre-shuffle snapshot, and not one of Smart
+        //    Shuffle's own picks.
+        val originalIds = original.mapTo(HashSet()) { it.id }
+        val currentTail = state.queue.drop(state.queueIndex + 1)
+        val queuedByUser = currentTail.take(signal.playNextCount) +
+            currentTail.drop(signal.playNextCount).filter {
+                it.id !in originalIds && it.id !in sessionPicks
+            }
+
+        // A preserved song may also sit somewhere in the restored order. It
+        // should play where the user put it, not twice, so one occurrence is
+        // dropped from the restored tail — one, not all, because a queue may
+        // legitimately contain the same song more than once and deleting
+        // every copy would quietly edit the user's list.
+        val restored = tail.toMutableList()
+        queuedByUser.forEach { queued ->
+            val duplicate = restored.indexOfFirst { it.id == queued.id }
+            if (duplicate >= 0) restored.removeAt(duplicate)
+        }
+
         preShuffleQueue = null
         lastHandoverSongId = null
         sessionPicks.clear()
-        if (tail.isEmpty()) return
+        if (restored.isEmpty() && queuedByUser.isEmpty()) return
         playback.removeQueueRange(state.queueIndex + 1, state.queue.size)
-        playback.addToQueueAll(tail)
+        // User-queued first: they were explicitly asked for, so they keep
+        // their place at the front of what's coming.
+        if (queuedByUser.isNotEmpty()) playback.addToQueueAll(queuedByUser)
+        if (restored.isNotEmpty()) playback.addToQueueAll(restored)
     }
 
     /**
@@ -201,8 +249,29 @@ class SmartQueueCoordinator @Inject constructor(
      * fight the user if they then re-queue something manually.
      */
     private suspend fun handOverToSmartShuffle(signal: QueueSignal) {
+        val previousMode = lastHandoverMode
+        lastHandoverMode = signal.mode
         if (signal.mode != ShuffleMode.SMART) return
         val id = signal.currentSongId ?: return
+        // Switching shuffle ON is a mode change, not a song choice — the
+        // song playing is the same one as a moment ago. Running the handover
+        // here trimmed everything after it, which is why songs queued by
+        // hand vanished the instant shuffle was pressed. Mark the current
+        // song as already handled and snapshot the queue for the restore
+        // path, but touch nothing — clearing the linear tail is
+        // [onShuffleActivated]'s job.
+        //
+        // The snapshot is only taken if activation hasn't already taken one:
+        // by the time this signal is collected the tail may already be
+        // trimmed, and snapshotting that would make turning shuffle off
+        // "restore" a queue with the original songs missing. The same goes
+        // for a journey handing back to SMART — the snapshot from before the
+        // journey is the one to keep.
+        if (previousMode != ShuffleMode.SMART) {
+            lastHandoverSongId = id
+            if (preShuffleQueue == null) preShuffleQueue = playback.playerState.value.queue
+            return
+        }
         if (id in sessionPicks) return          // we queued it: normal smart flow
         if (id == lastHandoverSongId) return    // already handled this selection
         // Rolling into the next queue entry is not a decision. Handover
@@ -292,7 +361,7 @@ class SmartQueueCoordinator @Inject constructor(
 
     /** Apply a human-readable Smart Shuffle personality preset. */
     fun setSmartStyle(style: SmartShuffleStyle) {
-        ensureShuffleActive()
+        val activated = ensureShuffleActive()
         val preset = SmartPreset.forStyle(style)
         _config.value = _config.value.copy(
             style = style,
@@ -301,7 +370,7 @@ class SmartQueueCoordinator @Inject constructor(
             variety = preset.variety,
             temperature = temperatureForVariety(preset.variety),
         )
-        refreshUpcomingQueue()
+        if (!activated) refreshUpcomingQueue()
     }
 
     fun setFamiliarity(value: Float) {
@@ -356,16 +425,21 @@ class SmartQueueCoordinator @Inject constructor(
      * stale queue instead of no-op'ing on the old OFF state.
      */
     fun setMoodFilter(mood: MoodFilter?) {
-        if (mood != null) ensureShuffleActive()
+        val activated = mood != null && ensureShuffleActive()
         _config.value = _config.value.copy(moodFilter = mood)
-        refreshUpcomingQueue()
+        // Activation already cleared the whole upcoming tail; a second,
+        // index-based drop computed from the pre-trim state would remove the
+        // wrong entries.
+        if (!activated) refreshUpcomingQueue()
     }
 
-    private fun ensureShuffleActive() {
+    /** @return true when this call switched Smart Shuffle on. */
+    private fun ensureShuffleActive(): Boolean {
         val current = playback.playerState.value.shuffleMode
-        if (current != ShuffleMode.SMART && current != ShuffleMode.JOURNEY) {
-            playback.setShuffleMode(ShuffleMode.SMART)
-        }
+        if (current == ShuffleMode.SMART || current == ShuffleMode.JOURNEY) return false
+        playback.setShuffleMode(ShuffleMode.SMART)
+        onShuffleActivated()
+        return true
     }
 
     /**
@@ -374,26 +448,53 @@ class SmartQueueCoordinator @Inject constructor(
      * visible effect if the queue was already full of straight-through
      * tracks (e.g. a whole album just queued) — [maybeTopUp] only adds
      * beyond the existing lookahead, it never replaces songs that are
-     * already sitting there. This drops everything not yet played,
-     * regardless of who queued it, since turning shuffle on is an explicit
-     * "shuffle starting now." The vacated slots are refilled automatically
-     * by the same reactive pipeline [start] sets up (queue size changes ->
-     * maybeTopUp runs). Deliberately NOT called for RANDOM: that mode relies
-     * on ExoPlayer's own native shuffle order over the existing timeline, and
-     * this coordinator never refills for RANDOM, so clearing here would just
-     * leave the queue empty.
+     * already sitting there. This drops the linear tail, since turning
+     * shuffle on is an explicit "shuffle starting now." The vacated slots are
+     * refilled automatically by the same reactive pipeline [start] sets up
+     * (queue size changes -> maybeTopUp runs). Deliberately NOT called for
+     * RANDOM: that mode relies on ExoPlayer's own native shuffle order over
+     * the existing timeline, and this coordinator never refills for RANDOM,
+     * so clearing here would just leave the queue empty.
+     *
+     * Call it only on a real transition INTO Smart Shuffle / Journey; calling
+     * it while already shuffling throws away the picks already queued.
      */
     fun onShuffleActivated() {
         // Switching Smart Shuffle on starts a new session: the anchor reseeds
         // from whatever is playing rather than carrying over a stale centroid
         // from the last time it was on.
         resetSessionAnchor()
-        val scope = coordinatorScope ?: return
         val state = playback.playerState.value
-        val toRemove = (state.queueIndex + 1 until state.queue.size).sortedDescending()
-        if (toRemove.isEmpty()) return
+
+        // Snapshot BEFORE trimming, synchronously, so turning shuffle off
+        // puts back the full running order. The handover path would take
+        // one too, but only once the mode change is collected — possibly
+        // after the trim below has already landed. An existing snapshot is
+        // kept: it belongs to a session that is still running (a journey
+        // started from Smart Shuffle, "Start Mix" pressed again).
+        if (preShuffleQueue == null) preShuffleQueue = state.queue
+        state.currentSong?.id?.let { lastHandoverSongId = it }
+
+        val scope = coordinatorScope ?: return
+
+        // Clearing the lookahead is the point — the old queue was built for
+        // whatever was playing before (usually the album / playlist / library
+        // list the song was started from), and while it sits there
+        // [maybeTopUp] never gets a turn, so the queue shows no shuffle picks
+        // at all. Everything after the current song goes, EXCEPT the
+        // play-next run: those songs are the only ones the user queued by
+        // hand (addNext is the app's only manual-queue action), so they stay
+        // at the front and Smart Shuffle continues after them.
+        //
+        // An earlier version only removed this coordinator's own picks, to
+        // protect hand-queued songs. But every song of the original list
+        // also counts as "not a pick", so on a normal queue it removed
+        // nothing and pressing shuffle had no visible effect.
+        val firstFree = (state.queueIndex + 1 + state.playNextCount)
+            .coerceAtMost(state.queue.size)
+        if (firstFree >= state.queue.size) return
         scope.launch {
-            toRemove.forEach { playback.removeFromQueue(it) }
+            playback.removeQueueRange(firstFree, state.queue.size)
         }
     }
 

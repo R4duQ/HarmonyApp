@@ -20,8 +20,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -35,15 +37,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material.icons.rounded.Casino
+import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -81,16 +88,25 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -103,6 +119,7 @@ import com.harmony.core.model.Song
 import com.harmony.core.ui.component.formatDuration
 import com.harmony.domain.playback.AudioLevel
 import com.harmony.domain.playback.AudioLevels
+import com.harmony.domain.shuffle.model.SmartShuffleStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -148,6 +165,7 @@ fun NowPlayingScreen(
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isCurrentFavorite.collectAsStateWithLifecycle()
     val journeyProgress by viewModel.journeyProgress.collectAsStateWithLifecycle()
+    val smartStyle by viewModel.smartShuffleStyle.collectAsStateWithLifecycle()
 
     var showQueue by remember { mutableStateOf(false) }
     var showShuffleSheet by remember { mutableStateOf(false) }
@@ -311,6 +329,10 @@ fun NowPlayingScreen(
             // behind the floating chrome; this screen was never meant to
             // lose its own clearance in the process, so it claims its own
             // inset here instead.
+            // Applied AFTER background so the tint still reaches the screen
+            // edge and only the controls move up. Needed again now that
+            // NavHost fills the full height and no longer reserves the
+            // bottom inset for its content.
             .navigationBarsPadding()
             .pointerInput(Unit) {
                 var totalDrag = 0f
@@ -442,6 +464,9 @@ fun NowPlayingScreen(
                         onPlayPause = viewModel::onPlayPause,
                         onNext = viewModel::onNext,
                         onShuffle = viewModel::cycleShuffleMode,
+                        onShuffleLongPress = { showShuffleSheet = true },
+                        smartStyle = smartStyle,
+                        journeyProgress = journeyProgress,
                         playSize = 64,
                         sideSize = 48,
                     )
@@ -514,6 +539,9 @@ fun NowPlayingScreen(
                 onPlayPause = viewModel::onPlayPause,
                 onNext = viewModel::onNext,
                 onShuffle = viewModel::cycleShuffleMode,
+                onShuffleLongPress = { showShuffleSheet = true },
+                smartStyle = smartStyle,
+                journeyProgress = journeyProgress,
                 playSize = 72,
                 sideSize = 54,
             )
@@ -1028,6 +1056,9 @@ private fun Transport(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onShuffle: () -> Unit,
+    onShuffleLongPress: () -> Unit,
+    smartStyle: SmartShuffleStyle,
+    journeyProgress: Float?,
     playSize: Int,
     sideSize: Int,
 ) {
@@ -1107,21 +1138,178 @@ private fun Transport(
             )
         }
 
-        PlayerCircleButton(
+        ShuffleButton(
+            mode = state.shuffleMode,
+            smartStyle = smartStyle,
+            journeyProgress = journeyProgress,
+            tint = shuffleTint,
+            palette = palette,
             onClick = onShuffle,
-            contentDescription = if (state.shuffleMode == ShuffleMode.OFF) {
-                "Turn on Smart Shuffle"
-            } else {
-                "Turn off shuffle (currently ${state.shuffleMode})"
-            },
-            contentColor = shuffleTint,
+            onLongClick = onShuffleLongPress,
+        )
+    }
+}
+
+/**
+ * The shuffle toggle, which has to say more than "on" once it is on: there
+ * are three different things it can be doing (Smart, Random, a Journey), and
+ * a tinted icon alone reads the same for all of them — or, against the
+ * low-contrast player field, barely reads as on at all.
+ *
+ * Active, it becomes a filled accent disc with a stronger rim, the icon picks
+ * up a small mode glyph, and a label pill under the circle names the mode
+ * ("Smart", "Flow", "Random", "Journey 40%"). The pill overlaps the circle's
+ * lower edge rather than sitting below it, so switching modes never changes
+ * the transport row's height and nothing around it jumps.
+ *
+ * Long press opens the Smart Shuffle sheet, where the mode and style shown
+ * here can be changed.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ShuffleButton(
+    mode: ShuffleMode,
+    smartStyle: SmartShuffleStyle,
+    journeyProgress: Float?,
+    tint: Color,
+    palette: PlayerPalette,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    size: Dp = 46.dp,
+) {
+    val active = mode != ShuffleMode.OFF
+    val haptics = LocalHapticFeedback.current
+    val container by animateColorAsState(
+        targetValue = if (active) palette.accent.copy(alpha = 0.18f) else palette.control,
+        label = "shuffle-container",
+    )
+    val rim by animateColorAsState(
+        targetValue = if (active) palette.accent.copy(alpha = 0.65f) else palette.controlEdge,
+        label = "shuffle-rim",
+    )
+    val iconScale by animateFloatAsState(
+        targetValue = if (active) 1.08f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "shuffle-pop",
+    )
+    val label = shuffleBadgeLabel(mode, smartStyle, journeyProgress)
+    val description = when (mode) {
+        ShuffleMode.OFF -> "Shuffle off. Tap to turn on Smart Shuffle"
+        ShuffleMode.SMART -> "Smart Shuffle on, ${label.lowercase()} style. Tap to turn off"
+        ShuffleMode.RANDOM -> "Random shuffle on. Tap to turn off"
+        ShuffleMode.JOURNEY -> "$label. Tap to turn shuffle off"
+    } + ", long press for shuffle options."
+
+    Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(container)
+                .border(if (active) 1.5.dp else 1.dp, rim, CircleShape)
+                .combinedClickable(
+                    role = Role.Button,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onClick()
+                    },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick()
+                    },
+                )
+                // One announced button, not a button wrapping labelled parts.
+                .clearAndSetSemantics { contentDescription = description },
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Rounded.Shuffle,
                 contentDescription = null,
-                tint = shuffleTint,
-                modifier = Modifier.size(20.dp),
+                tint = tint,
+                modifier = Modifier
+                    .size(20.dp)
+                    .scale(iconScale),
+            )
+            // Small mode glyph in the icon's corner: sparkle for Smart, dice
+            // for Random, compass for a Journey.
+            AnimatedContent(
+                targetState = mode,
+                transitionSpec = {
+                    (scaleIn(initialScale = 0.4f) + fadeIn())
+                        .togetherWith(scaleOut(targetScale = 0.4f) + fadeOut())
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 7.dp, end = 7.dp),
+                label = "shuffle-glyph",
+            ) { shown ->
+                val glyph = when (shown) {
+                    ShuffleMode.SMART -> Icons.Rounded.AutoAwesome
+                    ShuffleMode.RANDOM -> Icons.Rounded.Casino
+                    ShuffleMode.JOURNEY -> Icons.Rounded.Explore
+                    ShuffleMode.OFF -> null
+                }
+                if (glyph != null) {
+                    Icon(
+                        glyph,
+                        contentDescription = null,
+                        tint = palette.accent,
+                        modifier = Modifier.size(10.dp),
+                    )
+                } else {
+                    Spacer(Modifier.size(10.dp))
+                }
+            }
+        }
+
+        // Mode label pill. Not a Surface: a non-clickable Surface still
+        // swallows touches, which would make the lower part of the button
+        // dead to taps.
+        AnimatedVisibility(
+            visible = active,
+            enter = scaleIn(initialScale = 0.6f) + fadeIn(),
+            exit = scaleOut(targetScale = 0.6f) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = 9.dp),
+        ) {
+            val onAccent = if (palette.accent.luminance() > 0.5f) palette.onPrimaryControl else Color.White
+            Text(
+                text = label.uppercase(),
+                fontSize = 8.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp,
+                color = onAccent,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(palette.accent)
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
             )
         }
+    }
+}
+
+/** Short, human name for what shuffle is doing — shown under the button. */
+private fun shuffleBadgeLabel(
+    mode: ShuffleMode,
+    smartStyle: SmartShuffleStyle,
+    journeyProgress: Float?,
+): String = when (mode) {
+    ShuffleMode.OFF -> "Off"
+    ShuffleMode.RANDOM -> "Random"
+    ShuffleMode.JOURNEY -> journeyProgress
+        ?.let { "Journey ${(it * 100).toInt().coerceIn(0, 100)}%" }
+        ?: "Journey"
+    // The sparkle glyph already says "Smart", so a non-default style is
+    // named on its own. Kept short on purpose: the pill hangs off the
+    // row's last button and must stay inside the screen gutter.
+    ShuffleMode.SMART -> when (smartStyle) {
+        SmartShuffleStyle.BALANCED -> "Smart"
+        SmartShuffleStyle.FAMILIAR -> "Familiar"
+        SmartShuffleStyle.DISCOVER -> "Discover"
+        SmartShuffleStyle.FLOW -> "Flow"
     }
 }

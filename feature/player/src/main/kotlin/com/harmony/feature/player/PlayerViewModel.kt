@@ -128,9 +128,7 @@ class PlayerViewModel @Inject constructor(
     fun cycleShuffleMode() {
         val current = playerState.value.shuffleMode
         val next = if (current == ShuffleMode.OFF) ShuffleMode.SMART else ShuffleMode.OFF
-        coordinator.onShuffleModeChosen(next)
-        playback.setShuffleMode(next)
-        if (next == ShuffleMode.SMART) coordinator.onShuffleActivated()
+        setShuffleMode(next)
     }
 
     /**
@@ -139,9 +137,15 @@ class PlayerViewModel @Inject constructor(
      * on immediately after the user asked for Off.
      */
     fun setShuffleMode(mode: ShuffleMode) {
+        val wasSmart = playerState.value.shuffleMode.let {
+            it == ShuffleMode.SMART || it == ShuffleMode.JOURNEY
+        }
         coordinator.onShuffleModeChosen(mode)
         playback.setShuffleMode(mode)
-        if (mode == ShuffleMode.SMART) coordinator.onShuffleActivated()
+        // Only a real switch INTO Smart Shuffle clears the linear queue.
+        // Tapping "Smart" while it is already on (or while a journey hands
+        // back to it) must keep the picks already lined up.
+        if (mode == ShuffleMode.SMART && !wasSmart) coordinator.onShuffleActivated()
     }
 
     fun setPlaybackSpeed(speed: Float) = playback.setPlaybackSpeed(speed)
