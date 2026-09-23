@@ -1,4 +1,4 @@
-# Verificări pentru Harmony 1.0.0
+# Verificări pentru Harmony 1.0
 
 Testele obișnuite sunt în modulele `src/test`. Cu SDK-ul și Gradle configurate:
 

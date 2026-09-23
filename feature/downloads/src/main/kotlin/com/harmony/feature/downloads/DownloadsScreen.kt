@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,8 +65,8 @@ import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.EditorialPill
 import com.harmony.core.ui.component.EditorialSectionLabel
 import com.harmony.core.ui.component.animatedEditorialPalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.analysis.model.SpectralReport
-import com.harmony.core.ui.component.FloatingChromeClearance
 
 @Composable
 fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsViewModel = hiltViewModel()) {
@@ -81,6 +82,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
     // why it showed an artist/song search box instead of a URL field.
     val soulseekArmed = state.preferredDownloadSource == DownloadSource.SOULSEEK
     val converterArmed = state.preferredDownloadSource == DownloadSource.YTCONVERTER
+    var albumsMode by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -120,7 +122,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
             .fillMaxSize()
             .background(palette.field)
             .verticalScroll(rememberScrollState())
-            .padding(bottom = FloatingChromeClearance),
+            .padding(bottom = LocalFloatingChromeHeight.current),
     ) {
         Text(
             "Downloads",
@@ -132,7 +134,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
             modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp),
         )
         Text(
-            "Find a track, then explicitly choose SpotiFLAC or Soulseek before downloading. Harmony never switches engines automatically, and both save through the same local-file pipeline.",
+            "Download a track, a full album, or selected album songs through SpotiFLAC or Soulseek. Choose the audio source explicitly; Harmony never switches engines automatically.",
             fontSize = 13.sp,
             lineHeight = 18.sp,
             color = palette.muted,
@@ -153,7 +155,35 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
 
         AlbumDownloadsShelf(onOpenAlbum, palette)
 
-        if (soulseekArmed) {
+        if (!converterArmed) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FilterChip(selected = !albumsMode, onClick = { albumsMode = false }, label = { Text("Tracks") })
+                FilterChip(selected = albumsMode, onClick = { albumsMode = true }, label = { Text("Albums") })
+            }
+            if (albumsMode) {
+                // Soulseek album search needs a live peer session, so the
+                // search box is gated on it the same way the Tracks tab's
+                // is. The connect card was already shown here when signed
+                // out, but the search box below it rendered regardless —
+                // so it looked usable, and typing in it could only fail.
+                val soulseekReady = state.soulseekConnection.status == SoulseekConnectionStatus.CONNECTED
+                if (soulseekArmed && !soulseekReady) {
+                    SoulseekConnectCard(state.soulseekConnection, state.soulseekUsername, state.soulseekPassword,
+                        viewModel::setSoulseekUsername, viewModel::setSoulseekPassword, viewModel::connectSoulseek,
+                        palette, Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+                }
+                if (!soulseekArmed || soulseekReady) {
+                    AlbumSearchSection(source = state.preferredDownloadSource,
+                        format = if (soulseekArmed) {
+                            if (state.soulseekFormatPreference.preferredExtension == "mp3") SpotiFlacOutputFormat.MP3_320
+                            else SpotiFlacOutputFormat.FLAC_LOSSLESS
+                        } else state.spotiFlacOutputFormat,
+                        palette = palette, onOpenAlbum = onOpenAlbum)
+                }
+            }
+        }
+
+        if (soulseekArmed && !albumsMode) {
             SoulseekDownloadsLayout(
                 state = state,
                 palette = palette,
@@ -189,7 +219,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
             )
         }
 
-        if (!soulseekArmed && !converterArmed) {
+        if (!soulseekArmed && !converterArmed && !albumsMode) {
             SpotiFlacDownloadsLayout(
                 state = state,
                 palette = palette,
@@ -779,6 +809,7 @@ private fun SpotiFlacDownloadsLayout(
                                     buildString {
                                         append(candidate.matchScore)
                                         append("% match")
+                                        if (candidate.source != "Deezer") append(" · via ${candidate.source}")
                                         if (candidate.durationMs > 0L) {
                                             append(" · ")
                                             append(formatTrackDuration(candidate.durationMs))

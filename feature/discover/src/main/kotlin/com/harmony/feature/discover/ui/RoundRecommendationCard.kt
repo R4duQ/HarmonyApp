@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.feature.discover.model.SwipeRound
+import androidx.compose.ui.graphics.luminance
+import com.harmony.core.ui.component.GlassCard
 
 @Composable
 internal fun RoundRecommendationCard(state: DiscoverUiState, palette: EditorialPalette, busy: Boolean,
@@ -33,10 +35,14 @@ internal fun RoundRecommendationCard(state: DiscoverUiState, palette: EditorialP
             Text("Every eligible album is marked as listened. You can revisit them in All albums or start another round.", color = palette.muted)
         } else {
             val album = result.album
-            val paper = Color(0xFFF7F3EB)
-            val quiet = Color(0xFFBFC4BD)
+            // Was a hardcoded near-black card with cream text — Discover's
+            // own palette, unrelated to the rest of the app. The album's own
+            // colour is kept for the accents, since that genuinely varies
+            // per record and is the one thing here that should.
+            val paper = palette.ink
+            val quiet = palette.muted
             val accent = Color(album.color)
-            Surface(color = Color(0xFF171A19), shape = RoundedCornerShape(26.dp)) {
+            GlassCard(palette = palette) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         AlbumCover(album, Modifier.widthIn(max = 320.dp).fillMaxWidth().aspectRatio(1f)
@@ -60,9 +66,16 @@ internal fun RoundRecommendationCard(state: DiscoverUiState, palette: EditorialP
                     }
                     val entry = result.supportingSongs.firstOrNull { it.album.id == album.id }?.title ?: album.entryTracks.first()
                     Text("Start with: $entry", color = quiet, fontSize = 13.sp)
+                    // Keeps a solid fill in the album's own colour: this is
+                    // the card's single primary action, and turning it into
+                    // another outline would leave the panel with no focus.
                     Button(onClick = { onDownload(album.id) }, enabled = !busy,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color(0xFF171A19))) {
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accent,
+                            contentColor = if (accent.luminance() < 0.5f) Color.White else Color(0xFF171A19),
+                        )) {
                         Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(8.dp))
                         Text("Open album · choose tracks")
                     }

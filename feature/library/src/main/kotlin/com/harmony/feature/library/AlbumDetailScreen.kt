@@ -43,8 +43,8 @@ import com.harmony.core.ui.component.amberPalette
 import com.harmony.core.ui.component.formatLongDuration
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
-import com.harmony.core.ui.component.MiniPlayerClearance
 import com.harmony.core.ui.component.DetailCardScaffold
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -105,7 +105,7 @@ fun AlbumDetailScreen(viewModel: AlbumDetailViewModel = hiltViewModel()) {
         title = first?.album ?: "Album",
         palette = palette,
         modifier = Modifier.background(palette.field),
-        contentPadding = PaddingValues(bottom = MiniPlayerClearance),
+        contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current),
         header = {
             Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 8.dp)) {
                 Text(

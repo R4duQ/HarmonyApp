@@ -48,6 +48,11 @@ interface HistoryDao {
     @Query("SELECT DISTINCT songId FROM play_history WHERE playedAt >= :sinceMillis")
     suspend fun recentSongIds(sinceMillis: Long): List<Long>
 
+    data class ListeningEventRow(val songId: Long, val playedAt: Long, val completed: Boolean)
+
+    @Query("SELECT songId, playedAt, completed FROM play_history ORDER BY playedAt DESC LIMIT :limit")
+    suspend fun recentEvents(limit: Int): List<ListeningEventRow>
+
     data class BehaviorStatsRow(
         val songId: Long,
         val completedPlays: Int,

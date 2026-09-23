@@ -48,6 +48,9 @@ class PlaybackHistoryRepositoryImpl @Inject constructor(
     override suspend fun recentSongIds(windowMillis: Long): List<Long> =
         historyDao.recentSongIds(System.currentTimeMillis() - windowMillis)
 
+    override suspend fun listeningEvents(limit: Int): List<com.harmony.domain.library.discovery.ListeningEvent> =
+        historyDao.recentEvents(limit).map { com.harmony.domain.library.discovery.ListeningEvent(it.songId, it.playedAt, it.completed) }
+
     private companion object {
         const val SQLITE_QUERY_CHUNK = 900
     }

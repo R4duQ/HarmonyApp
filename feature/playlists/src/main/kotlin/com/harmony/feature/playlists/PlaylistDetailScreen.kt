@@ -22,7 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.harmony.core.model.SmartPlaylistType
 import com.harmony.core.model.Song
-import com.harmony.core.ui.component.MiniPlayerClearance
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.core.ui.component.greenPalette
 import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
@@ -227,7 +227,7 @@ fun PlaylistDetailScreen(
         ui = ui,
         palette = palette,
         actions = actions,
-        bottomPadding = MiniPlayerClearance,
+        bottomPadding = LocalFloatingChromeHeight.current,
         // Saveable: coming back from Now Playing lands on the same row.
         listState = rememberLazyListState(),
     )

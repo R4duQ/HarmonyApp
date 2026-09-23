@@ -42,6 +42,23 @@ interface PlaylistDao {
     @Insert
     suspend fun insert(playlist: PlaylistEntity): Long
 
+    @Query("SELECT COUNT(*) FROM playlists WHERE id = :id")
+    suspend fun exists(id: Long): Int
+
+    @Query("SELECT DISTINCT songId FROM playlist_songs WHERE playlistId > 0")
+    suspend fun userPlaylistSongIds(): List<Long>
+
+    /** Negative, deterministic import IDs never collide with SQLite's positive generated IDs. */
+    @Transaction
+    suspend fun insertDiscoveryOnce(id: Long, name: String, songIds: List<Long>): Long {
+        require(id < 0 && songIds.isNotEmpty() && songIds.distinct().size == songIds.size)
+        if (exists(id) == 0) {
+            insert(PlaylistEntity(id = id, name = name, createdAt = System.currentTimeMillis()))
+            replaceSongOrder(id, songIds)
+        }
+        return id
+    }
+
     @Query("UPDATE playlists SET name = :name WHERE id = :id")
     suspend fun rename(id: Long, name: String)
 

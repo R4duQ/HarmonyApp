@@ -77,9 +77,9 @@ import com.harmony.core.ui.component.EditorialTab
 import com.harmony.core.ui.component.EditorialTabs
 import com.harmony.core.ui.component.EmptyState
 import com.harmony.core.ui.component.greenPalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
-import com.harmony.core.ui.component.FloatingChromeClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -310,7 +310,7 @@ fun PlaylistsScreen(
                 0 -> LazyColumn(
                     Modifier.fillMaxSize(),
                     state = smartListState,
-                    contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
+                    contentPadding = PaddingValues(top = 2.dp, bottom = LocalFloatingChromeHeight.current),
                 ) {
                     items(SmartPlaylistType.entries, key = { it.name }) { type ->
                         SmartPlaylistRow(
@@ -331,7 +331,7 @@ fun PlaylistsScreen(
                         LazyColumn(
                             Modifier.fillMaxSize(),
                             state = yoursListState,
-                            contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
+                            contentPadding = PaddingValues(top = 2.dp, bottom = LocalFloatingChromeHeight.current),
                         ) {
                             items(cards, key = { it.id }) { card ->
                                 PlaylistRow(

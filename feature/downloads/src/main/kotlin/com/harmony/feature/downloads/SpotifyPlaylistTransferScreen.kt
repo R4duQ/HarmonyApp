@@ -70,6 +70,7 @@ import com.harmony.core.ui.component.EditorialPill
 import com.harmony.core.ui.component.EditorialSectionLabel
 import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.greenPalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 
 @Composable
 fun SpotifyPlaylistTransferScreen(
@@ -91,7 +92,7 @@ fun SpotifyPlaylistTransferScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(palette.field),
-        contentPadding = PaddingValues(bottom = 30.dp),
+        contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {

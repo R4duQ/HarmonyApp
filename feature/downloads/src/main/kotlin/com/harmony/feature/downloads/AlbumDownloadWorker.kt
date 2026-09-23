@@ -42,10 +42,15 @@ class AlbumDownloadWorker @AssistedInject constructor(
         val stored = albums.journeys.value.find { it.id == albumId } ?: return Result.failure()
         val album = stored.copy(source = inputData.getString(KEY_SOURCE) ?: stored.source,
             format = inputData.getString(KEY_FORMAT) ?: stored.format)
-        val selectedIds = inputData.getStringArray(KEY_TRACKS)?.toSet()
-            ?: album.tracks.filter { it.selectedForDownload }.map { it.id }.toSet()
-        val selected = album.tracks.filter { it.id in selectedIds }
-        if (selected.isEmpty()) return Result.failure()
+        val selected = try {
+            val source = AlbumDownloadPolicy.source(album.source)
+            check(AlbumDownloadPolicy.formatFor(source, SpotiFlacOutputFormat.fromName(album.format)).name == album.format) {
+                "This source does not support the selected album format."
+            }
+            AlbumDownloadPolicy.tracksFor(album, inputData.getStringArray(KEY_TRACKS)?.toSet())
+        } catch (e: IllegalArgumentException) { return Result.failure()
+        } catch (e: IllegalStateException) { return Result.failure() }
+        val selectedIds = selected.map { it.id }.toSet()
         var needsRetry = false
         try {
             setForeground(notification(album.title, "Preparing album…"))
@@ -98,7 +103,11 @@ class AlbumDownloadWorker @AssistedInject constructor(
                 ?.count { it.id in selectedIds && it.uri == null } ?: selected.size
             status.publishOutcome(album.title, remaining == 0,
                 if (remaining == 0) "Selected tracks are ready in Library." else "$remaining selected tracks need another attempt.")
-            return if (needsRetry && runAttemptCount < 2) Result.retry() else Result.success()
+            return when {
+                remaining == 0 -> Result.success()
+                needsRetry && runAttemptCount < 2 -> Result.retry()
+                else -> Result.failure() // A partially failed album is not a completed download.
+            }
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
                 albums.journeys.value.find { it.id == albumId }?.tracks?.filter { it.status == "Downloading" }?.forEach { t ->

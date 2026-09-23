@@ -51,10 +51,12 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.coralPalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
+import com.harmony.core.ui.component.EditorialPill
+import com.harmony.core.ui.component.GlassCard
 import com.harmony.core.ui.network.InternetNotice
 import com.harmony.feature.discover.model.*
 import com.harmony.feature.discover.provider.*
-import com.harmony.core.ui.component.FloatingChromeClearance
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
@@ -66,7 +68,7 @@ private val QuietPaper = Color(0xFFBFC4BD)
 
 /** The parent scrolls vertically; the native pager owns only horizontal swipes. */
 @Composable
-fun DiscoverScreen(
+internal fun LegacyAlbumDiscoverScreen(
     onSearchLibrary: (String) -> Unit = {},
     onDownloadAlbum: (String) -> Unit = {},
     provider: DiscoveryProvider = ShflDiscoveryProvider,
@@ -122,7 +124,7 @@ fun DiscoverScreen(
     }
 
     Box(Modifier.fillMaxSize().background(palette.field)) {
-        LazyColumn(state = scroll, contentPadding = PaddingValues(bottom = FloatingChromeClearance),
+        LazyColumn(state = scroll, contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current),
             modifier = Modifier.align(Alignment.TopCenter).widthIn(max = 600.dp).fillMaxSize()) {
             item(key = "heading") {
                 Column(Modifier.padding(horizontal = 22.dp, vertical = 14.dp)) {
@@ -459,21 +461,26 @@ internal fun AlbumCover(album: DiscoverAlbum, modifier: Modifier) {
 
 @Composable
 private fun EmptyAlbumShelf(state: DiscoverUiState, palette: EditorialPalette, onBrowse: () -> Unit) {
-    Surface(Modifier.padding(24.dp).fillMaxWidth(), color = Sleeve, shape = RoundedCornerShape(26.dp)) {
+    // Glass, not the Sleeve black used by the record artwork below. This
+    // panel is app chrome — an empty state with a button — so it belongs to
+    // the same surface language as every other card in the app. The sleeve
+    // colour stays where it means something: on the album covers, which are
+    // meant to look like record sleeves.
+    GlassCard(palette = palette, modifier = Modifier.padding(24.dp).fillMaxWidth()) {
         Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.Album, null, tint = Paper, modifier = Modifier.size(62.dp))
+            Icon(Icons.Rounded.Album, null, tint = palette.ink, modifier = Modifier.size(62.dp))
             Text(when {
                 state.shelf == AlbumShelf.SAVED && state.savedCount == 0 -> "Make room for a full listen."
                 state.genre != null -> "No albums in this selection."
                 else -> "You've explored this selection."
-            }, color = Paper, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold,
+            }, color = palette.ink, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 20.dp))
             Text(if (state.shelf == AlbumShelf.SAVED && state.savedCount == 0)
                 "Tap the bookmark on an album to keep it here for later."
             else "Browse all albums, including records you've marked as listened.",
-                color = QuietPaper, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 10.dp))
-            Button(onClick = onBrowse, colors = ButtonDefaults.buttonColors(containerColor = palette.accent, contentColor = palette.onAccent),
-                modifier = Modifier.padding(top = 20.dp)) { Text("Browse albums") }
+                color = palette.muted, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 10.dp))
+            EditorialPill("Browse albums", Icons.Rounded.Album, onBrowse, palette,
+                Modifier.padding(top = 20.dp))
         }
     }
 }

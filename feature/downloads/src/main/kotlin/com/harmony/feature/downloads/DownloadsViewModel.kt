@@ -236,9 +236,7 @@ class DownloadsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             spotiFlacEngine.verificationEvents.collect { result ->
-                if (spotiFlacEngine.pendingVerificationOwner() ==
-                    SpotiFlacRequestOwner.PLAYLIST_TRANSFER
-                ) return@collect
+                if (spotiFlacEngine.pendingVerificationOwner()?.let { it != SpotiFlacRequestOwner.DOWNLOADS } == true) return@collect
                 handleSpotiFlacVerificationResult(result)
             }
         }
@@ -1432,7 +1430,7 @@ class DownloadsViewModel @Inject constructor(
                         spotiFlacSearchResults = results,
                         identifiedTrack = null,
                         message = if (results.isEmpty()) {
-                            "No sufficiently close track match was found. Try a more precise artist - song query."
+                            "No close match on Tidal (SpotiFLAC), Deezer or Apple Music. Check the spelling, or try \"artist - song\" or just the song title."
                         } else {
                             "Found ${results.size} verified metadata match${if (results.size == 1) "" else "es"}. Select the correct track before downloading."
                         },

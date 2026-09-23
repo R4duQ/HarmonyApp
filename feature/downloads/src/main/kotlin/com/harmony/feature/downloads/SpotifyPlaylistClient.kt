@@ -505,7 +505,7 @@ class SpotifyPlaylistClient @Inject constructor(
         private const val TOKEN_EXPIRY_MARGIN_MS = 60_000L
         private const val DEFAULT_TOKEN_LIFETIME_SECONDS = 3_600L
         private const val MAX_PAGES = 2_000
-        private const val USER_AGENT = "Harmony/1.0.0 Android PlaylistTransfer"
+        private const val USER_AGENT = "Harmony/1.0 Android PlaylistTransfer"
         private val SPOTIFY_ID = Regex("[A-Za-z0-9]{10,64}")
         private val PLAYLIST_LINK = Regex(
             "(?:open\\.spotify\\.com/(?:intl-[^/]+/)?playlist/|spotify:playlist:)([A-Za-z0-9]{10,64})",

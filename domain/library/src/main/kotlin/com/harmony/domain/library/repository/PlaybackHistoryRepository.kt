@@ -36,4 +36,7 @@ interface PlaybackHistoryRepository {
 
     /** Song ids played within the last [windowMillis]; Smart Shuffle's anti-repetition input. */
     suspend fun recentSongIds(windowMillis: Long): List<Long>
+
+    /** Raw play events, newest first, for Discover's taste profile (recency, skips, replays). */
+    suspend fun listeningEvents(limit: Int = 5_000): List<com.harmony.domain.library.discovery.ListeningEvent> = emptyList()
 }

@@ -21,6 +21,10 @@ import javax.inject.Singleton
 abstract class DataLibraryModule {
 
     @Binds @Singleton
+    abstract fun bindSongDiscovery(impl: com.harmony.data.library.SongDiscoveryRepositoryImpl):
+        com.harmony.domain.library.repository.SongDiscoveryRepository
+
+    @Binds @Singleton
     abstract fun bindAlbumJourneys(impl: com.harmony.data.library.AlbumJourneyRepositoryImpl):
         com.harmony.domain.library.repository.AlbumJourneyRepository
 

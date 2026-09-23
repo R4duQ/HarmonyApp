@@ -23,6 +23,12 @@ interface PlaylistRepository {
     fun observeSmartPlaylist(type: SmartPlaylistType, limit: Int = 200): Flow<List<Song>>
 
     suspend fun create(name: String): Long
+    /** Songs in the user's own playlists; Discover-made playlists (negative ids) are left out. */
+    suspend fun userPlaylistSongIds(): Set<Long> = emptySet()
+
+    /** Atomically saves a Discover selection (all of it, or the part available now). Replaying the same key is idempotent. */
+    suspend fun saveDiscoveryBatch(batchId: String, name: String, songIds: List<Long>): Long =
+        error("Discovery playlist import is unavailable")
     suspend fun rename(playlistId: Long, name: String)
     suspend fun delete(playlistId: Long)
     suspend fun addSongs(playlistId: Long, songIds: List<Long>)
