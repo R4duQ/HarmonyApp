@@ -1,216 +1,157 @@
 package com.harmony.feature.library
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import com.harmony.core.model.Song
-import com.harmony.core.ui.component.Artwork
-import com.harmony.core.ui.component.EditorialPill
-import com.harmony.core.ui.component.EditorialSongCard
-import com.harmony.core.ui.component.EmptyState
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.core.ui.component.amberPalette
-import com.harmony.core.ui.component.formatLongDuration
 import com.harmony.domain.library.repository.LibraryRepository
+import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
-import com.harmony.core.ui.component.MiniPlayerClearance
-import com.harmony.core.ui.component.DetailCardScaffold
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AlbumDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    libraryRepository: LibraryRepository,
+    private val libraryRepository: LibraryRepository,
     private val playSongs: PlaySongsUseCase,
-    private val playback: com.harmony.domain.playback.PlaybackController,
+    private val playback: PlaybackController,
     private val fileActions: LibraryFileActions,
 ) : ViewModel() {
 
-    fun deleteSong(song: Song) { fileActions.requestDelete(listOf(song)) }
-    fun deleteAlbum(songs: List<Song>) { fileActions.requestDelete(songs) }
-
-    /** Insert directly AFTER the current song ("play next"), not at the end. */
-    fun addToQueue(song: Song) {
-        viewModelScope.launch { playback.addNext(song) }
-    }
     private val albumId: Long = checkNotNull(savedStateHandle["albumId"])
 
-    val songs: StateFlow<List<Song>> = libraryRepository.observeSongsByAlbum(albumId)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Null until the first read, so the page shows a skeleton rather than "not in your library". */
+    val songs: StateFlow<List<Song>?> = libraryRepository.observeSongsByAlbum(albumId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
-    fun play(list: List<Song>, index: Int) = viewModelScope.launch { playSongs(list, index) }
+    /** Which song is current and whether it is playing, for the row meter and the turning record. */
+    val nowPlaying: StateFlow<Pair<Long?, Boolean>> = playback.playerState
+        .map { it.currentSong?.id to it.isPlaying }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null to false)
 
-    /** Shuffle the album: same list, random entry point. */
+    internal val moreByArtist: StateFlow<List<OtherAlbum>> = songs
+        .filterNotNull()
+        .map { if (it.isEmpty()) null else AlbumDetailFormat.headline(it).artistLink }
+        .distinctUntilChanged()
+        .flatMapLatest { artist ->
+            if (artist == null) flowOf(emptyList())
+            else libraryRepository.observeSongsByArtist(artist).map { AlbumDetailFormat.otherAlbums(it, artist, albumId) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    fun play(list: List<Song>, index: Int) {
+        viewModelScope.launch { playSongs(list, index) }
+    }
+
+    /** Shuffle the album: same songs, random order. */
     fun shuffle(list: List<Song>) {
         if (list.isEmpty()) return
         viewModelScope.launch { playSongs(list.shuffled(), 0) }
     }
+
+    /** Insert directly after the current song. */
+    fun playNext(song: Song) {
+        viewModelScope.launch { playback.addNext(song) }
+    }
+
+    /**
+     * The whole album right after the current song, in album order. Each
+     * insert goes directly after the current song, so inserting last track
+     * first leaves them in order.
+     */
+    fun playAlbumNext(list: List<Song>) {
+        viewModelScope.launch { list.asReversed().forEach { playback.addNext(it) } }
+    }
+
+    fun addAlbumToQueue(list: List<Song>) {
+        viewModelScope.launch { playback.addToQueueAll(list) }
+    }
+
+    /** Android asks the user to confirm before any file is deleted. */
+    fun delete(list: List<Song>) {
+        if (list.isNotEmpty()) fileActions.requestDelete(list)
+    }
+
+    private companion object {
+        const val STOP_TIMEOUT_MS = 5_000L
+    }
 }
 
 /**
- * Album detail in the amber editorial treatment, matching Library and the
- * artist page: framed cover, album title, artist and stats, then the track
- * list as outlined cards.
- *
- * Title and artist come from the songs themselves rather than from an
- * album-by-id query — every song already carries `album` and `albumArtist`,
- * and the flow re-emits on any change, so there's nothing to keep in sync.
+ * Album detail. The layout lives in [AlbumDetailContent]; this wires it to
+ * the library, the player and the add-to-playlist sheet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlbumDetailScreen(viewModel: AlbumDetailViewModel = hiltViewModel()) {
+fun AlbumDetailScreen(
+    onBack: () -> Unit = {},
+    onOpenArtist: (String) -> Unit = {},
+    onOpenAlbum: (Long) -> Unit = {},
+    viewModel: AlbumDetailViewModel = hiltViewModel(),
+) {
     val songs by viewModel.songs.collectAsStateWithLifecycle()
-    var addToPlaylistSongId by remember { mutableStateOf<Long?>(null) }
-    val palette = amberPalette()
+    val nowPlaying by viewModel.nowPlaying.collectAsStateWithLifecycle()
+    val moreByArtist by viewModel.moreByArtist.collectAsStateWithLifecycle()
+    var addToPlaylist by remember { mutableStateOf<List<Long>?>(null) }
 
-    val first = songs.firstOrNull()
-    val totalMs = remember(songs) { songs.sumOf { it.durationMs } }
-
-    DetailCardScaffold(
-        title = first?.album ?: "Album",
-        palette = palette,
-        modifier = Modifier.background(palette.field),
-        contentPadding = PaddingValues(bottom = MiniPlayerClearance),
-        header = {
-            Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 8.dp)) {
-                Text(
-                    "ALBUM",
-                    fontSize = 11.sp,
-                    letterSpacing = 2.2.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.ink,
-                )
-                Row(
-                    modifier = Modifier.padding(top = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .size(96.dp)
-                            .border(1.5.dp, palette.line, RoundedCornerShape(16.dp)),
-                    ) {
-                        Artwork(
-                            artworkUri = first?.artworkUri,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(1.5.dp),
-                            cornerRadius = 14.dp,
-                        )
-                    }
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .padding(start = 16.dp),
-                    ) {
-                        Text(
-                            first?.album ?: "Album",
-                            fontSize = 26.sp,
-                            lineHeight = 30.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.7).sp,
-                            color = palette.ink,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            first?.albumArtist ?: first?.artist ?: "",
-                            fontSize = 13.sp,
-                            color = palette.muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 3.dp),
-                        )
-                        Text(
-                            "${songs.size} songs  •  ${formatLongDuration(totalMs)}",
-                            fontSize = 12.sp,
-                            color = palette.muted,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                }
-                if (songs.isNotEmpty()) {
-                    Row(Modifier.padding(top = 14.dp)) {
-                        EditorialPill(
-                            text = "Play",
-                            icon = Icons.Rounded.PlayArrow,
-                            onClick = { viewModel.play(songs, 0) },
-                            palette = palette,
-                        )
-                        Box(Modifier.size(10.dp))
-                        EditorialPill(
-                            text = "Shuffle",
-                            icon = Icons.Rounded.Shuffle,
-                            onClick = { viewModel.shuffle(songs) },
-                            palette = palette,
-                        )
-                    }
-                }
-            }
-        },
-    ) {
-        if (songs.isEmpty()) {
-            item {
-                EmptyState("Nothing here", "This album has no tracks in your library.")
-            }
-        }
-
-        if (songs.isNotEmpty()) item {
-            androidx.compose.material3.TextButton(onClick = { viewModel.deleteAlbum(songs) }, modifier = Modifier.padding(horizontal = 22.dp)) {
-                Text("Delete album from phone", color = androidx.compose.material3.MaterialTheme.colorScheme.error)
-            }
-        }
-        itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
-            EditorialSongCard(
-                song = song,
-                palette = palette,
-                onClick = { viewModel.play(songs, index) },
-                onPlayNext = { viewModel.addToQueue(song) },
-                onAddToPlaylist = { addToPlaylistSongId = song.id },
-                onRemove = { viewModel.deleteSong(song) },
-                removeLabel = "Delete from phone",
-            )
-        }
+    val back by rememberUpdatedState(onBack)
+    val openArtist by rememberUpdatedState(onOpenArtist)
+    val openAlbum by rememberUpdatedState(onOpenAlbum)
+    val actions = remember(viewModel) {
+        AlbumDetailActions(
+            onBack = { back() },
+            onPlay = viewModel::play,
+            onShuffle = viewModel::shuffle,
+            onPlayNext = viewModel::playNext,
+            onAddToPlaylist = { addToPlaylist = it },
+            onDelete = viewModel::delete,
+            onPlayAlbumNext = viewModel::playAlbumNext,
+            onAddAlbumToQueue = viewModel::addAlbumToQueue,
+            onOpenArtist = { openArtist(it) },
+            onOpenAlbum = { openAlbum(it) },
+        )
     }
 
-    addToPlaylistSongId?.let { id ->
-        ModalBottomSheet(onDismissRequest = { addToPlaylistSongId = null }) {
-            AddToPlaylistSheet(songId = id, onDismiss = { addToPlaylistSongId = null })
+    AlbumDetailContent(
+        ui = AlbumDetailUi(
+            songs = songs,
+            nowPlayingId = nowPlaying.first,
+            isPlaying = nowPlaying.second,
+            moreByArtist = moreByArtist,
+        ),
+        palette = amberPalette(),
+        actions = actions,
+        bottomPadding = LocalFloatingChromeHeight.current,
+    )
+
+    addToPlaylist?.let { ids ->
+        ModalBottomSheet(onDismissRequest = { addToPlaylist = null }) {
+            AddToPlaylistSheet(songIds = ids, onDismiss = { addToPlaylist = null })
         }
     }
 }

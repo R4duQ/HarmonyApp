@@ -70,13 +70,17 @@ import com.harmony.core.ui.component.EditorialCircleButton
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.EditorialTab
 import com.harmony.core.ui.component.EmptyState
-import com.harmony.core.ui.component.FloatingChromeClearance
 import com.harmony.core.ui.component.GlassCircleButton
 import com.harmony.core.ui.component.GlassSearchBar
 import com.harmony.core.ui.component.GlassSegmentedTabs
 import com.harmony.core.ui.component.GlassSongCard
 import com.harmony.core.ui.component.VinylAlbumCover
 import com.harmony.core.ui.component.amberPalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 
 /**
  * Library home: permission gate, search, then Songs / Albums / Artists tabs.
@@ -206,6 +210,12 @@ fun LibraryScreen(
     // tie: it only fires on an ordinary tab entry, never on a Now Playing
     // return, so search only survives the case you actually want it to.
     var searchActive by rememberSaveable { mutableStateOf(false) }
+    // Deliberately NOT saveable, and that is the whole mechanism: it is true
+    // only when search was opened by an action in THIS composition. Going to
+    // Now Playing and back restores searchActive from the back stack but
+    // resets this, so the bar comes back open with the keyboard still down,
+    // exactly as it was left.
+    var raiseKeyboard by remember { mutableStateOf(false) }
     // Saveable, so navigating away and back doesn't replay an old request:
     // the signal only counts if it is newer than the one already handled.
     var handledSearchSignal by rememberSaveable { mutableIntStateOf(0) }
@@ -214,6 +224,7 @@ fun LibraryScreen(
             handledSearchSignal = openSearchSignal
             requestedSearchQuery?.let(viewModel::onSearchQueryChange)
             searchActive = true
+            raiseKeyboard = true
         }
     }
     // Same replay-guard pattern as handledSearchSignal above, for the
@@ -248,9 +259,10 @@ fun LibraryScreen(
         // on the Songs tab ----
         GlassSearchBar(
             active = searchActive,
+            autoFocus = raiseKeyboard,
             value = searchQuery,
             onValueChange = viewModel::onSearchQueryChange,
-            onFieldClick = { searchActive = true },
+            onFieldClick = { searchActive = true; raiseKeyboard = true },
             onClear = {
                 if (searchQuery.isEmpty()) {
                     searchActive = false
@@ -259,6 +271,11 @@ fun LibraryScreen(
                 }
             },
             palette = palette,
+            // The pill sat 10dp under the status bar with the tab row right
+            // beneath it and the list starting immediately after — three
+            // bands stacked with no air between them, which is what made the
+            // top read as cut off rather than as a header.
+            modifier = Modifier.padding(top = 10.dp),
             trailing = if (!searchActive && selectedTab == 0) {
                 {
                     GlassCircleButton(
@@ -308,7 +325,28 @@ fun LibraryScreen(
                         selected = selectedTab,
                         onSelect = { selectedTab = it },
                         palette = palette,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(
+                            start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp,
+                        ),
+                    )
+                    // A hairline that fades out toward the edges instead of
+                    // ruling straight across. A full-width line reads as a
+                    // hard division — the header and the list are the same
+                    // surface, and this only needs to suggest where one ends.
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .height(1.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        palette.line.copy(alpha = 0.35f),
+                                        Color.Transparent,
+                                    ),
+                                ),
+                            ),
                     )
                     // Tab content slides in the direction of travel, so
                     // switching tabs reads as horizontal movement between
@@ -427,7 +465,7 @@ private fun SongsTab(
     }
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = FloatingChromeClearance),
+        contentPadding = PaddingValues(top = 6.dp, bottom = LocalFloatingChromeHeight.current),
     ) {
         items(
             count = songs.itemCount,
@@ -470,7 +508,7 @@ private fun AlbumsTab(
         columns = GridCells.Adaptive(minSize = 160.dp),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            start = 14.dp, end = 14.dp, top = 14.dp, bottom = FloatingChromeClearance,
+            start = 14.dp, end = 14.dp, top = 14.dp, bottom = LocalFloatingChromeHeight.current,
         ),
     ) {
         items(albums, key = { it.id }) { album ->
@@ -528,7 +566,7 @@ private fun ArtistsTab(
     }
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = FloatingChromeClearance),
+        contentPadding = PaddingValues(top = 6.dp, bottom = LocalFloatingChromeHeight.current),
     ) {
         // Keyed on the name, not the id. GROUP BY names.name in
         // CollectionDao.observeArtists guarantees one row per name, so the
@@ -557,7 +595,7 @@ private fun ArtistsTab(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "${artist.albumCount} albums  •  ${artist.songCount} songs",
+                            artistCounts(artist.albumCount, artist.songCount),
                             fontSize = 12.sp,
                             color = palette.muted,
                             modifier = Modifier.padding(top = 3.dp),
@@ -634,7 +672,7 @@ private fun SearchResultsContent(
                 EmptyState("No matches", "Try a different spelling or a shorter search.")
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = FloatingChromeClearance)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current)) {
                 if (results.songs.isNotEmpty()) {
                     item { sectionHeader("Songs") }
                     itemsIndexed(results.songs) { index, song ->
@@ -704,7 +742,7 @@ private fun SearchResultsContent(
                                     color = palette.ink,
                                 )
                                 Text(
-                                    "${artist.albumCount} albums  •  ${artist.songCount} songs",
+                                    artistCounts(artist.albumCount, artist.songCount),
                                     fontSize = 12.sp,
                                     color = palette.muted,
                                 )
@@ -721,3 +759,7 @@ private fun SearchResultsContent(
         }
     }
 }
+
+/** "1 album  •  12 songs": singular when there is one. */
+internal fun artistCounts(albums: Int, songs: Int): String =
+    "${if (albums == 1) "1 album" else "$albums albums"}  •  ${if (songs == 1) "1 song" else "$songs songs"}"

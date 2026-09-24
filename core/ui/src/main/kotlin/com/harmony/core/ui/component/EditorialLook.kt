@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
@@ -166,6 +167,26 @@ val FloatingChromeClearance = 190.dp
  */
 val MiniPlayerClearance = 96.dp
 
+/** Breathing room between a screen's last row and the floating chrome. */
+val ContentBottomSpacing = 16.dp
+
+/**
+ * Bottom spacing a screen must reserve for the floating chrome, published
+ * by the app shell as the chrome's real measured height.
+ *
+ * The page itself runs the full height, behind the mini player and nav bar
+ * — that is what keeps them reading as pills floating over content rather
+ * than as two ends of an opaque slab. This value is what stops anything
+ * from being stranded under them: with it reserved, the last row can always
+ * be scrolled clear of the glass, it just passes beneath on the way.
+ *
+ * Measured rather than assumed, because the height moves with the download
+ * banner, whether the nav bar exists on this route, and the device's
+ * gesture inset — every screen that once hardcoded a number was wrong most
+ * of the time.
+ */
+val LocalFloatingChromeHeight = compositionLocalOf { ContentBottomSpacing }
+
 /**
  * The mini player's own surface. Fixed per light/dark theme rather than the
  * section palette: the player is the one piece of chrome that persists
@@ -177,18 +198,23 @@ val MiniPlayerClearance = 96.dp
  * warm hue carried at a tone that reads as "gold on a night sky" rather
  * than as a light-mode colour that just got dimmed.
  *
- * Held below full opacity so the list scrolling underneath stays visible
- * through it, the same way the nav bar's glass does. 0.86 rather than the
- * bar's 0.72: this pill carries dark ink over a bright fill, and the text
- * loses contrast against passing artwork much faster than the bar's
- * icons do.
+ * Held well below full opacity. Content no longer scrolls underneath —
+ * the shell ends it at this pill's top edge — so what shows through is the
+ * page's own flat field rather than passing artwork, and the fill can go
+ * much further than it safely could before.
+ *
+ * 0.72 is the floor, set by DARK mode specifically: this pill carries dark
+ * ink on gold, and as the gold thins toward a near-black field the two
+ * close on each other. Measured, 0.72 leaves the title at ~4.9:1 and 0.66
+ * drops it to ~4.3:1, under the 4.5:1 readability threshold. Light mode
+ * sits above 12:1 throughout and is not the constraint.
  */
 @Composable
 fun miniPlayerField(): Color =
     if (MaterialTheme.colorScheme.background.luminance() < 0.5f) {
-        Color(0xFFE1BE1F).copy(alpha = 0.86f)
+        Color(0xFFE1BE1F).copy(alpha = 0.72f)
     } else {
-        Color(0xFFFFD54F).copy(alpha = 0.86f)
+        Color(0xFFFFD54F).copy(alpha = 0.72f)
     }
 
 /**

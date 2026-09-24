@@ -65,8 +65,6 @@ data class DiscoverUiState(
 )
 
 data class DiscoverMessage(val text: String, val undoListenedId: String? = null)
-data class PreviewState(val songId: String? = null, val loading: Boolean = false,
-    val playing: Boolean = false, val message: String? = null)
 
 @HiltViewModel
 class DiscoverViewModel @Inject constructor(

@@ -1,11 +1,16 @@
-# Harmony 1.0.0
+# Harmony 1.0
 
-Android music player with a local library, playlists, equalizer, album discovery,
-swipe-based recommendations, Spotify playlist import and album downloads through
-the configured SpotiFLAC and Soulseek integrations.
+Android music player with a local library, playlists, equalizer, personalized song
+discovery, Spotify playlist import and album and track downloads through the
+configured SpotiFLAC and Soulseek integrations.
 
-The public release version is **1.0.0** (`versionCode = 83`). The internal Android
-code is retained so existing installations can update with the same signing key.
+**1.0** (`versionCode = 101`) is the first stable version. It contains every change
+made so far: the FLAC compatibility fix, album downloads, the three-step Discover flow
+([instructions](DISCOVER-FLOW.md)), SpotiFLAC search across its providers (Tidal
+included), Smart Shuffle, the Home, playlist and album page redesigns and the Android Auto fixes.
+Full-album and selected-track downloads are in Downloads; see
+[album instructions](ALBUME-DOWNLOADS.md). The versionCode is higher than every
+earlier build, so 1.0 installs as an update over them when it is signed with the same key.
 
 ## Build locally
 
@@ -32,8 +37,9 @@ Upload the contents of this project folder to your repository, including
 `.github/`, `gradle/` and the Gradle wrapper. Keep the `.gitignore` rules in place;
 do not upload local SDK settings or signing material.
 
-The release workflow runs when a version tag is pushed. For this release the tag
-is `v1.0.0`; it must match `app/build.gradle.kts`. Configure these repository
+The release workflow runs when a version tag is pushed, or manually from the
+Actions tab (Publish Android Release, Run workflow) with the tag as input. For this
+release the tag is `v1.0`; it must match `app/build.gradle.kts`. Configure these repository
 Actions secrets before triggering a signed build:
 
 - `HARMONY_KEYSTORE_BASE64`
@@ -48,7 +54,7 @@ Uploading these sources alone does not trigger a tagged release.
 
 ## Release and verification
 
-See [release notes](docs/RELEASE-v1.0.0-STABLE.md) and
+See [release notes](docs/RELEASE-v1.0-STABLE.md) and
 [test instructions](tools/audit/README.md). Previous audit reports and build
 instructions are preserved under [docs/history](docs/history/README.md) as
 historical evidence, not current installation instructions.

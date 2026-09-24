@@ -50,9 +50,9 @@ import com.harmony.core.ui.component.EditorialSlider
 import com.harmony.core.ui.component.EditorialSwitch
 import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.stonePalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.library.model.ScanEvent
 import com.harmony.domain.library.usecase.ScanLibraryUseCase
-import com.harmony.core.ui.component.MiniPlayerClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -177,7 +177,7 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(palette.field)
             .verticalScroll(rememberScrollState())
-            .padding(bottom = MiniPlayerClearance),
+            .padding(bottom = LocalFloatingChromeHeight.current),
     ) {
         Row(
             Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 14.dp),
@@ -493,8 +493,13 @@ fun SettingsScreen(
                     fontWeight = FontWeight.Bold,
                     color = palette.ink,
                 )
+                // Read from the installed package so this always matches the build.
+                val versionName = remember(context) {
+                    runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+                        .getOrNull() ?: "1.0"
+                }
                 Text(
-                    "Version 1.0.0",
+                    "Version $versionName",
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = palette.muted,

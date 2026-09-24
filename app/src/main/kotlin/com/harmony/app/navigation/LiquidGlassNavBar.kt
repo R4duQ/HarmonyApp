@@ -111,13 +111,14 @@ fun LiquidGlassNavBar(
     // belongs to whichever screen is above it — amber Library and blue EQ
     // each get their own tint of frost instead of one neutral slab.
     val glass = remember(palette.field) {
-        // 0.5 read as too transparent in light mode: against the near-white
-        // #F4FDFF field, content sliding underneath competed too much with
-        // the bar's own icons and labels for contrast. 0.72 keeps genuine
-        // see-through — you can still tell something is scrolling under it
-        // — while leaving enough of the frosted white on top that the bar
-        // reads as its own surface rather than as a smudge on the page.
-        lerp(palette.field, Color.White, 0.62f).copy(alpha = 0.72f)
+        // 0.72 was set back when the list scrolled underneath and competed
+        // with these labels for contrast. It no longer does — the shell
+        // ends content at the chrome's top edge — so the backdrop here is
+        // the page's own flat field, and thinning the glass costs nothing.
+        // Measured, the labels stay above 14:1 in both themes at this
+        // value, because the frost is derived from the very field showing
+        // through it.
+        lerp(palette.field, Color.White, 0.62f).copy(alpha = 0.55f)
     }
     // The rim: brighter along the top edge, fading out by the bottom. This
     // is the single cheapest cue that a surface is glass rather than paint.

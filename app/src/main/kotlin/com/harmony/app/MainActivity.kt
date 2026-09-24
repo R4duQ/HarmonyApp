@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
 
     private val verificationReturnSignal = MutableStateFlow(0)
     private val albumVerificationReturnSignal = MutableStateFlow(0)
+    private val discoveryVerificationReturnSignal = MutableStateFlow(0)
     private val playlistVerificationReturnSignal = MutableStateFlow(0)
     private val spotifyAuthorizationReturnSignal = MutableStateFlow(0)
 
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
             }
             val returnSignal by verificationReturnSignal.collectAsStateWithLifecycle()
             val albumReturnSignal by albumVerificationReturnSignal.collectAsStateWithLifecycle()
+            val discoveryReturnSignal by discoveryVerificationReturnSignal.collectAsStateWithLifecycle()
             val playlistReturnSignal by playlistVerificationReturnSignal.collectAsStateWithLifecycle()
             val spotifyReturnSignal by spotifyAuthorizationReturnSignal.collectAsStateWithLifecycle()
             HarmonyTheme(
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity() {
                 HarmonyApp(
                     verificationReturnSignal = returnSignal,
                     albumVerificationReturnSignal = albumReturnSignal,
+                    discoveryVerificationReturnSignal = discoveryReturnSignal,
                     playlistVerificationReturnSignal = playlistReturnSignal,
                     spotifyAuthorizationReturnSignal = spotifyReturnSignal,
                 )
@@ -131,6 +134,8 @@ class MainActivity : ComponentActivity() {
             playlistVerificationReturnSignal.value = playlistVerificationReturnSignal.value + 1
         } else if (spotiFlacDownloadEngine.pendingVerificationOwner() == SpotiFlacRequestOwner.ALBUM_DOWNLOAD) {
             albumVerificationReturnSignal.value = albumVerificationReturnSignal.value + 1
+        } else if (spotiFlacDownloadEngine.pendingVerificationOwner() == SpotiFlacRequestOwner.DISCOVERY_DOWNLOAD) {
+            discoveryVerificationReturnSignal.value = discoveryVerificationReturnSignal.value + 1
         } else {
             verificationReturnSignal.value = verificationReturnSignal.value + 1
         }

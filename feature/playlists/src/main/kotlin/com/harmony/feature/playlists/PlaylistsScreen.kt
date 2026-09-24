@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -76,9 +77,9 @@ import com.harmony.core.ui.component.EditorialTab
 import com.harmony.core.ui.component.EditorialTabs
 import com.harmony.core.ui.component.EmptyState
 import com.harmony.core.ui.component.greenPalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
-import com.harmony.core.ui.component.FloatingChromeClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -294,6 +295,12 @@ fun PlaylistsScreen(
             modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
         )
 
+        // Hoisted out of AnimatedContent, one per tab: created inside it,
+        // each list's state lived and died with the tab's content, so the
+        // scroll position was not reliably there when coming back from a
+        // playlist. Both are saveable and belong to this back stack entry.
+        val smartListState = rememberLazyListState()
+        val yoursListState = rememberLazyListState()
         AnimatedContent(
             targetState = selectedTab,
             transitionSpec = { fadeIn().togetherWith(fadeOut()) },
@@ -302,7 +309,8 @@ fun PlaylistsScreen(
             when (tab) {
                 0 -> LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
+                    state = smartListState,
+                    contentPadding = PaddingValues(top = 2.dp, bottom = LocalFloatingChromeHeight.current),
                 ) {
                     items(SmartPlaylistType.entries, key = { it.name }) { type ->
                         SmartPlaylistRow(
@@ -322,7 +330,8 @@ fun PlaylistsScreen(
                     } else {
                         LazyColumn(
                             Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 2.dp, bottom = FloatingChromeClearance),
+                            state = yoursListState,
+                            contentPadding = PaddingValues(top = 2.dp, bottom = LocalFloatingChromeHeight.current),
                         ) {
                             items(cards, key = { it.id }) { card ->
                                 PlaylistRow(

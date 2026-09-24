@@ -1,4 +1,4 @@
-# SpotiFLAC: compatibilitate FLAC — 1.0.2-flac-compat (85)
+# SpotiFLAC: compatibilitate FLAC — inclus in Harmony 1.0
 
 Aceasta arhiva contine surse modificate, nu un APK testat pe telefoane.
 Pastreaza modificarile anterioare FLAC CD / FLAC max 24/96 si corectia Preparing.

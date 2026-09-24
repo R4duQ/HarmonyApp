@@ -3,6 +3,7 @@ package com.harmony.feature.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.harmony.core.model.PlayerState
+import com.harmony.core.model.SmartPlaylistType
 import com.harmony.core.model.Song
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.library.repository.PlaybackHistoryRepository
@@ -10,12 +11,14 @@ import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.shuffle.usecase.StartSmartMixUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -67,31 +70,50 @@ data class QualityStatus(
     }
 }
 
-data class HomeUiState(
-    val stats: LibraryStats = LibraryStats(),
-    val recentlyPlayed: List<Song> = emptyList(),
-    val quality: QualityStatus = QualityStatus(),
-    val nowPlaying: Song? = null,
-    val isPlaying: Boolean = false,
-    val libraryEmpty: Boolean = false,
+/** The "Continue" card: what is loaded in the player right now. */
+data class NowPlayingCard(
+    val song: Song,
+    val isPlaying: Boolean,
+    /** 1-based position in the queue, and the queue's length. */
+    val queuePosition: Int,
+    val queueSize: Int,
 )
 
+data class HomeUiState(
+    /** False until every section has its first real value — the page shows placeholders, not "empty". */
+    val loaded: Boolean = false,
+    val stats: LibraryStats = LibraryStats(),
+    /** The player's current song, if the queue has one (restored or playing). */
+    val nowPlaying: NowPlayingCard? = null,
+    /** With an empty player: the most recently played song, offered to resume. */
+    val resumeSong: Song? = null,
+    /** History without the song featured above and without repeats. */
+    val recentlyPlayed: List<Song> = emptyList(),
+    val playlists: List<HomePlaylist> = emptyList(),
+    val recentAlbums: List<HomeAlbum> = emptyList(),
+    val quality: QualityStatus = QualityStatus(),
+    val libraryEmpty: Boolean = false,
+) {
+    val hasHistory: Boolean get() = resumeSong != null || recentlyPlayed.isNotEmpty() || nowPlaying != null
+}
+
 /**
- * Home dashboard state.
+ * Home state.
  *
- * Every section reads from a repository that already exists; nothing here
- * scans the filesystem, builds a second queue, or holds its own copy of the
- * library. Counts come from COUNT(*) flows rather than from observed lists,
- * so a 20k-song library costs the dashboard a handful of integers.
+ * Every section reads a repository that already exists; nothing here scans
+ * the filesystem, builds a second queue, or holds its own copy of the
+ * library. Counts are COUNT(*) flows; every list is capped at what a
+ * horizontal row can show, so a 20k-song library costs Home a few dozen rows.
  *
  * All flows are `stateIn(WhileSubscribed)`, so navigating away stops the
- * collection and coming back re-uses the cached value instead of re-querying —
- * which is what preserves the dashboard across navigation and rotation.
+ * collection and coming back re-uses the cached value instead of re-querying
+ * — which, with the list state being saveable, is what brings Home back
+ * exactly as it was left.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    libraryRepository: LibraryRepository,
-    playlistRepository: PlaylistRepository,
+    private val libraryRepository: LibraryRepository,
+    private val playlistRepository: PlaylistRepository,
     historyRepository: PlaybackHistoryRepository,
     private val playback: PlaybackController,
     /**
@@ -106,11 +128,11 @@ class HomeViewModel @Inject constructor(
     private val _mixStarting = MutableStateFlow(false)
     val mixStarting: StateFlow<Boolean> = _mixStarting.asStateFlow()
 
-    /** Non-null when Start Mix could not run, e.g. an empty library. */
+    /** Non-null when an action could not run, e.g. Start Mix on an empty library. */
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    private val stats: kotlinx.coroutines.flow.Flow<LibraryStats> = combine(
+    private val stats: Flow<LibraryStats> = combine(
         libraryRepository.observeSongCount(),
         libraryRepository.observeAlbumCount(),
         libraryRepository.observeArtistCount(),
@@ -119,13 +141,21 @@ class HomeViewModel @Inject constructor(
         LibraryStats(songs, albums, artists, playlists)
     }.distinctUntilChanged()
 
-    /**
-     * "Continue listening". Capped at a small number because the row is
-     * horizontal and only a handful is ever visible — pulling 100 rows to
-     * render three would be waste the dashboard does not need.
-     */
-    private val recentlyPlayed = historyRepository
-        .observeRecentlyPlayed(limit = RECENT_LIMIT)
+    /** One more than a row holds, so the featured song can be dropped without leaving a gap. */
+    private val history = historyRepository
+        .observeRecentlyPlayed(limit = HomeSections.ROW_LIMIT + 6)
+        .distinctUntilChanged()
+
+    private val playlists: Flow<List<HomePlaylist>> = combine(
+        playlistRepository.observePlaylists(),
+        playlistRepository.observePlaylistArtwork(),
+        playlistRepository.observePlaylistDurations(),
+    ) { all, artwork, durations -> HomeSections.playlists(all, artwork, durations) }
+        .distinctUntilChanged()
+
+    private val recentAlbums: Flow<List<HomeAlbum>> = playlistRepository
+        .observeSmartPlaylist(SmartPlaylistType.RECENTLY_ADDED, limit = RECENTLY_ADDED_WINDOW)
+        .map { HomeSections.recentAlbums(it) }
         .distinctUntilChanged()
 
     private val playerSnapshot = playback.playerState
@@ -133,16 +163,20 @@ class HomeViewModel @Inject constructor(
         .distinctUntilChanged()
 
     val uiState: StateFlow<HomeUiState> = combine(
-        stats,
-        recentlyPlayed,
+        combine(stats, history, ::Pair),
+        combine(playlists, recentAlbums, ::Pair),
         playerSnapshot,
-    ) { libraryStats, recent, snapshot ->
+    ) { (libraryStats, recent), (lists, albums), snapshot ->
+        val featured = snapshot.card?.song ?: recent.firstOrNull()
         HomeUiState(
+            loaded = true,
             stats = libraryStats,
-            recentlyPlayed = recent,
+            nowPlaying = snapshot.card,
+            resumeSong = if (snapshot.card == null) recent.firstOrNull() else null,
+            recentlyPlayed = HomeSections.recentlyPlayed(recent, featured),
+            playlists = lists,
+            recentAlbums = albums,
             quality = snapshot.quality,
-            nowPlaying = snapshot.song,
-            isPlaying = snapshot.isPlaying,
             libraryEmpty = libraryStats.songs == 0,
         )
     }.stateIn(
@@ -150,6 +184,16 @@ class HomeViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
         initialValue = HomeUiState(),
     )
+
+    /**
+     * How far through the current song, 0..1. Separate from [uiState] on
+     * purpose: position moves twice a second while playing, and only the
+     * Continue card's progress line should redraw for it — not the page.
+     */
+    val progress: StateFlow<Float> = playback.playerState
+        .map { s -> if (s.durationMs > 0) (s.positionMs.toFloat() / s.durationMs).coerceIn(0f, 1f) else 0f }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), 0f)
 
     fun startSmartMix() {
         if (_mixStarting.value) return
@@ -166,8 +210,42 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /** Play/pause for the Continue card; resumes the last-played song when the player is empty. */
+    fun togglePlayback() {
+        val card = uiState.value.nowPlaying
+        when {
+            card == null -> uiState.value.resumeSong?.let(::playSong)
+            card.isPlaying -> playback.pause()
+            else -> playback.play()
+        }
+    }
+
     fun playSong(song: Song) {
         viewModelScope.launch { playback.setQueue(listOf(song), 0, playWhenReady = true) }
+    }
+
+    /** Plays a history row from that song onwards, in the order the row shows. */
+    fun playRecent(song: Song) {
+        val row = uiState.value.recentlyPlayed
+        val index = row.indexOfFirst { it.id == song.id }
+        if (index < 0) return playSong(song)
+        viewModelScope.launch { playback.setQueue(row, index, playWhenReady = true) }
+    }
+
+    fun playAlbum(albumId: Long) = playList { libraryRepository.observeSongsByAlbum(albumId).first() }
+
+    fun playPlaylist(playlistId: Long) = playList { playlistRepository.observePlaylistSongs(playlistId).first() }
+
+    /** Songs are fetched only when Play is pressed — Home never loads a whole album or playlist to draw a card. */
+    private fun playList(load: suspend () -> List<Song>) {
+        viewModelScope.launch {
+            val songs = load()
+            if (songs.isEmpty()) {
+                _message.value = "Nothing to play here yet."
+            } else {
+                playback.setQueue(songs, 0, playWhenReady = true)
+            }
+        }
     }
 
     fun consumeMessage() {
@@ -175,29 +253,34 @@ class HomeViewModel @Inject constructor(
     }
 
     private data class PlayerSnapshot(
-        val song: Song?,
-        val isPlaying: Boolean,
+        val card: NowPlayingCard?,
         val quality: QualityStatus,
     )
 
     /**
-     * Reduces the full PlayerState to only what the dashboard draws.
+     * Reduces the full PlayerState to only what the page draws.
      *
      * Without this the position field alone would emit several times a second
-     * and re-run the whole combine — the dashboard does not show a progress
-     * bar, so it must not recompose for one.
+     * and re-run the whole combine; position has its own flow ([progress]).
      */
     private fun PlayerState.toSnapshot(): PlayerSnapshot {
         val song = currentSong
         return PlayerSnapshot(
-            song = song,
-            isPlaying = isPlaying,
+            card = song?.let {
+                NowPlayingCard(
+                    song = it,
+                    isPlaying = isPlaying,
+                    queuePosition = (queueIndex + 1).coerceAtLeast(1),
+                    queueSize = queue.size,
+                )
+            },
             quality = song?.toQuality() ?: QualityStatus(),
         )
     }
 
     private companion object {
-        const val RECENT_LIMIT = 12
+        /** Recently added songs to group into albums: enough for ten albums of normal length. */
+        const val RECENTLY_ADDED_WINDOW = 120
         const val STOP_TIMEOUT_MS = 5_000L
     }
 }

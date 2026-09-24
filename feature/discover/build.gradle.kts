@@ -7,6 +7,9 @@ plugins {
 android {
     namespace = "com.harmony.feature.discover"
     buildFeatures { compose = true }
+    defaultConfig {
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 }
 
 dependencies {
@@ -28,4 +31,14 @@ dependencies {
     implementation(libs.media3.exoplayer)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    // android.jar's org.json is a stub in local unit tests; the catalog tests parse real JSON.
+    testImplementation("org.json:json:20240303")
+
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation(libs.androidx.test.ext)
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    debugImplementation(platform(libs.compose.bom))
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

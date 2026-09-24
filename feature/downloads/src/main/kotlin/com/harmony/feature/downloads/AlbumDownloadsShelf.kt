@@ -44,7 +44,7 @@ fun AlbumDownloadsShelf(
 
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         EditorialSectionLabel(
-            "Your Discover albums",
+            "Your album downloads",
             palette,
             Modifier.padding(start = 22.dp, bottom = 8.dp),
         )

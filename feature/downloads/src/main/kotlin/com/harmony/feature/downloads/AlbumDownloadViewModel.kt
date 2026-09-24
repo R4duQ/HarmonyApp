@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 @HiltViewModel
@@ -30,10 +32,23 @@ class AlbumDownloadViewModel @Inject constructor(
     private val favorites: FavoritesRepository,
     private val scan: ScanLibraryUseCase,
     private val spoti: SpotiFlacDownloadEngine,
+    private val soulseek: SoulseekClient,
     downloadStatusCenter: DownloadStatusCenter,
 ) : ViewModel() {
     private val work = WorkManager.getInstance(context)
+    private val selectionMutex = Mutex()
     val internet = InternetMonitor.get(context).state
+
+    /**
+     * Soulseek's live connection state, surfaced so the screen can say up
+     * front that the selected engine cannot run.
+     *
+     * The check in [start] stays where it is — it is the one that actually
+     * guards the download — but it only fires when the button is pressed,
+     * which meant selecting Soulseek while signed out looked like a working
+     * choice right up until it failed.
+     */
+    val soulseekConnection = soulseek.connectionState
     val downloadProgress = downloadStatusCenter.active
     val journeys = albums.journeys
     val jobs = work.getWorkInfosForUniqueWorkFlow(AlbumDownloadWorker.WORK)
@@ -87,27 +102,44 @@ class AlbumDownloadViewModel @Inject constructor(
     }
 
     fun start(id: String, source: DownloadSource, format: SpotiFlacOutputFormat, wifiOnly: Boolean) = action(online = true) {
-        check(withContext(Dispatchers.IO) { work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get() }.none { !it.state.isFinished }) {
-            "An album is already queued. Pause it or wait for it to finish."
+        selectionMutex.withLock {
+            val outputFormat = AlbumDownloadPolicy.formatFor(source, format)
+            if (source == DownloadSource.SOULSEEK) check(soulseek.connectionState.value.status == SoulseekConnectionStatus.CONNECTED) {
+                "Connect Soulseek in Downloads first, then return to download the selected tracks."
+            }
+            check(withContext(Dispatchers.IO) { work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get() }.none { !it.state.isFinished }) {
+                "An album is already queued. Pause it or wait for it to finish."
+            }
+            val current = albums.journeys.value.first { it.id == id }
+            val selection = current.selectedMissing.map { it.id }
+            check(selection.isNotEmpty()) { "Select at least one missing track to download." }
+            albums.save(current.copy(source = source.name, format = outputFormat.name,
+                reviewed = false, remindAfter = 0L,
+                tracks = if (current.reviewed) current.tracks.map { it.copy(coverage = emptyList(), playbackDurationMs = 0L) } else current.tracks))
+            val request = AlbumDownloadWorker.request(id, wifiOnly, selection, source.name, outputFormat.name)
+            withContext(Dispatchers.IO) {
+                work.enqueueUniqueWork(AlbumDownloadWorker.WORK, ExistingWorkPolicy.KEEP, request).result.get()
+                check(work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get().any { it.id == request.id }) {
+                    "Another album was queued first. Wait for it or pause it before starting this album."
+                }
+            }
+            message.value = "${selection.size} tracks queued. Completed files are kept if you pause."
         }
-        val current = albums.journeys.value.first { it.id == id }
-        val selection = current.selectedMissing.map { it.id }
-        check(selection.isNotEmpty()) { "Select at least one missing track to download." }
-        albums.save(current.copy(source = source.name, format = format.name,
-            reviewed = false, remindAfter = 0L,
-            tracks = if (current.reviewed) current.tracks.map { it.copy(coverage = emptyList(), playbackDurationMs = 0L) } else current.tracks))
-        work.enqueueUniqueWork(AlbumDownloadWorker.WORK, ExistingWorkPolicy.KEEP,
-            AlbumDownloadWorker.request(id, wifiOnly, selection, source.name, format.name))
-        message.value = "${selection.size} tracks queued. Completed files are kept if you pause."
     }
-    fun select(id: String, trackId: String? = null, selected: Boolean) = action {
-        check(withContext(Dispatchers.IO) { work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get() }
-            .none { !it.state.isFinished && id in it.tags }) { "Pause the album before changing its selection." }
-        val album = albums.journeys.value.first { it.id == id }
-        val ids = album.tracks.filter {
-            if (it.uri == null && (trackId == null || it.id == trackId)) selected else it.selectedForDownload
-        }.map { it.id }.toSet()
-        albums.selectDownloads(id, ids)
+    fun select(id: String, trackId: String? = null, selected: Boolean) {
+        if (busy.value) return
+        // Serialize rapid checkbox taps rather than dropping them while another
+        // preference write is in progress. Start waits for these writes too.
+        viewModelScope.launch {
+            try { selectionMutex.withLock {
+                check(withContext(Dispatchers.IO) { work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get() }
+                    .none { !it.state.isFinished && id in it.tags }) { "Pause the album before changing its selection." }
+                val album = albums.journeys.value.first { it.id == id }
+                val ids = AlbumDownloadPolicy.selectedIds(album, trackId, selected)
+                albums.selectDownloads(id, ids)
+            } } catch (e: CancellationException) { throw e
+            } catch (e: Exception) { message.value = e.message ?: "Could not save the selected tracks." }
+        }
     }
     fun pause() { work.cancelUniqueWork(AlbumDownloadWorker.WORK) }
 

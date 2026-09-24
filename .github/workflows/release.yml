@@ -3,11 +3,12 @@ name: Publish Android Release
 on:
   push:
     tags:
+      - 'v*.*'
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to build/publish (e.g. v1.0.1-audiofix). Must match app/build.gradle.kts versionName.'
+        description: 'Release tag to build/publish (e.g. v1.0). Must match app/build.gradle.kts versionName.'
         required: true
 
 permissions:
@@ -124,6 +125,12 @@ jobs:
           :feature:player:compileReleaseKotlin
           :feature:downloads:compileReleaseKotlin
           :feature:downloads:testReleaseUnitTest
+          :domain:library:test
+          :data:library:testReleaseUnitTest
+          :feature:discover:compileReleaseKotlin
+          :feature:discover:testReleaseUnitTest
+          :feature:library:testReleaseUnitTest
+          :feature:playlists:testReleaseUnitTest
           --no-daemon
           --stacktrace
 

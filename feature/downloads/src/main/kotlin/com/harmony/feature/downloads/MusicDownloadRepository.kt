@@ -29,7 +29,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.text.Normalizer
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -38,6 +37,8 @@ import javax.inject.Singleton
 @Singleton
 class MusicDownloadRepository @Inject constructor(
     @ApplicationContext private val context: Context,
+    // Lazy: most of this repository never touches SpotiFLAC, and its engine is heavy to set up.
+    private val spotiFlac: dagger.Lazy<SpotiFlacDownloadEngine>,
 ) {
     private val downloadManager: DownloadManager =
         context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -70,7 +71,7 @@ class MusicDownloadRepository @Inject constructor(
             readTimeout = 10_000
             requestMethod = "GET"
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "Harmony/1.0.0 Android")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android")
         }
 
         try {
@@ -98,110 +99,55 @@ class MusicDownloadRepository @Inject constructor(
     fun isYouTubeUrl(value: String): Boolean = looksLikeYouTubeUrl(value.trim())
 
     /**
-     * Real text search for the SpotiFLAC flow.
-     *
-     * Previous Harmony versions treated any free text as an identified track,
-     * which meant even a single letter could become a fake "Detected" result.
-     * This method performs an actual remote metadata lookup and then applies a
-     * strict local title/artist similarity filter before the UI may present a
-     * selectable candidate.
+     * Real text search for the SpotiFLAC flow: several phrasings on Deezer,
+     * then Apple Music, all filtered by the same strict title/artist check.
+     * See [SpotiFlacTrackSearch].
      */
     suspend fun searchSpotiFlacTracks(rawQuery: String): List<SpotiFlacSearchCandidate> =
         withContext(Dispatchers.IO) {
             val query = rawQuery.trim().replace(Regex("\\s+"), " ")
             validateSpotiFlacQuery(query)
-
-            val resolvedQuery = if (looksLikeYouTubeUrl(query)) {
-                identify(query).displayName
-            } else {
-                query
-            }
-            val expected = parseExpectedSearch(resolvedQuery)
-            val endpoint = buildString {
-                append("https://api.deezer.com/search/track?q=")
-                append(URLEncoder.encode(resolvedQuery, StandardCharsets.UTF_8.toString()))
-                append("&limit=")
-                append(SPOTIFLAC_SEARCH_LIMIT)
-            }
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 12_000
-                readTimeout = 12_000
-                requestMethod = "GET"
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "Harmony/1.0.0 Android MetadataSearch")
-            }
-
-            try {
-                val code = connection.responseCode
-                if (code == 429) {
-                    throw IllegalStateException("The metadata search service is rate-limiting requests. Wait a few seconds and try again.")
-                }
-                if (code !in 200..299) {
-                    throw IllegalStateException("The metadata search service could not be reached (HTTP $code).")
-                }
-
-                val body = connection.inputStream.bufferedReader().use { it.readText() }
-                val root = JSONObject(body)
-                root.optJSONObject("error")?.let { error ->
-                    val message = error.optString("message").ifBlank { "Unknown metadata search error." }
-                    throw IllegalStateException(message)
-                }
-                val data = root.optJSONArray("data") ?: JSONArray()
-
-                buildList {
-                    for (index in 0 until data.length()) {
-                        val item = data.optJSONObject(index) ?: continue
-                        val artist = item.optJSONObject("artist")?.optString("name").orEmpty().trim()
-                        val title = item.optString("title_short").ifBlank { item.optString("title") }.trim()
-                        if (artist.isBlank() || title.isBlank()) continue
-
-                        val score = scoreMetadataMatch(
-                            expected = expected,
-                            candidateArtist = artist,
-                            candidateTitle = title,
-                        )
-                        if (score < expected.minimumScore) continue
-
-                        val album = item.optJSONObject("album")
-                        add(
-                            SpotiFlacSearchCandidate(
-                                metadataId = item.optLong("id").takeIf { it > 0L }?.toString().orEmpty(),
-                                artist = artist,
-                                title = title,
-                                album = album?.optString("title").orEmpty().trim(),
-                                durationMs = item.optLong("duration").coerceAtLeast(0L) * 1000L,
-                                thumbnailUrl = album?.optString("cover_xl")
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: album?.optString("cover_big")?.takeIf { it.isNotBlank() }
-                                    ?: album?.optString("cover_medium")?.takeIf { it.isNotBlank() },
-                                matchScore = score,
-                                rank = item.optLong("rank").coerceAtLeast(0L),
-                            )
-                        )
-                    }
-                }
-                    .filter { it.metadataId.isNotBlank() }
-                    .distinctBy { "${normalizeSearchText(it.artist)}|${normalizeSearchText(it.title)}" }
-                    .sortedWith(
-                        compareByDescending<SpotiFlacSearchCandidate> { it.matchScore }
-                            .thenByDescending { it.rank }
-                    )
-                    .take(SPOTIFLAC_VISIBLE_RESULTS)
-            } finally {
-                connection.disconnect()
-            }
+            val resolvedQuery = if (looksLikeYouTubeUrl(query)) identify(query).displayName else query
+            SpotiFlacTrackSearch(
+                fetch = { url -> fetchMetadata(url) },
+                providers = { q, limit -> spotiFlac.get().searchProviderTracks(q, limit) },
+            ).search(resolvedQuery)
         }
+
+    private fun fetchMetadata(url: String): SearchResponse {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 12_000
+            readTimeout = 12_000
+            requestMethod = "GET"
+            instanceFollowRedirects = false
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android MetadataSearch")
+        }
+        return try {
+            val code = connection.responseCode
+            val body = if (code in 200..299) connection.inputStream.bufferedReader().use { it.readText() } else ""
+            SearchResponse(code, body)
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     suspend fun resolveSpotiFlacTrack(candidate: SpotiFlacSearchCandidate): IdentifiedTrack =
         withContext(Dispatchers.IO) {
             require(candidate.metadataId.isNotBlank()) { "The selected metadata result has no track ID." }
+            // Found on Apple Music: there is no Deezer id to look up. The download engine
+            // works from artist, title and duration; never hand it Apple's id as a Deezer one.
+            if (candidate.metadataId.startsWith(SpotiFlacTrackSearch.APPLE_PREFIX) ||
+                candidate.metadataId.startsWith(SpotiFlacTrackSearch.PROVIDER_PREFIX)) {
+                return@withContext candidate.toIdentifiedTrack().copy(metadataId = null)
+            }
             val endpoint = "https://api.deezer.com/track/${URLEncoder.encode(candidate.metadataId, StandardCharsets.UTF_8.toString())}"
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10_000
                 readTimeout = 10_000
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "Harmony/1.0.0 Android MetadataResolve")
+                setRequestProperty("User-Agent", "Harmony/1.0 Android MetadataResolve")
             }
             try {
                 if (connection.responseCode !in 200..299) {
@@ -229,7 +175,7 @@ class MusicDownloadRepository @Inject constructor(
                     .takeIf { it > 0L }
                     ?.times(1000L)
                     ?: candidate.durationMs
-                val isrc = item.optString("isrc").trim().takeIf { it.isNotBlank() }
+                val isrc = item.optString("isrc").trim().takeIf { it.isNotBlank() } ?: candidate.isrc
 
                 IdentifiedTrack(
                     artist = artist,
@@ -253,8 +199,12 @@ class MusicDownloadRepository @Inject constructor(
         thumbnailUrl = thumbnailUrl,
         album = album,
         durationMs = durationMs,
+        isrc = isrc,
         metadataId = metadataId,
     )
+
+    /** Same similarity as the search, so a file is judged by the rule that found it. */
+    private fun fuzzyTextScore(expected: String, actual: String): Int = SearchScoring.fuzzy(expected, actual)
 
     private fun validateSpotiFlacQuery(query: String) {
         if (query.isBlank()) {
@@ -274,132 +224,6 @@ class MusicDownloadRepository @Inject constructor(
         if (query.all { !it.isLetterOrDigit() }) {
             throw IllegalArgumentException("Enter a real artist or song title, not only punctuation.")
         }
-    }
-
-    private data class ExpectedSearch(
-        val raw: String,
-        val artist: String?,
-        val title: String?,
-        val minimumScore: Int,
-    )
-
-    private fun parseExpectedSearch(query: String): ExpectedSearch {
-        val split = DASH_SEPARATOR.split(query.trim(), limit = 2)
-        val explicitArtist = split.getOrNull(0)?.trim().orEmpty()
-        val explicitTitle = split.getOrNull(1)?.trim().orEmpty()
-        return if (split.size == 2 && explicitArtist.length >= 2 && explicitTitle.length >= 2) {
-            ExpectedSearch(
-                raw = query,
-                artist = explicitArtist,
-                title = explicitTitle,
-                minimumScore = 70,
-            )
-        } else {
-            ExpectedSearch(
-                raw = query,
-                artist = null,
-                title = null,
-                minimumScore = 56,
-            )
-        }
-    }
-
-    private fun scoreMetadataMatch(
-        expected: ExpectedSearch,
-        candidateArtist: String,
-        candidateTitle: String,
-    ): Int {
-        val variantPenalty = unexpectedVersionPenalty(expected.raw, candidateTitle)
-        val score = if (expected.artist != null && expected.title != null) {
-            val titleScore = fuzzyTextScore(expected.title, candidateTitle)
-            val artistScore = fuzzyTextScore(expected.artist, candidateArtist)
-            // An explicit "artist - title" query must match both sides. This is
-            // deliberately strict to avoid returning a famous but unrelated song.
-            if (titleScore < 62 || artistScore < 48) return 0
-            titleScore * 0.68 + artistScore * 0.32
-        } else {
-            val candidateFull = "$candidateArtist $candidateTitle"
-            val fullScore = fuzzyTextScore(expected.raw, candidateFull)
-            val titleScore = fuzzyTextScore(expected.raw, candidateTitle)
-            val coverage = tokenCoverage(expected.raw, candidateFull) * 100.0
-            maxOf(fullScore.toDouble(), titleScore * 0.92) * 0.62 + coverage * 0.38
-        }
-        return (score - variantPenalty).toInt().coerceIn(0, 100)
-    }
-
-    private fun fuzzyTextScore(expected: String, actual: String): Int {
-        val left = normalizeSearchText(expected)
-        val right = normalizeSearchText(actual)
-        if (left.isBlank() || right.isBlank()) return 0
-        if (left == right) return 100
-        val edit = normalizedEditSimilarity(left, right)
-        val coverage = tokenCoverage(left, right)
-        val containment = when {
-            right.contains(left) -> 0.92
-            left.contains(right) -> 0.86
-            else -> 0.0
-        }
-        return (maxOf(edit, coverage * 0.96, containment) * 100.0).toInt().coerceIn(0, 100)
-    }
-
-    private fun normalizedEditSimilarity(left: String, right: String): Double {
-        if (left == right) return 1.0
-        val a = left.take(SEARCH_COMPARISON_MAX_CHARS)
-        val b = right.take(SEARCH_COMPARISON_MAX_CHARS)
-        if (a.isEmpty() || b.isEmpty()) return 0.0
-        val previous = IntArray(b.length + 1) { it }
-        val current = IntArray(b.length + 1)
-        for (i in a.indices) {
-            current[0] = i + 1
-            for (j in b.indices) {
-                val substitution = previous[j] + if (a[i] == b[j]) 0 else 1
-                current[j + 1] = minOf(
-                    current[j] + 1,
-                    previous[j + 1] + 1,
-                    substitution,
-                )
-            }
-            for (j in previous.indices) previous[j] = current[j]
-        }
-        val distance = previous[b.length]
-        return (1.0 - distance.toDouble() / maxOf(a.length, b.length).toDouble()).coerceIn(0.0, 1.0)
-    }
-
-    private fun tokenCoverage(expected: String, actual: String): Double {
-        val expectedTokens = searchTokens(expected)
-        if (expectedTokens.isEmpty()) return 0.0
-        val actualTokens = searchTokens(actual)
-        if (actualTokens.isEmpty()) return 0.0
-        val matched = expectedTokens.count { token ->
-            actualTokens.any { other -> token == other || (token.length >= 4 && other.startsWith(token)) }
-        }
-        return matched.toDouble() / expectedTokens.size.toDouble()
-    }
-
-    private fun searchTokens(value: String): Set<String> = normalizeSearchText(value)
-        .split(' ')
-        .asSequence()
-        .map(String::trim)
-        .filter { it.length >= 2 && it !in SEARCH_STOP_WORDS }
-        .toSet()
-
-    private fun normalizeSearchText(value: String): String {
-        val decomposed = Normalizer.normalize(value, Normalizer.Form.NFD)
-            .replace(COMBINING_MARKS, "")
-            .lowercase(Locale.ROOT)
-        return decomposed
-            .replace(FEATURING_TEXT, " ")
-            .replace(NON_ALPHANUMERIC, " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-    }
-
-    private fun unexpectedVersionPenalty(query: String, candidateTitle: String): Double {
-        val queryNorm = normalizeSearchText(query)
-        val candidateNorm = normalizeSearchText(candidateTitle)
-        return VERSION_MARKERS.sumOf { marker ->
-            if (candidateNorm.contains(marker) && !queryNorm.contains(marker)) 7.0 else 0.0
-        }.coerceAtMost(18.0)
     }
 
     fun lastDownloadSource(): DownloadSource = runCatching {
@@ -1232,7 +1056,7 @@ class MusicDownloadRepository @Inject constructor(
             requestMethod = "GET"
             setRequestProperty("Accept", "audio/flac, audio/x-flac, application/octet-stream, */*")
             setRequestProperty("Accept-Encoding", "identity")
-            setRequestProperty("User-Agent", "Harmony/1.0.0 Android")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android")
         }
 
         try {
@@ -1313,7 +1137,7 @@ class MusicDownloadRepository @Inject constructor(
             setRequestProperty("Range", "bytes=0-31")
             setRequestProperty("Accept", "audio/flac, audio/x-flac, application/octet-stream, */*")
             setRequestProperty("Accept-Encoding", "identity")
-            setRequestProperty("User-Agent", "Harmony/1.0.0 Android")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android")
         }
 
         try {
@@ -1490,15 +1314,6 @@ class MusicDownloadRepository @Inject constructor(
     private companion object {
         const val SPOTIFLAC_MIN_QUERY_CHARS = 3
         const val SPOTIFLAC_MAX_QUERY_LENGTH = 160
-        const val SPOTIFLAC_SEARCH_LIMIT = 25
-        const val SPOTIFLAC_VISIBLE_RESULTS = 8
-        const val SEARCH_COMPARISON_MAX_CHARS = 160
-        val DASH_SEPARATOR = Regex("\\s+[-–—]\\s+")
-        val COMBINING_MARKS = Regex("\\p{Mn}+")
-        val NON_ALPHANUMERIC = Regex("[^\\p{L}\\p{N}]+")
-        val FEATURING_TEXT = Regex("\\b(feat(?:uring)?|ft)\\.?\\b", RegexOption.IGNORE_CASE)
-        val SEARCH_STOP_WORDS = setOf("the", "and", "feat", "featuring", "ft", "official", "audio", "video")
-        val VERSION_MARKERS = listOf("live", "remix", "remaster", "acoustic", "instrumental", "karaoke", "sped up", "slowed")
         const val PREF_LAST_YTDLP_UPDATE = "last_ytdlp_nightly_update_ms"
         const val PREF_DOWNLOAD_FOLDER_URI = "download_folder_uri"
         const val PREF_DOWNLOAD_FOLDER_LABEL = "download_folder_label"

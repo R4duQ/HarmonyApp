@@ -73,7 +73,7 @@ import com.harmony.core.ui.component.EditorialTab
 import com.harmony.core.ui.component.EditorialTabs
 import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.bluePalette
-import com.harmony.core.ui.component.MiniPlayerClearance
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -291,7 +291,7 @@ private fun SimpleTab(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = MiniPlayerClearance)
+            .padding(bottom = LocalFloatingChromeHeight.current)
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -522,7 +522,7 @@ private fun AdvancedTab(viewModel: EqualizerViewModel, palette: EditorialPalette
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = MiniPlayerClearance)
+            .padding(bottom = LocalFloatingChromeHeight.current)
             .padding(horizontal = 20.dp),
     ) {
         // ---- Profile picker ----

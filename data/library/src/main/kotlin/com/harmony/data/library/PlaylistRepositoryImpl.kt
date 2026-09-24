@@ -64,6 +64,14 @@ class PlaylistRepositoryImpl @Inject constructor(
     override suspend fun create(name: String): Long =
         playlistDao.insert(PlaylistEntity(name = name, createdAt = System.currentTimeMillis()))
 
+    override suspend fun userPlaylistSongIds(): Set<Long> = playlistDao.userPlaylistSongIds().toSet()
+
+    override suspend fun saveDiscoveryBatch(batchId: String, name: String, songIds: List<Long>): Long {
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(("harmony-discover:" + batchId).toByteArray(Charsets.UTF_8))
+        val id = java.nio.ByteBuffer.wrap(digest).long or Long.MIN_VALUE
+        return playlistDao.insertDiscoveryOnce(id, name, songIds)
+    }
+
     override suspend fun rename(playlistId: Long, name: String) = playlistDao.rename(playlistId, name)
 
     override suspend fun delete(playlistId: Long) = playlistDao.delete(playlistId)

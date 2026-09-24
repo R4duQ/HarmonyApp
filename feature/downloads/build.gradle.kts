@@ -39,4 +39,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // android.jar's org.json is a stub in local unit tests; the search tests parse real JSON.
+    testImplementation("org.json:json:20240303")
 }

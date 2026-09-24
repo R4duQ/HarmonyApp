@@ -16,6 +16,12 @@ import javax.inject.Inject
 
 data class AlbumEdition(val id: String, val title: String, val artist: String, val cover: String)
 
+/** Stable identity for albums opened from Downloads, independent of engine. */
+internal fun downloadsAlbumId(editionId: String): String {
+    require(editionId.matches(Regex("[0-9]+"))) { "Invalid album identifier" }
+    return "downloads-deezer-$editionId"
+}
+
 object AlbumTrackMatcher {
     fun key(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "").lowercase(Locale.ROOT)
@@ -49,14 +55,20 @@ object AlbumEditionMatcher {
 
 /** Public album metadata only. Audio always goes through the explicitly selected engine. */
 class AlbumMetadataClient @Inject constructor() {
-    suspend fun search(title: String, artist: String, artistAliases: Set<String> = emptySet()): List<AlbumEdition> = withContext(Dispatchers.IO) {
-        val query = URLEncoder.encode("$artist $title", "UTF-8")
+    suspend fun searchAlbums(input: String): List<AlbumEdition> = withContext(Dispatchers.IO) {
+        val text = input.trim()
+        require(text.length in 2..200) { "Enter an album title and artist (2–200 characters)." }
+        val query = URLEncoder.encode(text, "UTF-8")
         val data = get("https://api.deezer.com/search/album?q=$query&limit=25").getJSONArray("data")
-        val editions = (0 until data.length()).map { data.getJSONObject(it) }.map { a ->
+        (0 until data.length()).map { data.getJSONObject(it) }.map { a ->
             AlbumEdition(a.getLong("id").toString(), a.optString("title"),
                 a.optJSONObject("artist")?.optString("name").orEmpty(), a.optString("cover_big"))
-        }
-        AlbumEditionMatcher.matching(editions, title, artist, artistAliases)
+        }.filter { it.title.isNotBlank() && it.artist.isNotBlank() }.distinctBy { it.id }.take(25)
+    }
+
+    suspend fun search(title: String, artist: String, artistAliases: Set<String> = emptySet()): List<AlbumEdition> {
+        val editions = searchAlbums("$artist $title".take(200))
+        return AlbumEditionMatcher.matching(editions, title, artist, artistAliases)
     }
 
     suspend fun load(shflId: String, edition: AlbumEdition): AlbumJourney = withContext(Dispatchers.IO) {
@@ -92,14 +104,15 @@ class AlbumMetadataClient @Inject constructor() {
             page = get(url.toString())
         }
         check(rows.size == total && rows.map { it.id }.distinct().size == total) { "The complete album tracklist is unavailable. Retry later." }
-        AlbumJourney(shflId, edition.title, edition.artist, edition.cover, edition.id, rows)
+        AlbumJourney(shflId, edition.title, edition.artist, edition.cover, edition.id,
+            rows.sortedWith(compareBy<AlbumJourneyTrack> { it.disc }.thenBy { it.number }))
     }
 
     private fun get(url: String): JSONObject {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000; readTimeout = 20_000; instanceFollowRedirects = false
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "Harmony/1.0.0 AlbumMetadata")
+            setRequestProperty("User-Agent", "Harmony/1.0 AlbumMetadata")
         }
         try {
             val code = connection.responseCode

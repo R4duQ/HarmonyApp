@@ -70,6 +70,11 @@ import com.harmony.feature.settings.FlacCheckScreen
 import com.harmony.feature.settings.SettingsScreen
 import com.harmony.feature.settings.TagEditorScreen
 import com.harmony.core.ui.component.FloatingChromeClearance
+import androidx.compose.runtime.remember
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.CompositionLocalProvider
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 
 object Routes {
     const val LIBRARY = "library"
@@ -90,6 +95,21 @@ object Routes {
     const val TAG_EDITOR = "tag_editor"
 }
 
+/**
+ * Pops [entry] only if it is still the top of the back stack.
+ *
+ * The playlist page can ask to leave from its Back button and from its
+ * swipe-down gesture, and the system back gesture can race either of them.
+ * A bare popBackStack() from a page that is already on its way out pops the
+ * page UNDER it too — the user lands two screens back. Checking the entry
+ * makes every request after the first a no-op, and popping (rather than
+ * navigating somewhere) is what returns to the real previous page with its
+ * tab, scroll position and state as they were left.
+ */
+private fun androidx.navigation.NavController.popIfCurrent(
+    entry: androidx.navigation.NavBackStackEntry,
+): Boolean = currentBackStackEntry?.id == entry.id && popBackStack()
+
 private data class TopLevel(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 /**
@@ -104,6 +124,7 @@ fun HarmonyApp(
     playlistVerificationReturnSignal: Int = 0,
     spotifyAuthorizationReturnSignal: Int = 0,
     albumVerificationReturnSignal: Int = 0,
+    discoveryVerificationReturnSignal: Int = 0,
 ) {
     val libraryActions: LibraryActionsViewModel = hiltViewModel()
     val navController = rememberNavController()
@@ -203,6 +224,10 @@ fun HarmonyApp(
         if (albumVerificationReturnSignal > 0 && currentRoute != Routes.ALBUM_DOWNLOAD) goTo(Routes.DOWNLOADS)
     }
 
+    LaunchedEffect(discoveryVerificationReturnSignal) {
+        if (discoveryVerificationReturnSignal > 0 && currentRoute != Routes.DISCOVER) goTo(Routes.DISCOVER)
+    }
+
     Scaffold(
         containerColor = palette.field,
         // Only the TOP side, deliberately: Scaffold's default is
@@ -217,6 +242,27 @@ fun HarmonyApp(
         // Column's own windowInsetsPadding gets the real value.
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top),
     ) { innerPadding ->
+        // Measured, not assumed: the chrome's height changes with the
+        // download banner, whether the nav bar is on this route, and the
+        // device's gesture inset.
+        var chromeHeight by remember { mutableStateOf(FloatingChromeClearance) }
+        val density = LocalDensity.current
+
+        // The page runs the FULL height, behind the chrome, and the chrome
+        // floats over it.
+        //
+        // Bounding NavHost here instead looked right in isolation but left
+        // the region under the pills as flat field with no content in it —
+        // an opaque slab that visually welded the mini player to the nav
+        // bar. There is no way to make that strip transparent while nothing
+        // is drawn behind it; the only thing that removes it is letting the
+        // page continue underneath.
+        //
+        // Nothing becomes unreachable: screens still reserve the chrome's
+        // real height through the local below, so the last row can always
+        // be scrolled clear of the glass. It travels UNDER the pills on the
+        // way there, which is what makes them read as floating.
+        CompositionLocalProvider(LocalFloatingChromeHeight provides chromeHeight) {
         Box(Modifier.fillMaxSize()) {
             NavHost(
                 navController = navController,
@@ -275,7 +321,7 @@ fun HarmonyApp(
                     // The shell no longer reserves this space via Scaffold's
                     // bottomBar, so the floating chrome's height has to be
                     // handed down explicitly — HomeScreen already takes it.
-                    contentPadding = PaddingValues(bottom = FloatingChromeClearance),
+                    contentPadding = PaddingValues(bottom = chromeHeight),
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenSearch = {
                         librarySearchText = null
@@ -286,22 +332,34 @@ fun HarmonyApp(
                     onOpenDiscover = { goTo(Routes.DISCOVER) },
                     onOpenFlacCheck = { navController.navigate(Routes.FLAC_CHECK) },
                     onOpenLibrary = { librarySearchResetSignal++; goTo(Routes.LIBRARY) },
+                    // Albums and playlists open ON TOP of Home, so Back (or
+                    // a playlist's swipe-down) returns to Home exactly where
+                    // it was scrolled to.
+                    onOpenAlbum = { navController.navigate("album/$it") },
+                    onOpenPlaylist = { navController.navigate("playlist/$it") },
+                    onOpenPlaylists = { goTo(Routes.PLAYLISTS) },
+                    onOpenNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
                 )
             }
             composable(Routes.DISCOVER) {
                 DiscoverScreen(
-                    onDownloadAlbum = { navController.navigate("album_download/${android.net.Uri.encode(it)}") { launchSingleTop = true } },
-                    onSearchLibrary = { albumTitle ->
-                        librarySearchText = albumTitle
-                        librarySearchSignal++
-                        goTo(Routes.LIBRARY)
-                    },
+                    onOpenPlaylists = { goTo(Routes.PLAYLISTS) },
+                    // The playlist Discover just saved opens over Discover; Back returns to the flow.
+                    onOpenPlaylist = { navController.navigate("playlist/$it") },
+                    downloadPanel = { batch -> com.harmony.feature.downloads.DiscoveryDownloadPanel(batch,
+                        onOpenDownloads = { goTo(Routes.DOWNLOADS) }) },
                 )
             }
             composable(
                 Routes.ALBUM,
                 arguments = listOf(navArgument("albumId") { type = NavType.LongType }),
-            ) { AlbumDetailScreen() }
+            ) { entry ->
+                AlbumDetailScreen(
+                    onBack = { navController.popIfCurrent(entry) },
+                    onOpenArtist = { navController.navigate("artist/${android.net.Uri.encode(it)}") },
+                    onOpenAlbum = { navController.navigate("album/$it") },
+                )
+            }
             composable(
                 "artist/{artistName}",
                 arguments = listOf(navArgument("artistName") { type = NavType.StringType }),
@@ -334,11 +392,15 @@ fun HarmonyApp(
             composable(
                 Routes.PLAYLIST,
                 arguments = listOf(navArgument("playlistId") { type = NavType.LongType }),
-            ) { PlaylistDetailScreen() }
+            ) { entry ->
+                PlaylistDetailScreen(onBack = { navController.popIfCurrent(entry) })
+            }
             composable(
                 Routes.SMART_PLAYLIST,
                 arguments = listOf(navArgument("smartType") { type = NavType.StringType }),
-            ) { PlaylistDetailScreen() }
+            ) { entry ->
+                PlaylistDetailScreen(onBack = { navController.popIfCurrent(entry) })
+            }
             composable(Routes.EQUALIZER) {
                 EqualizerScreen(onBack = { navController.popBackStack() })
             }
@@ -409,6 +471,11 @@ fun HarmonyApp(
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
+                .onSizeChanged {
+                    // +8dp so the last row clears the glass rather than
+                    // ending flush against its edge.
+                    with(density) { chromeHeight = it.height.toDp() + 8.dp }
+                }
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars),
         ) {
@@ -455,6 +522,7 @@ fun HarmonyApp(
                 )
             }
         }
+    }
     }
     }
     LibraryActionsHost(libraryActions)

@@ -32,6 +32,10 @@ data class SpotiFlacSearchCandidate(
     val thumbnailUrl: String?,
     val matchScore: Int,
     val rank: Long = 0L,
+    /** Where the metadata came from: "Tidal", "Qobuz" (SpotiFLAC providers), "Deezer" or "Apple Music". */
+    val source: String = "Deezer",
+    /** The recording code when the source gave one; the download engine matches by it first. */
+    val isrc: String? = null,
 ) {
     val displayName: String
         get() = listOf(artist, title).filter { it.isNotBlank() }.joinToString(" - ")

@@ -66,6 +66,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.model.Song
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 
 // ---------------------------------------------------------------------------
 // Shared glass surface maths
@@ -155,6 +160,16 @@ fun GlassSearchBar(
     palette: EditorialPalette,
     modifier: Modifier = Modifier,
     placeholder: String = "Search songs, artists, albums",
+    /**
+     * Whether becoming active should also raise the keyboard.
+     *
+     * False when [active] was restored rather than chosen — coming back from
+     * Now Playing with search still open, say. The effect below used to key
+     * on Unit, so it re-ran on every fresh composition of this bar and threw
+     * the keyboard up again even though the user had dismissed it before
+     * navigating away.
+     */
+    autoFocus: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -191,7 +206,11 @@ fun GlassSearchBar(
                 // content and a second tap is what actually raises the
                 // keyboard.
                 val focusRequester = remember { FocusRequester() }
-                LaunchedEffect(Unit) { focusRequester.requestFocus() }
+                val keyboard = LocalSoftwareKeyboardController.current
+                val focusManager = LocalFocusManager.current
+                LaunchedEffect(autoFocus) {
+                    if (autoFocus) focusRequester.requestFocus()
+                }
                 // BasicTextField, not Material3's TextField: TextField
                 // enforces its own 56dp minimum height no matter what
                 // container it sits in, but this pill is 44dp tall with a
@@ -229,6 +248,22 @@ fun GlassSearchBar(
                             singleLine = true,
                             textStyle = TextStyle(color = palette.ink, fontSize = 15.sp),
                             cursorBrush = SolidColor(palette.ink),
+                            // Search action, and it actually dismisses. The
+                            // field had no imeAction at all, so the key read
+                            // "enter" and did nothing — results are already
+                            // live as you type, so the keyboard just sat
+                            // there covering them with no obvious way down.
+                            // Focus is cleared as well as the IME hidden:
+                            // hiding alone leaves the field focused, and the
+                            // keyboard springs back on the next recomposition
+                            // that touches focus.
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    focusManager.clearFocus()
+                                    keyboard?.hide()
+                                },
+                            ),
                         )
                     }
                     IconButton(

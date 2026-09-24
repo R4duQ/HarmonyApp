@@ -123,7 +123,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         outputFormat: SpotiFlacOutputFormat = SpotiFlacOutputFormat.FLAC_LOSSLESS,
         requestOwner: SpotiFlacRequestOwner = SpotiFlacRequestOwner.DOWNLOADS,
         onProgress: (SpotiFlacTransferProgress) -> Unit,
-    ): SpotiFlacDownloadedFile = DownloadEngineGate.run(requestOwner == SpotiFlacRequestOwner.ALBUM_DOWNLOAD) {
+    ): SpotiFlacDownloadedFile = DownloadEngineGate.run(requestOwner in setOf(SpotiFlacRequestOwner.ALBUM_DOWNLOAD, SpotiFlacRequestOwner.DISCOVERY_DOWNLOAD)) {
         downloadExclusive(track, outputFormat, requestOwner, onProgress)
     }
 
@@ -1426,6 +1426,18 @@ class SpotiFlacDownloadEngine @Inject constructor(
         return -1.0
     }
 
+    /**
+     * Track search across SpotiFLAC's own metadata providers (Tidal, Qobuz,
+     * Deezer, Amazon: whichever installed extensions offer search), in the
+     * engine's priority order. Returns the engine's JSON array of tracks.
+     * A provider that needs verification is skipped; the error is returned
+     * only when no provider found anything.
+     */
+    suspend fun searchProviderTracks(query: String, limit: Int): String {
+        ensureReady { }
+        return nativeControl { Gobackend.searchTracksWithMetadataProvidersJSON(query, limit.toLong(), true) }
+    }
+
     private suspend fun <T> nativeControl(block: () -> T): T = withContext(Dispatchers.IO) {
         try {
             nativeControlExecutor.submit<T> { block() }.get()
@@ -1490,7 +1502,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             instanceFollowRedirects = true
             requestMethod = "GET"
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "Harmony/1.0.0 Android SpotiFLAC-Bridge")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Bridge")
         }
         try {
             val code = connection.responseCode
@@ -1548,7 +1560,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             instanceFollowRedirects = true
             requestMethod = "GET"
             setRequestProperty("Accept", "application/octet-stream")
-            setRequestProperty("User-Agent", "Harmony/1.0.0 Android SpotiFLAC-Bridge")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Bridge")
         }
         try {
             val code = connection.responseCode
@@ -1605,7 +1617,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 readTimeout = SONG_LINK_TIMEOUT_MS
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "Harmony/1.0.0 Android SpotiFLAC-Resolver")
+                setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Resolver")
             }
             try {
                 if (connection.responseCode !in 200..299) {
@@ -2981,7 +2993,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             connection.requestMethod = "GET"
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "image/jpeg,image/png;q=0.9,*/*;q=0.2")
-            connection.setRequestProperty("User-Agent", "Harmony/1.0.0 Android ArtworkEmbed")
+            connection.setRequestProperty("User-Agent", "Harmony/1.0 Android ArtworkEmbed")
             val code = connection.responseCode
             if (code !in 200..299) return null
             val advertised = connection.contentLengthLong

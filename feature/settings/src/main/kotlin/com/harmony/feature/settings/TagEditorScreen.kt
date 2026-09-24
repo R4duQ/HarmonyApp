@@ -45,6 +45,7 @@ import com.harmony.core.ui.component.EditorialPill
 import com.harmony.core.ui.component.EditorialSectionLabel
 import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.stonePalette
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 
 /**
  * Tag editor: find a song, correct its title/artist/album, and replace or
@@ -164,7 +165,8 @@ fun TagEditorScreen(viewModel: TagEditorViewModel = hiltViewModel()) {
         Column(
             Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = LocalFloatingChromeHeight.current),
         ) {
             EditorialSectionLabel(
                 "Artwork",

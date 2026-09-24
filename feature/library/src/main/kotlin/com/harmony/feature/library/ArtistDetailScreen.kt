@@ -39,9 +39,9 @@ import com.harmony.core.ui.component.EditorialCard
 import com.harmony.core.ui.component.EditorialCircleButton
 import com.harmony.core.ui.component.amberPalette
 import com.harmony.core.ui.component.formatLongDuration
+import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.playback.usecase.PlaySongsUseCase
-import com.harmony.core.ui.component.MiniPlayerClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -125,7 +125,7 @@ fun ArtistDetailScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.field),
-        contentPadding = PaddingValues(bottom = MiniPlayerClearance),
+        contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current),
     ) {
         item {
             Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 10.dp)) {

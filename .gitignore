@@ -30,3 +30,6 @@ APK/
 *.log
 __pycache__/
 *.pyc
+
+# Website build output (website/build.mjs)
+website/dist/

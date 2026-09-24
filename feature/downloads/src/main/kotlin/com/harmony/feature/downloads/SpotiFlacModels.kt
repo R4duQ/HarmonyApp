@@ -7,6 +7,7 @@ enum class SpotiFlacRequestOwner {
     DOWNLOADS,
     PLAYLIST_TRANSFER,
     ALBUM_DOWNLOAD,
+    DISCOVERY_DOWNLOAD,
 }
 
 
