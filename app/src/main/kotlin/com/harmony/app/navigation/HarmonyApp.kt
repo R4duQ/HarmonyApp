@@ -353,7 +353,13 @@ fun HarmonyApp(
             composable(
                 Routes.ALBUM,
                 arguments = listOf(navArgument("albumId") { type = NavType.LongType }),
-            ) { AlbumDetailScreen() }
+            ) { entry ->
+                AlbumDetailScreen(
+                    onBack = { navController.popIfCurrent(entry) },
+                    onOpenArtist = { navController.navigate("artist/${android.net.Uri.encode(it)}") },
+                    onOpenAlbum = { navController.navigate("album/$it") },
+                )
+            }
             composable(
                 "artist/{artistName}",
                 arguments = listOf(navArgument("artistName") { type = NavType.StringType }),

@@ -92,6 +92,10 @@ import com.harmony.core.model.SmartPlaylistType
 import com.harmony.core.model.Song
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.EditorialSwipeToQueue
+import com.harmony.core.ui.component.SwipeDownToDismissState
+import com.harmony.core.ui.component.rememberDismissCallback
+import com.harmony.core.ui.component.rememberSwipeDownToDismissState
+import com.harmony.core.ui.component.swipeDownToDismiss
 import com.harmony.core.ui.component.formatDuration
 import com.harmony.core.ui.component.glassFill
 import com.harmony.core.ui.component.glassRim

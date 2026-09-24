@@ -595,7 +595,7 @@ private fun ArtistsTab(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "${artist.albumCount} albums  •  ${artist.songCount} songs",
+                            artistCounts(artist.albumCount, artist.songCount),
                             fontSize = 12.sp,
                             color = palette.muted,
                             modifier = Modifier.padding(top = 3.dp),
@@ -742,7 +742,7 @@ private fun SearchResultsContent(
                                     color = palette.ink,
                                 )
                                 Text(
-                                    "${artist.albumCount} albums  •  ${artist.songCount} songs",
+                                    artistCounts(artist.albumCount, artist.songCount),
                                     fontSize = 12.sp,
                                     color = palette.muted,
                                 )
@@ -759,3 +759,7 @@ private fun SearchResultsContent(
         }
     }
 }
+
+/** "1 album  •  12 songs": singular when there is one. */
+internal fun artistCounts(albums: Int, songs: Int): String =
+    "${if (albums == 1) "1 album" else "$albums albums"}  •  ${if (songs == 1) "1 song" else "$songs songs"}"

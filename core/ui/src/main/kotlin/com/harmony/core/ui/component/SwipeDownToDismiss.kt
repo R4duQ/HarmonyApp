@@ -1,4 +1,4 @@
-package com.harmony.feature.playlists
+package com.harmony.core.ui.component
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -59,7 +59,7 @@ class SwipeDownToDismissState internal constructor(
         internal set
 
     /** Height of the page, for "0 → 1" progress and the exit travel. */
-    internal var pageHeightPx by mutableStateOf(0f)
+    var pageHeightPx by mutableStateOf(0f)
 
     /** 0 at rest, 1 once the page has travelled its full height. */
     val progress: Float
@@ -205,7 +205,7 @@ fun Modifier.swipeDownToDismiss(
 
 /** Stable holder so [swipeDownToDismiss] can read the latest callback without restarting. */
 @Composable
-internal fun rememberDismissCallback(onDismiss: () -> Unit): () -> Unit {
+fun rememberDismissCallback(onDismiss: () -> Unit): () -> Unit {
     val latest by rememberUpdatedState(onDismiss)
     return remember { { latest() } }
 }

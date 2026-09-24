@@ -129,6 +129,8 @@ jobs:
           :data:library:testReleaseUnitTest
           :feature:discover:compileReleaseKotlin
           :feature:discover:testReleaseUnitTest
+          :feature:library:testReleaseUnitTest
+          :feature:playlists:testReleaseUnitTest
           --no-daemon
           --stacktrace
 

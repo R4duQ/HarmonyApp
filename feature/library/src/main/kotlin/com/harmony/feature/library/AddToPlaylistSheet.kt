@@ -49,14 +49,14 @@ class AddToPlaylistViewModel @Inject constructor(
     val playlists: StateFlow<List<Playlist>> = playlistRepository.observePlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun addSongToPlaylist(playlistId: Long, songId: Long) {
-        viewModelScope.launch { playlistRepository.addSongs(playlistId, listOf(songId)) }
+    fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
+        viewModelScope.launch { playlistRepository.addSongs(playlistId, songIds) }
     }
 
-    fun createPlaylistAndAddSong(name: String, songId: Long) {
+    fun createPlaylistAndAddSongs(name: String, songIds: List<Long>) {
         viewModelScope.launch {
             val id = playlistRepository.create(name.trim())
-            playlistRepository.addSongs(id, listOf(songId))
+            playlistRepository.addSongs(id, songIds)
         }
     }
 }
@@ -76,6 +76,15 @@ fun AddToPlaylistSheet(
     songId: Long,
     onDismiss: () -> Unit,
     viewModel: AddToPlaylistViewModel = hiltViewModel(),
+) = AddToPlaylistSheet(listOf(songId), onDismiss, viewModel = viewModel)
+
+/** The same sheet for several songs at once, such as a whole album. */
+@Composable
+fun AddToPlaylistSheet(
+    songIds: List<Long>,
+    onDismiss: () -> Unit,
+    title: String = if (songIds.size == 1) "Add to playlist" else "Add ${songIds.size} songs to playlist",
+    viewModel: AddToPlaylistViewModel = hiltViewModel(),
 ) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     var justAdded by remember { mutableStateOf<Long?>(null) }
@@ -87,7 +96,7 @@ fun AddToPlaylistSheet(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Add to playlist", style = MaterialTheme.typography.titleMedium)
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f, fill = false))
             TextButton(onClick = onDismiss) { Text("Done") }
         }
 
@@ -116,7 +125,7 @@ fun AddToPlaylistSheet(
                         }
                     },
                     modifier = Modifier.clickable {
-                        viewModel.addSongToPlaylist(playlist.id, songId)
+                        viewModel.addSongsToPlaylist(playlist.id, songIds)
                         justAdded = playlist.id
                     },
                 )
@@ -138,7 +147,7 @@ fun AddToPlaylistSheet(
                 )
                 Button(
                     onClick = {
-                        viewModel.createPlaylistAndAddSong(name, songId)
+                        viewModel.createPlaylistAndAddSongs(name, songIds)
                         showCreateField = false
                     },
                     enabled = name.isNotBlank(),
