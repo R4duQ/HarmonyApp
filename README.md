@@ -4,10 +4,10 @@ Android music player with a local library, playlists, equalizer, personalized so
 discovery, Spotify playlist import and album and track downloads through the
 configured SpotiFLAC and Soulseek integrations.
 
-**1.0** (`versionCode = 100`) is the first stable version. It contains every change
+**1.0** (`versionCode = 101`) is the first stable version. It contains every change
 made so far: the FLAC compatibility fix, album downloads, the three-step Discover flow
 ([instructions](DISCOVER-FLOW.md)), SpotiFLAC search across its providers (Tidal
-included), Smart Shuffle, the Home and playlist redesigns and the Android Auto fixes.
+included), Smart Shuffle, the Home, playlist and album page redesigns and the Android Auto fixes.
 Full-album and selected-track downloads are in Downloads; see
 [album instructions](ALBUME-DOWNLOADS.md). The versionCode is higher than every
 earlier build, so 1.0 installs as an update over them when it is signed with the same key.

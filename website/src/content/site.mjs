@@ -8,9 +8,9 @@ const repo = 'https://github.com/R4duQ/HarmonyApp';
 
 export const release = {
   version: '1.0',
-  versionCode: 100,
+  versionCode: 101,
   tag: 'v1.0',
-  date: '2026-09-23', // GitHub release published_at
+  date: '2026-09-24', // GitHub release published_at
   // 'stable' shows "Download Harmony"; 'beta' shows "Try the beta";
   // 'none' shows "Follow development" and links to the repository.
   status: 'stable',
@@ -61,7 +61,7 @@ export const nav = [
 export const requirements = [
   { label: 'Platform', value: 'Android phones with a 64-bit ARM processor (arm64-v8a)' },
   { label: 'Minimum', value: 'Android 10' },
-  { label: 'Version', value: `<span class="mono">${release.version}</span>, released 23 September 2026` },
+  { label: 'Version', value: `<span class="mono">${release.version}</span>, released 24 September 2026` },
   { label: 'Status', value: 'Stable release' },
   { label: 'Install', value: 'APK file from GitHub Releases' },
   { label: 'Also built', value: 'An x86_64 APK for the Android emulator, for testing on a computer' },

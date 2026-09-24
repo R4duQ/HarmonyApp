@@ -1,8 +1,8 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **100**: higher than
-every earlier build, so it installs as an update over 1.0.0–1.0.4 when signed with
-the same key. Library, playlists and settings are kept.
+First stable version. Android versionName **1.0**, versionCode **101**: higher than
+every earlier build, including the first 1.0 build (100), so it installs as an update
+over any of them. Library, playlists and settings are kept.
 
 ## Download
 
@@ -31,6 +31,10 @@ certificate.
 - **FLAC compatibility fix.** FFmpeg runs from its own verified library set.
 - **Smart Shuffle** reshuffles the queue correctly.
 - Redesigned **Home** and **playlist detail** screens.
+- Redesigned **album page**: the cover as a record that turns while the album
+  plays, a link to the artist, a quality badge (lossless, bit depth and sample
+  rate), tracks in album order split by disc, a line for each track missing from
+  your library, "About this album" details and the artist's other albums.
 - **Android Auto.** The session stays alive when the phone app is swiped away.
   Connections are also written to a small diagnostic log, which you can read with
   `adb pull /sdcard/Android/data/com.harmony.app/files/android-auto-log.txt`.
