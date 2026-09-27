@@ -93,6 +93,7 @@ internal class DiscoveryActions(
     val backFromReview: () -> Unit = {},
     val createPlaylist: () -> Unit = {},
     val rename: (String) -> Unit = {},
+    val setDownload: (List<String>, Boolean) -> Unit = { _, _ -> },
     val openBatch: (String) -> Unit = {},
     val startNew: () -> Unit = {},
     val consumeMessage: () -> Unit = {},
@@ -104,7 +105,7 @@ internal class DiscoveryActions(
             changeLevel = vm::changeLevel, regenerate = vm::regenerate, fill = vm::fill, toggleKeep = vm::toggleKeep, remove = vm::remove,
             replace = vm::replace, notInterested = vm::notInterested, moreLike = vm::moreLikeThis, focus = vm::focus,
             togglePreview = vm::togglePreview, backToPreferences = vm::backToPreferences, goToReview = vm::goToReview,
-            backFromReview = vm::backFromReview, createPlaylist = vm::createPlaylist, rename = vm::rename, openBatch = vm::openBatch,
+            backFromReview = vm::backFromReview, createPlaylist = vm::createPlaylist, rename = vm::rename, setDownload = vm::setDownload, openBatch = vm::openBatch,
             startNew = vm::startNewSelection, consumeMessage = vm::consumeMessage,
         )
     }
@@ -185,6 +186,9 @@ internal object DiscoveryTags {
     const val DURATION = "discover:duration"
     const val AVAILABILITY = "discover:availability"
     const val DOWNLOADS = "discover:downloads"
+    const val DOWNLOAD_COUNT = "discover:download-count"
+    const val SELECT_ALL = "discover:select-all"
+    const val SELECT_NONE = "discover:select-none"
     const val CREATE = "discover:create"
     const val CREATE_REASON = "discover:create-reason"
     const val OPEN_PLAYLIST = "discover:open-playlist"
@@ -193,5 +197,6 @@ internal object DiscoveryTags {
     fun focus(key: String) = "discover:focus:$key"
     fun row(key: String) = "discover:row:$key"
     fun reviewRow(key: String) = "discover:review-row:$key"
+    fun downloadBox(key: String) = "discover:download-box:$key"
     fun batch(id: String) = "discover:batch:$id"
 }

@@ -59,7 +59,7 @@ internal object DiscoveryStateJson {
             put("uris", JSONObject(b.uris)); put("errors", JSONObject(b.errors)); put("playlist", b.playlistId)
             put("status", b.status); put("source", b.source); put("format", b.format); put("verificationProvider", b.verificationProvider)
             put("placed", JSONArray(b.placedKeys.toList())); put("reasons", JSONObject(b.reasons)); put("active", b.activeKey)
-            put("deleted", b.playlistDeleted); put("locked", b.locked)
+            put("deleted", b.playlistDeleted); put("locked", b.locked); put("skipped", JSONArray(b.skipped.toList()))
         } }))
         s.draft?.let { put("draft", draft(it)) }
         put("recommended", JSONArray(s.recommended.map { JSONObject().put("id", it.identity).put("at", it.at) }))
@@ -114,7 +114,8 @@ internal object DiscoveryStateJson {
                 DiscoveryBatch(b.getString("id"), b.getString("name"), tracks, readMap(b.optJSONObject("uris")), readMap(b.optJSONObject("errors")),
                     b.optional("playlist")?.toLong(), b.optString("status", "Ready to download"), b.optString("source", "SPOTIFLAC"), b.optString("format", "FLAC_LOSSLESS"), b.optional("verificationProvider"),
                     placedKeys = strings(b.optJSONArray("placed")).toSet(), reasons = readMap(b.optJSONObject("reasons")),
-                    activeKey = b.optional("active"), playlistDeleted = b.optBoolean("deleted"), locked = b.optBoolean("locked"))
+                    activeKey = b.optional("active"), playlistDeleted = b.optBoolean("deleted"), locked = b.optBoolean("locked"),
+                    skipped = strings(b.optJSONArray("skipped")).toSet())
             } }, s.optional("reveal"), s.optional("undo"),
             draft = s.optJSONObject("draft")?.let(::readDraft),
             recommended = (s.optJSONArray("recommended") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getJSONObject(it) }

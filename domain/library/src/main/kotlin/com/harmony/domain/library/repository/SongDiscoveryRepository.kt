@@ -62,6 +62,8 @@ data class DiscoveryBatch(
     val playlistDeleted: Boolean = false,
     /** A download was queued or a playlist was made: the song list can no longer be edited. */
     val locked: Boolean = false,
+    /** Missing songs the user chose not to download. They stay listed and can be ticked again. */
+    val skipped: Set<String> = emptySet(),
 )
 
 /** When a song was last recommended, so the next sessions can prefer others. */

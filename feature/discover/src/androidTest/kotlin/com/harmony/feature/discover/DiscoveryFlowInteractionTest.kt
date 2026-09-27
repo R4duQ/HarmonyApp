@@ -8,6 +8,12 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -46,6 +52,7 @@ class DiscoveryFlowInteractionTest {
         togglePreview = { calls += "preview:${it.key}" }, backToPreferences = { calls += "back" }, goToReview = { calls += "review" },
         backFromReview = { calls += "backFromReview" }, createPlaylist = { calls += "create" }, rename = { calls += "rename:$it" },
         openBatch = { calls += "open:$it" }, startNew = { calls += "new" },
+        setDownload = { keys, on -> calls += "download:${keys.joinToString(",")}:$on" },
     )
 
     private fun show(state: DiscoveryUiState, preview: PreviewState = PreviewState(), width: Int? = null, fontScale: Float = 1f) {
@@ -149,6 +156,41 @@ class DiscoveryFlowInteractionTest {
         rule.onNodeWithText("The other 8 stay here and join the same playlist when they're downloaded.").assertIsDisplayed()
         rule.onNodeWithTag(DiscoveryTags.DOWNLOADS).assertExists()
         assertEquals(listOf("create"), calls)
+    }
+
+    @Test fun untickingAMissingSongSkipsItsDownload() {
+        show(DiscoverySamples.review(available = 12, total = 20))
+        rule.onNodeWithTag(DiscoveryTags.DOWNLOAD_COUNT).assertTextEquals("Download the missing 8")
+        rule.onNodeWithTag(DiscoveryTags.REVIEW_STEP).performScrollToKey("review:dz:20")
+        rule.onNodeWithTag(DiscoveryTags.reviewRow("dz:20")).assertIsOn() // the row is the checkbox for accessibility
+        rule.onNodeWithTag(DiscoveryTags.reviewRow("dz:20")).performClick()
+        assertEquals(listOf("download:dz:20:false"), calls)
+    }
+
+    @Test fun uncheckedSongsAreCountedAndCanBeTickedAgain() {
+        show(DiscoverySamples.review(available = 12, total = 20, skipped = 3))
+        rule.onNodeWithTag(DiscoveryTags.DOWNLOAD_COUNT).assertTextEquals("Download 5 of the 8 missing")
+        rule.onNodeWithText("4 waiting · 1 downloading · 3 not downloading").assertIsDisplayed()
+        rule.onNodeWithText("The other 5 stay here and join the same playlist when they're downloaded. The 3 you unticked won't be downloaded.")
+            .assertIsDisplayed()
+        rule.onNodeWithTag(DiscoveryTags.REVIEW_STEP).performScrollToKey("review:dz:20")
+        rule.onNodeWithTag(DiscoveryTags.reviewRow("dz:20")).assertIsOff()
+        rule.onAllNodesWithText("Won't be downloaded", useUnmergedTree = true).assertCountEquals(3)
+        rule.onNodeWithTag(DiscoveryTags.reviewRow("dz:20")).performClick()
+        assertEquals(listOf("download:dz:20:true"), calls)
+    }
+
+    @Test fun selectAllAndNoneCoverEveryMissingSongExceptTheOneDownloading() {
+        show(DiscoverySamples.review(available = 12, total = 20, skipped = 3))
+        rule.onNodeWithTag(DiscoveryTags.REVIEW_STEP).performScrollToKey("download")
+        rule.onNodeWithTag(DiscoveryTags.SELECT_ALL).performClick()
+        rule.onNodeWithTag(DiscoveryTags.SELECT_NONE).performClick()
+        val keys = (14..20).joinToString(",") { "dz:$it" }
+        assertEquals(listOf("download:$keys:true", "download:$keys:false"), calls)
+        // The song being downloaded right now shows its state and can't be toggled.
+        rule.onNodeWithTag(DiscoveryTags.REVIEW_STEP).performScrollToKey("review:dz:13")
+        rule.onNodeWithTag(DiscoveryTags.downloadBox("dz:13"), useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithTag(DiscoveryTags.reviewRow("dz:13")).assertHasNoClickAction()
     }
 
     @Test fun nothingAvailableDisablesCreateWithAReason() {

@@ -55,14 +55,16 @@ internal object DiscoverySamples {
         notes = if (connection == Connection.ONLINE) listOf("Found 48 of 50 songs. Add more artists or genres, or try again later.") else emptyList(),
     )
 
-    fun review(available: Int, total: Int = 20, playlistId: Long? = null, failed: Int = 0) : DiscoveryUiState {
+    fun review(available: Int, total: Int = 20, playlistId: Long? = null, failed: Int = 0, skipped: Int = 0) : DiscoveryUiState {
         val songs = (1..total).map { item(it).song }
+        // The last missing songs are the ones the listener unticked.
+        val unticked = songs.drop(available).takeLast(skipped).map { it.key }.toSet()
         val batch = DiscoveryBatch("b", "Discover · 23 Sep", songs, playlistId = playlistId, locked = playlistId != null,
             errors = songs.drop(available).take(failed).associate { it.key to "No close enough match on Soulseek." },
             reasons = songs.associate { it.key to "Deezer lists ${it.artist} as related to Muse" }, activeKey = songs.getOrNull(available + failed)?.key,
-            status = if (playlistId != null) "Saved with $available of $total · the rest join when downloaded" else "Ready")
+            status = if (playlistId != null) "Saved with $available of $total · the rest join when downloaded" else "Ready", skipped = unticked)
         val progress = BatchProgress(songs.take(available).associate { it.key to it.key.removePrefix("dz:").toLong() },
-            songs.getOrNull(available + failed)?.key, songs.drop(available).take(failed).map { it.key }.toSet(), songs.drop(available).map { it.key })
+            songs.getOrNull(available + failed)?.key, songs.drop(available).take(failed).map { it.key }.toSet(), songs.drop(available).map { it.key }, unticked)
         return DiscoveryUiState(loaded = true, step = DraftStep.REVIEW, review = batch, progress = progress, connection = Connection.ONLINE,
             draft = DiscoveryDraft("d", DraftStep.REVIEW, batchId = "b"))
     }

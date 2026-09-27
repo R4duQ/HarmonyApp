@@ -34,6 +34,26 @@ class PlaylistPlacementTest {
         assertTrue(PlaylistPlacement.toAppend(created.copy(playlistDeleted = true), PlaylistPlacement.progress(created, withDownload)).isEmpty())
     }
 
+    @Test fun untickedSongsAreSkippedNotDownloadedAndCanBeTickedAgain() {
+        val skipped = PlaylistPlacement.setDownload(batch, listOf("dz:4", "dz:5", "nope"), download = false)
+        assertEquals(setOf("dz:4", "dz:5"), skipped.skipped) // unknown keys are ignored
+        val progress = PlaylistPlacement.progress(skipped, LibraryIndex(library))
+        assertEquals(SongAvailability.SKIPPED, progress.status("dz:4"))
+        assertEquals(SongAvailability.SKIPPED, progress.status("dz:5")) // skipping beats an old failure
+        assertEquals(SongAvailability.DOWNLOADING, progress.status("dz:2"))
+        assertEquals(listOf("dz:2"), progress.toDownload)
+        assertEquals(setOf("dz:4", "dz:5"), progress.skipped)
+        val ticked = PlaylistPlacement.setDownload(skipped, listOf("dz:5"), download = true)
+        assertEquals(setOf("dz:4"), ticked.skipped)
+    }
+
+    @Test fun skippingASongThatIsAlreadyInTheLibraryChangesNothing() {
+        val progress = PlaylistPlacement.progress(batch.copy(skipped = setOf("dz:1")), LibraryIndex(library))
+        assertEquals(SongAvailability.IN_LIBRARY, progress.status("dz:1"))
+        assertTrue(progress.skipped.isEmpty())
+        assertEquals(listOf(10L, 30L), PlaylistPlacement.toCreate(batch, progress))
+    }
+
     @Test fun oneLibraryFileIsNeverUsedForTwoSongs() {
         val twin = batch.copy(songs = listOf(remote(1), remote(1).copy(key = "apple:1")))
         assertEquals(1, PlaylistPlacement.progress(twin, LibraryIndex(library)).availableCount)

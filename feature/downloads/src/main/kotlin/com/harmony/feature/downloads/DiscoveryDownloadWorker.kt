@@ -47,10 +47,11 @@ class DiscoveryDownloadWorker @AssistedInject constructor(
             val snapshot = batch()
             require(snapshot.songs.isNotEmpty() && snapshot.songs.distinctBy { it.key }.size == snapshot.songs.size)
             val total = snapshot.songs.size
+            val chosen = total - snapshot.skipped.size
             val source = AlbumDownloadPolicy.source(inputData.getString("source") ?: snapshot.source)
             val format = SpotiFlacOutputFormat.fromName(inputData.getString("format") ?: snapshot.format)
             require(AlbumDownloadPolicy.formatFor(source, format) == format)
-            setForeground(notification(snapshot.name, "Preparing $total songs…"))
+            setForeground(notification(snapshot.name, "Preparing $chosen songs…"))
             update { it.copy(locked = true) }
             // Recover any published file left unindexed by a killed process before matching.
             scan(force = false).collect { }
@@ -64,6 +65,8 @@ class DiscoveryDownloadWorker @AssistedInject constructor(
                 if (existing != null) {
                     update { it.copy(uris = it.uris + (song.key to existing), errors = it.errors - song.key) }; continue
                 }
+                // Read live: the user can tick or untick songs while the batch runs.
+                if (song.key in batch().skipped) continue
                 update { it.copy(uris = it.uris - song.key, errors = it.errors - song.key, activeKey = song.key, status = "${index + 1}/$total · ${song.title}") }
                 val detail = "${index + 1}/$total · ${song.title}"
                 DiscoveryTransferProgress.report(snapshot.id, song.key, song.title, null)
@@ -96,6 +99,8 @@ class DiscoveryDownloadWorker @AssistedInject constructor(
             val completed = batch()
             val progress = PlaylistPlacement.progress(completed, indexed)
             val ready = progress.availableCount
+            val wanted = ready + progress.toDownload.size
+            val skippedNote = progress.skipped.size.takeIf { it > 0 }?.let { " · $it not downloaded" }.orEmpty()
             val existingPlaylist = completed.playlistId
             when {
                 // A playlist already exists (made with the songs available earlier): add the new arrivals, once.
@@ -110,22 +115,26 @@ class DiscoveryDownloadWorker @AssistedInject constructor(
                         }
                     }
                 }
-                // Everything is here and nothing was saved yet: save the whole playlist in one transaction.
+                // Every ticked song is here and nothing was saved yet: save the playlist in one transaction.
                 // (Never after the user deleted it: the same id would bring it back.)
-                existingPlaylist == null && ready == total -> {
+                existingPlaylist == null && progress.toDownload.isEmpty() && ready > 0 -> {
                     val id = playlists.saveDiscoveryBatch(snapshot.id, completed.name, PlaylistPlacement.toCreate(completed, progress))
-                    update { it.copy(playlistId = id, placedKeys = progress.available.keys, errors = emptyMap(), status = "Saved in Your playlists · $total songs") }
-                    publisher.publishOutcome(snapshot.name, true, "All $total songs saved in Your playlists.")
+                    update { it.copy(playlistId = id, placedKeys = progress.available.keys, errors = emptyMap(), status = "Saved in Your playlists · $ready songs$skippedNote") }
+                    publisher.publishOutcome(snapshot.name, true, "All $ready songs saved in Your playlists.")
                     return Result.success()
                 }
             }
-            if (ready < total) {
-                update { it.copy(status = "$ready/$total ready. Missing songs are kept for another try.") }
+            if (progress.toDownload.isNotEmpty()) {
+                update { it.copy(status = "$ready/$wanted ready. Missing songs are kept for another try.") }
                 publisher.publishOutcome(snapshot.name, false, "Progress saved. Retry from Discover; finished files aren't downloaded again.")
                 return if (transientFailure && runAttemptCount < 2) Result.retry() else Result.failure()
             }
-            update { it.copy(status = "All $total songs are in the playlist") }
-            publisher.publishOutcome(snapshot.name, true, "All $total songs are in the playlist.")
+            if (ready == 0) {
+                update { it.copy(status = "No songs ticked for download") }
+                return Result.success()
+            }
+            update { it.copy(status = "All $ready songs are in the playlist$skippedNote") }
+            publisher.publishOutcome(snapshot.name, true, "All $ready songs are in the playlist.")
             return Result.success()
         } catch (e: CancellationException) {
             withContext(NonCancellable) { update { it.copy(status = "Paused · saved files kept", activeKey = null) } }
@@ -206,7 +215,7 @@ class DiscoveryDownloadWorker @AssistedInject constructor(
         fun request(batch: DiscoveryBatch, wifi: Boolean) = OneTimeWorkRequestBuilder<DiscoveryDownloadWorker>()
             .setInputData(Data.Builder().putString("batch", batch.id).putString("source", batch.source).putString("format", batch.format).build())
             .setConstraints(Constraints.Builder().setRequiresStorageNotLow(true).setRequiredNetworkType(
-                if (batch.songs.all { it.localUri != null || batch.uris[it.key] != null }) NetworkType.NOT_REQUIRED
+                if (batch.songs.all { it.localUri != null || batch.uris[it.key] != null || it.key in batch.skipped }) NetworkType.NOT_REQUIRED
                 else if (wifi) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).addTag(batch.id).build()
     }
