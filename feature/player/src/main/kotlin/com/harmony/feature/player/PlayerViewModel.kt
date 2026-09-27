@@ -49,6 +49,15 @@ class PlayerViewModel @Inject constructor(
         .flatMapLatest { id -> if (id == null) flowOf(false) else favorites.observeIsFavorite(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Device kinds the listener picked, keyed by device name; see [OutputForms]. */
+    val outputForms: StateFlow<Map<String, com.harmony.core.model.OutputForm>> = settings.outputForms
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Remembers what kind of device [name] is; null returns to the automatic guess. */
+    fun setOutputForm(name: String, form: com.harmony.core.model.OutputForm?) {
+        viewModelScope.launch { settings.setOutputForm(name, form) }
+    }
+
     val journeyProgress: StateFlow<Float?> = coordinator.journey
         .map { it?.progress }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
