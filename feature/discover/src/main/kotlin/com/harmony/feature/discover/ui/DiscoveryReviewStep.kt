@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,10 +23,13 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +41,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.glassFill
 import com.harmony.core.ui.component.glassRim
+import com.harmony.domain.library.discovery.BatchProgress
 import com.harmony.domain.library.discovery.PlaylistPlacement
 import com.harmony.domain.library.discovery.SongAvailability
 import com.harmony.domain.library.repository.DiscoveryBatch
@@ -66,6 +72,10 @@ internal fun ReviewStep(
     val available = progress?.availableCount ?: 0
     val total = batch.songs.size
     val missing = total - available
+    val skipped = progress?.skipped?.size ?: batch.skipped.size
+    val selected = missing - skipped
+    // Missing songs can be ticked or unticked for download, except the one being downloaded now.
+    val choosable = { status: SongAvailability -> !batch.playlistDeleted && status in ChoosableStatuses }
     val linkedToDraft = state.draft?.batchId == batch.id
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag(DiscoveryTags.REVIEW_STEP),
@@ -88,31 +98,49 @@ internal fun ReviewStep(
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("$available of $total in your library", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                     if (progress != null && missing > 0) {
+                        val failed = progress.failed.count { it !in progress.skipped }
                         val parts = listOfNotNull(
-                            "${missing - progress.failed.size - (if (progress.downloading != null) 1 else 0)} waiting",
+                            "${progress.toDownload.size - failed - (if (progress.downloading != null) 1 else 0)} waiting",
                             progress.downloading?.let { "1 downloading" },
-                            progress.failed.size.takeIf { it > 0 }?.let { "$it failed" },
+                            failed.takeIf { it > 0 }?.let { "$it failed" },
+                            skipped.takeIf { it > 0 }?.let { "$it not downloading" },
                         )
                         Text(parts.joinToString(" · "), color = palette.muted, fontSize = 14.sp)
                         Text("Found in a catalog doesn't mean there's a file. A song joins the playlist once it's downloaded and scanned.",
                             color = palette.muted, fontSize = 12.sp, lineHeight = 16.sp)
                     }
-                    CreateAction(batch, available, total, state.creating, palette, actions)
+                    CreateAction(batch, progress, available, total, state.creating, palette, actions)
                 }
             }
         }
         if (missing > 0 && !batch.playlistDeleted) item(key = "download") {
             DiscoverCard(palette, Modifier.testTag(DiscoveryTags.DOWNLOADS)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Download the missing $missing", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Text(if (skipped == 0) "Download the missing $missing" else "Download $selected of the $missing missing",
+                        color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
+                        modifier = Modifier.testTag(DiscoveryTags.DOWNLOAD_COUNT))
+                    Text("Tick the songs you want in the list below. Unticked songs aren't downloaded.",
+                        color = palette.muted, fontSize = 13.sp, lineHeight = 17.sp)
+                    val keys = progress?.missing.orEmpty().filter { it != progress?.downloading }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { actions.setDownload(keys, true) }, enabled = skipped > 0,
+                            modifier = Modifier.testTag(DiscoveryTags.SELECT_ALL)) { Text("Select all", color = palette.ink) }
+                        TextButton(onClick = { actions.setDownload(keys, false) }, enabled = selected > 0,
+                            modifier = Modifier.testTag(DiscoveryTags.SELECT_NONE)) { Text("Select none", color = palette.ink) }
+                    }
                     downloadPanel(batch)
                 }
             }
         }
         item(key = "songs-title") { SectionTitle("Songs", palette) }
         itemsIndexed(batch.songs, key = { _, s -> "review:${s.key}" }) { index, song ->
-            val status = progress?.status(song.key) ?: SongAvailability.NEEDS_DOWNLOAD
-            Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.testTag(DiscoveryTags.reviewRow(song.key)),
+            val status = progress?.status(song.key)
+                ?: if (song.key in batch.skipped) SongAvailability.SKIPPED else SongAvailability.NEEDS_DOWNLOAD
+            val canChoose = choosable(status)
+            val wanted = status != SongAvailability.SKIPPED
+            val rowModifier = if (canChoose) Modifier.toggleable(wanted, role = Role.Checkbox) { actions.setDownload(listOf(song.key), it) }
+                else Modifier.semantics(mergeDescendants = true) {}
+            Row(Modifier.fillMaxWidth().then(rowModifier).testTag(DiscoveryTags.reviewRow(song.key)),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${index + 1}", color = palette.muted, fontSize = 13.sp, modifier = Modifier.widthIn(min = 22.dp))
                 Cover(song.artwork, palette, Modifier.size(44.dp))
@@ -124,16 +152,22 @@ internal fun ReviewStep(
                         SongAvailability.DOWNLOADING -> "Downloading…"
                         SongAvailability.FAILED -> batch.errors[song.key] ?: "Download failed"
                         SongAvailability.NEEDS_DOWNLOAD -> "Needs download"
+                        SongAvailability.SKIPPED -> "Won't be downloaded"
                     }
                     Text(detail, color = palette.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     batch.reasons[song.key]?.let { Text(it, color = palette.muted.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
-                Icon(
+                if (canChoose) {
+                    if (status == SongAvailability.FAILED) Icon(Icons.Rounded.ErrorOutline, null, tint = palette.muted, modifier = Modifier.size(18.dp))
+                    // The row is the toggle; the box only shows its state.
+                    Checkbox(wanted, onCheckedChange = null, modifier = Modifier.testTag(DiscoveryTags.downloadBox(song.key)),
+                        colors = CheckboxDefaults.colors(checkedColor = palette.accent, uncheckedColor = palette.muted, checkmarkColor = palette.onAccent))
+                } else Icon(
                     when (status) {
                         SongAvailability.IN_LIBRARY -> Icons.Rounded.CheckCircle
                         SongAvailability.DOWNLOADING -> Icons.Rounded.Downloading
                         SongAvailability.FAILED -> Icons.Rounded.ErrorOutline
-                        SongAvailability.NEEDS_DOWNLOAD -> Icons.Rounded.CloudDownload
+                        SongAvailability.NEEDS_DOWNLOAD, SongAvailability.SKIPPED -> Icons.Rounded.CloudDownload
                     }, null, tint = if (status == SongAvailability.IN_LIBRARY) palette.accent else palette.muted, modifier = Modifier.size(20.dp))
             }
         }
@@ -188,13 +222,17 @@ private fun SummaryCard(batch: DiscoveryBatch, palette: EditorialPalette, action
 
 /** Create now with what's playable; the rest keeps going in the background. Disabled only with a reason. */
 @Composable
-private fun CreateAction(batch: DiscoveryBatch, available: Int, total: Int, creating: Boolean, palette: EditorialPalette, actions: DiscoveryActions) {
-    val missing = total - available
+private fun CreateAction(batch: DiscoveryBatch, progress: BatchProgress?, available: Int, total: Int, creating: Boolean,
+                         palette: EditorialPalette, actions: DiscoveryActions) {
+    // Only the ticked missing songs are still coming; skipped ones won't arrive.
+    val missing = progress?.toDownload?.size ?: (total - available)
+    val skipped = progress?.skipped?.size ?: 0
+    val skippedNote = if (skipped > 0) " The $skipped you unticked won't be downloaded." else ""
     when {
         batch.playlistId != null && !batch.playlistDeleted -> {
             PrimaryButton("Open playlist", palette, actions.createPlaylist, Modifier.fillMaxWidth().testTag(DiscoveryTags.OPEN_PLAYLIST),
                 icon = Icons.AutoMirrored.Rounded.QueueMusic)
-            Text(if (missing > 0) "Saved. The other $missing join the same playlist when they're downloaded, even after a restart."
+            Text(if (missing > 0) "Saved. The other $missing join the same playlist when they're downloaded, even after a restart.$skippedNote"
                 else batch.status, color = palette.muted, fontSize = 12.sp)
         }
         batch.playlistDeleted -> Text("You deleted this playlist. Downloads keep their files but no longer add to it.",
@@ -202,15 +240,22 @@ private fun CreateAction(batch: DiscoveryBatch, available: Int, total: Int, crea
         available == 0 -> {
             PrimaryButton("Create playlist", palette, {}, Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE), enabled = false,
                 icon = Icons.AutoMirrored.Rounded.PlaylistAdd)
-            Text("None of these songs is in your library yet. Download them below first.", color = palette.muted, fontSize = 12.sp,
+            Text(if (missing == 0) "None of these songs is in your library, and none is ticked for download. Tick some below."
+                else "None of these songs is in your library yet. Download them below first.", color = palette.muted, fontSize = 12.sp,
                 modifier = Modifier.testTag(DiscoveryTags.CREATE_REASON))
         }
-        missing == 0 -> PrimaryButton("Create playlist", palette, actions.createPlaylist, Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE),
-            icon = Icons.AutoMirrored.Rounded.PlaylistAdd, busy = creating)
+        missing == 0 -> {
+            PrimaryButton("Create playlist", palette, actions.createPlaylist, Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE),
+                icon = Icons.AutoMirrored.Rounded.PlaylistAdd, busy = creating)
+            if (skipped > 0) Text("Saves the $available in your library.$skippedNote", color = palette.muted, fontSize = 12.sp)
+        }
         else -> {
             PrimaryButton("Create playlist with the $available available songs", palette, actions.createPlaylist,
                 Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE), icon = Icons.AutoMirrored.Rounded.PlaylistAdd, busy = creating)
-            Text("The other $missing stay here and join the same playlist when they're downloaded.", color = palette.muted, fontSize = 12.sp)
+            Text("The other $missing stay here and join the same playlist when they're downloaded.$skippedNote", color = palette.muted, fontSize = 12.sp)
         }
     }
 }
+
+/** A missing song can be ticked or unticked; one in the library or downloading right now can't. */
+private val ChoosableStatuses = setOf(SongAvailability.NEEDS_DOWNLOAD, SongAvailability.FAILED, SongAvailability.SKIPPED)

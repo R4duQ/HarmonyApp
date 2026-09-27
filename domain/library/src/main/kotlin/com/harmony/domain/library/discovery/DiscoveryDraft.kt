@@ -48,7 +48,7 @@ class LibraryIndex(val songs: List<Song>) {
     }
 }
 
-enum class SongAvailability { IN_LIBRARY, DOWNLOADING, FAILED, NEEDS_DOWNLOAD }
+enum class SongAvailability { IN_LIBRARY, DOWNLOADING, FAILED, NEEDS_DOWNLOAD, SKIPPED }
 
 data class BatchProgress(
     /** Batch song key → library song id, for every song that can be played now. */
@@ -56,11 +56,16 @@ data class BatchProgress(
     val downloading: String?,
     val failed: Set<String>,
     val missing: List<String>,
+    /** Missing songs the user chose not to download. */
+    val skipped: Set<String> = emptySet(),
 ) {
     val availableCount: Int get() = available.size
+    /** Missing songs that will be downloaded: every missing one the user hasn't skipped. */
+    val toDownload: List<String> get() = missing.filterNot { it in skipped }
     fun status(key: String): SongAvailability = when {
         key in available -> SongAvailability.IN_LIBRARY
         key == downloading -> SongAvailability.DOWNLOADING
+        key in skipped -> SongAvailability.SKIPPED
         key in failed -> SongAvailability.FAILED
         else -> SongAvailability.NEEDS_DOWNLOAD
     }
@@ -82,7 +87,13 @@ object PlaylistPlacement {
         }
         val missing = batch.songs.map { it.key }.filterNot { it in available }
         return BatchProgress(available, batch.activeKey?.takeIf { it in missing },
-            batch.errors.keys.filter { it in missing }.toSet(), missing)
+            batch.errors.keys.filter { it in missing }.toSet(), missing, batch.skipped.filter { it in missing }.toSet())
+    }
+
+    /** Ticks or unticks songs for download. Keys that aren't in the selection are ignored. */
+    fun setDownload(batch: DiscoveryBatch, keys: Collection<String>, download: Boolean): DiscoveryBatch {
+        val known = keys.filterTo(HashSet()) { key -> batch.songs.any { it.key == key } }
+        return batch.copy(skipped = if (download) batch.skipped - known else batch.skipped + known)
     }
 
     /** Song ids for a new playlist, in the order of the selection. */

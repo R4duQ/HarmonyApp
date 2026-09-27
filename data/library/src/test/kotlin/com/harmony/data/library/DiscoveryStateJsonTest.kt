@@ -14,6 +14,14 @@ class DiscoveryStateJsonTest {
             votes = tracks.map { DiscoveryVote(it, true) }, batches = listOf(batch), revealedBatch = "uuid", undoKey = "dz:50")
         assertEquals(state, DiscoveryStateJson.decode(DiscoveryStateJson.encode(state)))
     }
+    @Test fun untickedSongsSurviveRestartAndOlderSavesHaveNone() {
+        val state = SongDiscoveryState(batches = listOf(DiscoveryBatch("a", "Test", tracks.take(5), skipped = setOf("dz:4", "dz:5"))))
+        assertEquals(state, DiscoveryStateJson.decode(DiscoveryStateJson.encode(state)))
+        val older = DiscoveryStateJson.encode(SongDiscoveryState(batches = listOf(DiscoveryBatch("a", "Test", tracks.take(5)))))
+            .replace(",\"skipped\":[]", "")
+        assertFalse(older.contains("skipped"))
+        assertEquals(emptySet<String>(), DiscoveryStateJson.decode(older).batches.single().skipped)
+    }
     @Test fun savedNegativePlaylistIdsAndNullsRoundTrip() {
         val state = SongDiscoveryState(batches = listOf(DiscoveryBatch("a", "Test", tracks, playlistId = -876543210987654321)))
         assertEquals(state, DiscoveryStateJson.decode(DiscoveryStateJson.encode(state)))

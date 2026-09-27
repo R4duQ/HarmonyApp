@@ -68,7 +68,7 @@ class DiscoveryDownloadViewModel @Inject constructor(
             "Another Discover download is running. Pause it or wait for it to finish."
         }
         val batch = repository.state.value.batches.first { it.id == id }
-        val needsNetwork = batch.songs.any { it.localUri == null && batch.uris[it.key] == null }
+        val needsNetwork = batch.songs.any { it.localUri == null && batch.uris[it.key] == null && it.key !in batch.skipped }
         if (needsNetwork && runPreflight(id, source) !is ProviderCheck.Ready) return@action
         val next = batch.copy(source = source.name, format = AlbumDownloadPolicy.formatFor(source, format).name,
             status = "Queued · waiting for network and storage", locked = true)
@@ -102,7 +102,7 @@ class DiscoveryDownloadViewModel @Inject constructor(
                 else -> {
                     providerCheck.value = ProviderCheck.Checking("Checking verification…")
                     val batch = repository.state.value.batches.first { it.id == id }
-                    val song = batch.songs.firstOrNull { it.key !in batch.uris }
+                    val song = batch.songs.firstOrNull { it.key !in batch.uris && it.key !in batch.skipped }
                     if (song != null) spoti.rememberPendingVerificationTrackFor(identifiedDiscoverySong(song), SpotiFlacRequestOwner.DISCOVERY_DOWNLOAD)
                     val challenge = withTimeout(20_000) { spoti.getVerificationChallenge(batch.verificationProvider ?: "tidal-web") }
                     when {
@@ -156,6 +156,9 @@ fun DiscoveryDownloadPanel(batch: DiscoveryBatch, onOpenDownloads: () -> Unit, v
     val thisActive = active?.tags?.contains(batch.id) == true
     val source = DownloadSource.valueOf(sourceName)
     val current = transfer?.takeIf { it.batchId == batch.id && thisActive }
+    // Songs the worker may still fetch. The library match happens in the worker, so this can overcount;
+    // it is only used to tell "nothing ticked" apart, and the exact count is on the review card.
+    val ticked = batch.songs.count { it.key !in batch.skipped && batch.uris[it.key] == null && it.localUri == null }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (current != null) {
             Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("discover:transfer")) {
@@ -166,7 +169,7 @@ fun DiscoveryDownloadPanel(batch: DiscoveryBatch, onOpenDownloads: () -> Unit, v
             }
         }
         Text(batch.status, style = MaterialTheme.typography.bodySmall)
-        Text("Songs already in your library are reused; only missing ones are downloaded.", style = MaterialTheme.typography.bodySmall)
+        Text("Songs already in your library are reused; only the missing songs you've ticked are downloaded.", style = MaterialTheme.typography.bodySmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(DownloadSource.SPOTIFLAC, DownloadSource.SOULSEEK).forEach { option ->
                 FilterChip(source == option, onClick = {
@@ -205,8 +208,13 @@ fun DiscoveryDownloadPanel(batch: DiscoveryBatch, onOpenDownloads: () -> Unit, v
         }
         if (thisActive) Button(onClick = viewModel::pause, modifier = Modifier.fillMaxWidth()) { Text("Pause · keep downloaded files") }
         else Button(onClick = { viewModel.start(batch.id, source, SpotiFlacOutputFormat.fromName(formatName), wifi) },
-            enabled = !busy && active == null && check !is ProviderCheck.Checking, modifier = Modifier.fillMaxWidth()) {
-            Text(if (batch.errors.isNotEmpty() || batch.uris.isNotEmpty()) "Retry missing songs" else "Download missing songs")
+            enabled = !busy && active == null && check !is ProviderCheck.Checking && ticked > 0, modifier = Modifier.fillMaxWidth()) {
+            Text(when {
+                ticked == 0 -> "No songs ticked"
+                batch.errors.keys.any { it !in batch.skipped } || batch.uris.isNotEmpty() -> "Retry ticked songs"
+                batch.skipped.isNotEmpty() -> "Download ticked songs"
+                else -> "Download missing songs"
+            })
         }
         if (active != null && !thisActive) Text("Another Discover download is running. Open it from Earlier selections to pause it.",
             style = MaterialTheme.typography.bodySmall)

@@ -398,6 +398,12 @@ class DiscoveryFlowViewModel @Inject constructor(
 
     fun startNewSelection() = persist { s -> s.copy(revealedBatch = null, draft = freshDraft(s.draft)) }
 
+    /** Ticks or unticks missing songs for download on the review step. */
+    fun setDownload(keys: List<String>, download: Boolean) {
+        val id = state.value.review?.id ?: return
+        persist { s -> s.copy(batches = s.batches.map { if (it.id == id) PlaylistPlacement.setDownload(it, keys, download) else it }) }
+    }
+
     fun rename(name: String) {
         val clean = name.trim().take(80)
         if (clean.isBlank()) return
@@ -434,7 +440,11 @@ class DiscoveryFlowViewModel @Inject constructor(
                 write { s -> s.copy(batches = s.batches.map { b ->
                     if (b.id != current.id) b else b.copy(playlistId = id, playlistDeleted = false, locked = true,
                         placedKeys = b.placedKeys + progress.available.keys,
-                        status = if (ids.size == total) "Saved · $total songs" else "Saved with ${ids.size} of $total · the rest join when downloaded")
+                        status = when {
+                            ids.size == total -> "Saved · $total songs"
+                            progress.toDownload.isEmpty() -> "Saved · ${ids.size} songs · ${progress.skipped.size} not downloaded"
+                            else -> "Saved with ${ids.size} of $total · the rest join when downloaded"
+                        })
                 }) }
                 mutableEvents.emit(DiscoveryEvent.OpenPlaylist(id))
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
