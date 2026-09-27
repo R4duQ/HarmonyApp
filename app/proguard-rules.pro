@@ -14,3 +14,11 @@
 # Keep the bridge intact in minified public release builds.
 -keep class gobackend.** { *; }
 -keep class go.** { *; }
+
+# youtubedl-android (the YouTube converter). It unpacks Python and yt-dlp with
+# commons-compress, whose zip extra-field registry creates classes through
+# Class.newInstance(). Without these keeps R8 drops their constructors and the
+# downloader can't start ("class X is not a concrete class"). Same rules as the
+# youtubedl-android README.
+-keep class com.yausername.** { *; }
+-keep class org.apache.commons.compress.archivers.zip.** { *; }
