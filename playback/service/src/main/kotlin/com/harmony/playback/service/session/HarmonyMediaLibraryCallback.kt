@@ -56,6 +56,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
     private val playlists: PlaylistRepository,
     private val favorites: FavoritesRepository,
     private val artworkCache: ArtworkCache,
+    private val audioOutput: com.harmony.playback.service.player.AudioOutputMonitor,
 ) : MediaLibrarySession.Callback {
 
     /**
@@ -149,6 +150,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         )
 
         AutoDiagnostics.log("connect ${controller.packageName} (version ${controller.controllerVersion}) · accepted")
+        audioOutput.onControllerChanged(controller.packageName, connected = true)
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(sessionCommands)
             .setCustomLayout(carButtons)
@@ -222,6 +224,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
 
     override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
         AutoDiagnostics.log("disconnect ${controller.packageName}")
+        audioOutput.onControllerChanged(controller.packageName, connected = false)
     }
 
     override fun onGetLibraryRoot(

@@ -48,13 +48,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.MoreVert
@@ -66,10 +64,7 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.Tv
-import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -111,7 +106,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.harmony.core.model.AudioOutputType
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ShuffleMode
@@ -934,16 +928,10 @@ private fun MetaRow(
         horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
     ) {
         Icon(
-            imageVector = when (state.audioOutput.type) {
-                AudioOutputType.BLUETOOTH -> Icons.Rounded.Bluetooth
-                AudioOutputType.WIRED -> Icons.Rounded.Headphones
-                AudioOutputType.USB -> Icons.Rounded.Usb
-                AudioOutputType.HDMI -> Icons.Rounded.Tv
-                else -> Icons.Rounded.Speaker
-            },
+            imageVector = OutputIcons.forType(state.audioOutput.type),
             contentDescription = "Audio output",
             tint = palette.muted,
-            modifier = Modifier.size(13.dp),
+            modifier = Modifier.size(15.dp),
         )
         Text(
             state.audioOutput.label,

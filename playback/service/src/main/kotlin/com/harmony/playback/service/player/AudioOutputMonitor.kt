@@ -70,6 +70,9 @@ class AudioOutputMonitor @Inject constructor(
         }.filter { it.isNotBlank() }.map { it.trim().lowercase() }.toSet()
     }
 
+    /** Open Android Auto controller connections; see [CarOutput]. */
+    @Volatile private var carConnections = 0
+
     private val _output = MutableStateFlow(currentOutput())
     val output: StateFlow<AudioOutput> = _output
 
@@ -89,7 +92,16 @@ class AudioOutputMonitor @Inject constructor(
         audioManager.registerAudioDeviceCallback(callback, null)
     }
 
-    private fun currentOutput(): AudioOutput {
+    /** Called by the media session when a controller connects or leaves. */
+    fun onControllerChanged(packageName: String, connected: Boolean) {
+        if (!CarOutput.isCarController(packageName)) return
+        synchronized(this) { carConnections = (carConnections + if (connected) 1 else -1).coerceAtLeast(0) }
+        _output.value = currentOutput()
+    }
+
+    private fun currentOutput(): AudioOutput = CarOutput.resolve(deviceOutput(), carConnections)
+
+    private fun deviceOutput(): AudioOutput {
         val devices = runCatching {
             audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         }.getOrNull() ?: return AudioOutput()
