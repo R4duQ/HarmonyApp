@@ -1,8 +1,8 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **101**: higher than
-every earlier build, including the first 1.0 build (100), so it installs as an update
-over any of them. Library, playlists and settings are kept.
+First stable version. Android versionName **1.0**, versionCode **102**: higher than
+every earlier build, including the earlier 1.0 builds (100 and 101), so it installs as an
+update over any of them. Library, playlists and settings are kept.
 
 ## Download
 
@@ -35,6 +35,11 @@ certificate.
   plays, a link to the artist, a quality badge (lossless, bit depth and sample
   rate), tracks in album order split by disc, a line for each track missing from
   your library, "About this album" details and the artist's other albums.
+- **YouTube converter fix.** yt-dlp now only downloads the audio, and Harmony converts it
+  to FLAC with the same bundled FFmpeg that SpotiFLAC uses, instead of the FFmpeg setup
+  that failed on some phones with "The free FLAC conversion failed". Starting, converting
+  and saving each report their own error with a Details log. YouTube's bot check is no
+  longer shown as a login problem: no YouTube account or Premium is needed.
 - **Android Auto.** The session stays alive when the phone app is swiped away.
   Connections are also written to a small diagnostic log, which you can read with
   `adb pull /sdcard/Android/data/com.harmony.app/files/android-auto-log.txt`.
