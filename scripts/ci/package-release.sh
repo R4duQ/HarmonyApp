@@ -30,6 +30,16 @@ for LIBRARY in libgojni.so libffmpeg.so libffmpeg.zip.so libpython.zip.so libc++
   fi
 done
 
+# The YouTube converter's downloader creates commons-compress classes by
+# reflection. If R8 renamed them, the keep rules in app/proguard-rules.pro were
+# lost and yt-dlp can't start on phones ("class X is not a concrete class").
+for CLASS in com/yausername/youtubedl_android/YoutubeDL org/apache/commons/compress/archivers/zip/AsiExtraField; do
+  if ! unzip -p "$APK_IN" 'classes*.dex' | LC_ALL=C grep -acF "L$CLASS;" >/dev/null; then
+    echo "ERROR: $CLASS was renamed or removed by R8; check the youtubedl-android keep rules" >&2
+    exit 7
+  fi
+done
+
 mkdir -p "$DIST_DIR"
 cp "$APK_IN" "$APK_OUT"
 sha256sum "$DIST_DIR"/Harmony-v"${VERSION_NAME}"-*.apk > "$DIST_DIR/SHA256SUMS.txt"
