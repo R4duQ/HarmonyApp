@@ -12,7 +12,6 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
-import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -47,6 +46,8 @@ class MusicDownloadRepository @Inject constructor(
     private val ytdlpUpdateMutex = Mutex()
     @Volatile private var ytdlpReady = false
     @Volatile private var ytdlpUpdatedThisProcess = false
+
+    private val bundledFfmpeg by lazy { BundledFfmpeg(context) }
 
     private val downloaderPreferences by lazy {
         context.getSharedPreferences("harmony_downloader", Context.MODE_PRIVATE)
@@ -290,8 +291,9 @@ class MusicDownloadRepository @Inject constructor(
 
     /**
      * Free/local conversion path:
-     *  1) yt-dlp downloads the best available audio stream.
-     *  2) bundled FFmpeg decodes that stream and writes FLAC in app cache.
+     *  1) yt-dlp downloads the best available audio stream, untouched.
+     *  2) Harmony's bundled FFmpeg (the verified library set SpotiFLAC uses, not
+     *     yt-dlp's FFmpeg setup) decodes that stream and writes FLAC in app cache.
      *  3) the finished FLAC is copied through MediaStore to Music/Harmony/Downloads.
      *
      * This is a lossless *container/codec conversion*, not a quality restoration:
@@ -352,18 +354,57 @@ class MusicDownloadRepository @Inject constructor(
                 throw friendlyYoutubeFailure(lastFailure)
             }
 
-            val flac = workDir.walkTopDown()
-                .filter { it.isFile && it.extension.equals("flac", ignoreCase = true) }
-                .maxByOrNull { it.lastModified() }
+            val source = workDir.listFiles().orEmpty()
+                .filter { it.isFile && it.length() > 0L && it.extension.lowercase() !in NON_AUDIO_EXTENSIONS }
+                .maxByOrNull { it.length() }
                 ?: throw HarmonyDownloadException(
-                    userMessage = "The download finished, but FFmpeg did not create a FLAC file.",
-                    technicalDetails = "No .flac output was found in ${workDir.absolutePath}",
+                    userMessage = "The download finished, but YouTube sent no audio.",
+                    technicalDetails = "No audio file in ${workDir.absolutePath}: " +
+                        workDir.listFiles().orEmpty().joinToString { "${it.name} (${it.length()} B)" },
                 )
+
+            onProgress(96f, "Converting to FLAC…")
+            val flac = File(workDir, "harmony-converted.flac")
+            val tags = readYouTubeTags(File(workDir, "$YOUTUBE_SOURCE_NAME.info.json"), preferredBaseName)
+            try {
+                bundledFfmpeg.run(
+                    arguments = YouTubeAudio.ffmpegArguments(source, flac, tags),
+                    workDir = workDir,
+                    timeoutMs = YOUTUBE_FLAC_TIMEOUT_MS,
+                    succeeded = { isFlacFile(flac) },
+                )
+            } catch (failure: BundledFfmpeg.Failure) {
+                throw HarmonyDownloadException(
+                    userMessage = if (YouTubeAudio.isOutOfSpace(failure.details)) {
+                        "Your phone ran out of storage while converting. Free some space and try again."
+                    } else {
+                        "The audio downloaded, but Harmony couldn't convert it to FLAC on this phone. Tap Details for the log."
+                    },
+                    technicalDetails = "${failure.message}\nSource: ${source.name} (${source.length()} B)\n${failure.details}"
+                        .take(MAX_TECHNICAL_DETAILS),
+                    cause = failure,
+                )
+            }
 
             onProgress(99f, "Adding FLAC to the Harmony library…")
             val displayBase = sanitizeFileName(preferredBaseName)
-                .ifBlank { flac.nameWithoutExtension.ifBlank { "Harmony download" } }
-            val publishedUri = publishFlac(flac, "$displayBase.flac")
+                .ifBlank { sanitizeFileName(tags.title).ifBlank { "Harmony download" } }
+            val publishedUri = try {
+                publishFlac(flac, "$displayBase.flac")
+            } catch (known: HarmonyDownloadException) {
+                throw known
+            } catch (t: Exception) {
+                val technical = t.stackTraceToString()
+                throw HarmonyDownloadException(
+                    userMessage = if (YouTubeAudio.isOutOfSpace(technical)) {
+                        "Your phone is out of storage, so the FLAC couldn't be saved. Free some space and try again."
+                    } else {
+                        "The FLAC was converted, but Android wouldn't let Harmony save it to Music/Harmony/Downloads. Tap Details for the log."
+                    },
+                    technicalDetails = technical.take(MAX_TECHNICAL_DETAILS),
+                    cause = t,
+                )
+            }
             val publishedSize = context.contentResolver.openAssetFileDescriptor(publishedUri, "r")
                 ?.use { it.length }
                 ?.takeIf { it >= 0L }
@@ -386,24 +427,48 @@ class MusicDownloadRepository @Inject constructor(
         processId: String,
         onProgress: (progressPercent: Float, statusLine: String) -> Unit,
     ) {
+        // youtubedl-android adds --js-runtimes with the bundled QuickJS path itself.
+        // yt-dlp only downloads: no -x, fixups or metadata embedding, all of which
+        // would run yt-dlp's FFmpeg. Harmony converts afterwards with its own.
         val request = YoutubeDLRequest(youtubeUrl).apply {
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--no-update")
-            addOption("--js-runtimes", "quickjs")
             addOption("-f", "bestaudio/best")
-            addOption("-x")
-            addOption("--audio-format", "flac")
-            addOption("--audio-quality", "0")
-            addOption("--embed-metadata")
-            addOption("-o", File(workDir, "%(title).180B [%(id)s].%(ext)s").absolutePath)
+            addOption("--fixup", "never")
+            addOption("--write-info-json")
+            addOption("--no-write-playlist-metafiles")
+            addOption("-o", File(workDir, "$YOUTUBE_SOURCE_NAME.%(ext)s").absolutePath)
         }
 
         YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
             val cleanStatus = compactYtDlpStatus(line.orEmpty(), progress)
-            onProgress(progress.coerceIn(0f, 98f), cleanStatus)
+            onProgress(progress.coerceIn(0f, 95f), cleanStatus)
         }
     }
+
+    private fun readYouTubeTags(infoJson: File, fallbackTitle: String): YouTubeAudioTags {
+        val info = runCatching { JSONObject(infoJson.readText()) }.getOrNull()
+            ?: return YouTubeAudio.tags(fallbackTitle)
+        fun text(key: String) = if (info.isNull(key)) "" else info.optString(key)
+        return YouTubeAudio.tags(
+            fallbackTitle = fallbackTitle,
+            title = text("title"),
+            track = text("track"),
+            artist = text("artist"),
+            creator = text("creator"),
+            uploader = text("uploader").ifBlank { text("channel") },
+            album = text("album"),
+            releaseYear = info.optInt("release_year", 0),
+            uploadDate = text("upload_date"),
+        )
+    }
+
+    private fun isFlacFile(file: File): Boolean = file.isFile && file.length() > 1_024L &&
+        runCatching {
+            val magic = ByteArray(4)
+            file.inputStream().use { it.read(magic) } == 4 && String(magic, Charsets.US_ASCII) == "fLaC"
+        }.getOrDefault(false)
 
     private suspend fun ensureYtDlpReady(
         onProgress: (progressPercent: Float, statusLine: String) -> Unit,
@@ -412,9 +477,8 @@ class MusicDownloadRepository @Inject constructor(
             ytdlpInitMutex.withLock {
                 if (!ytdlpReady) {
                     withContext(Dispatchers.IO) {
-                        onProgress(0f, "Starting yt-dlp + FFmpeg…")
-                        YoutubeDL.getInstance().init(context)
-                        FFmpeg.getInstance().init(context)
+                        onProgress(0f, "Starting yt-dlp…")
+                        initYoutubeDl()
                     }
                     ytdlpReady = true
                 }
@@ -424,6 +488,31 @@ class MusicDownloadRepository @Inject constructor(
         // The bundled yt-dlp can age quickly as YouTube changes its extractor.
         // Refresh at most once every 12 hours, and always once per fresh install.
         updateYtDlpNightly(force = false, onProgress = onProgress)
+    }
+
+    /**
+     * Starts yt-dlp's Python runtime. A half-extracted or stale Python package is
+     * the usual reason this fails, so the package is removed and extracted once
+     * more before giving up with a message that says which step failed.
+     */
+    private fun initYoutubeDl() {
+        val first = runCatching { YoutubeDL.getInstance().init(context) }.exceptionOrNull() ?: return
+        File(context.noBackupFilesDir, "youtubedl-android/packages/python").deleteRecursively()
+        val second = runCatching { YoutubeDL.getInstance().init(context) }.exceptionOrNull() ?: return
+        val technical = buildString {
+            append(second.stackTraceToString())
+            append("\n\nFirst attempt:\n")
+            append(first.stackTraceToString())
+        }
+        throw HarmonyDownloadException(
+            userMessage = if (YouTubeAudio.isOutOfSpace(technical)) {
+                "Your phone doesn't have enough free storage to start the YouTube downloader. Free some space and try again."
+            } else {
+                "Harmony couldn't start its YouTube downloader on this phone. Tap Details for the log."
+            },
+            technicalDetails = technical.take(MAX_TECHNICAL_DETAILS),
+            cause = second,
+        )
     }
 
     /**
@@ -480,23 +569,13 @@ class MusicDownloadRepository @Inject constructor(
             append('\n')
             append(t.cause?.message.orEmpty())
         }.lowercase()
-        return RETRYABLE_YOUTUBE_MARKERS.any(text::contains)
+        return YouTubeAudio.RETRYABLE_MARKERS.any(text::contains)
     }
 
     private fun friendlyYoutubeFailure(t: Throwable): HarmonyDownloadException {
         val technical = t.stackTraceToString().take(MAX_TECHNICAL_DETAILS)
-        val text = technical.lowercase()
-        val message = when {
-            RETRYABLE_YOUTUBE_MARKERS.any(text::contains) ->
-                "YouTube rejected this download after Harmony updated yt-dlp and retried. Try again later; YouTube may have changed its download protocol again."
-            "sign in" in text || "login" in text || "age-restricted" in text ->
-                "This video requires a YouTube session/login that Harmony does not have."
-            "network" in text || "timed out" in text || "unable to connect" in text ->
-                "Harmony couldn't reach YouTube. Check your connection and try again."
-            else -> "The YouTube download failed. Tap Details for the technical log."
-        }
         return HarmonyDownloadException(
-            userMessage = message,
+            userMessage = YouTubeAudio.failureMessage(technical),
             technicalDetails = technical,
             cause = t,
         )
@@ -1320,18 +1399,9 @@ class MusicDownloadRepository @Inject constructor(
         const val PREF_LAST_DOWNLOAD_SOURCE = "last_download_source"
         const val YTDLP_UPDATE_INTERVAL_MS = 12L * 60L * 60L * 1000L
         const val MAX_TECHNICAL_DETAILS = 8_000
-
-        val RETRYABLE_YOUTUBE_MARKERS = listOf(
-            "http error 403",
-            "403 forbidden",
-            "signature solving failed",
-            "challenge solving failed",
-            "error solving",
-            "quickjs",
-            "sabr",
-            "unable to download video data",
-            "player response",
-        )
+        const val YOUTUBE_SOURCE_NAME = "harmony-youtube-source"
+        const val YOUTUBE_FLAC_TIMEOUT_MS = 15L * 60L * 1000L
+        val NON_AUDIO_EXTENSIONS = setOf("json", "part", "ytdl", "log", "flac", "jpg", "webp", "png")
     }
 
 }

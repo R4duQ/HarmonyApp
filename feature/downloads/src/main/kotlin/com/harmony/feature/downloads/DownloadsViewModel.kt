@@ -1644,7 +1644,8 @@ class DownloadsViewModel @Inject constructor(
                     it.copy(
                         isConverting = false,
                         conversionStatus = "Download failed",
-                        error = known?.userMessage ?: "The free FLAC conversion failed.",
+                        error = known?.userMessage
+                            ?: "The YouTube conversion stopped unexpectedly (${t.javaClass.simpleName}). Tap Details for the log.",
                         errorDetails = known?.technicalDetails
                             ?: t.stackTraceToString().take(8_000),
                         showErrorDetails = false,
