@@ -1,5 +1,6 @@
 package com.harmony.playback.service
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.IBinder
 import androidx.annotation.OptIn
@@ -77,6 +78,7 @@ class PlaybackService : MediaLibraryService() {
         super.onCreate()
         mediaSession = MediaLibrarySession.Builder(this, harmonyPlayer.exoPlayer, callback)
             .setId(SESSION_ID)
+            .apply { openAppIntent()?.let { setSessionActivity(it) } }
             .build()
         AutoDiagnostics.log("session ready · ${android.os.SystemClock.elapsedRealtime() - createStart} ms (injection + player + session)")
         crossfade = CrossfadeController(this, harmonyPlayer.exoPlayer, serviceScope).also { it.start() }
@@ -84,6 +86,21 @@ class PlaybackService : MediaLibraryService() {
         albumListening = AlbumListeningMonitor(harmonyPlayer.exoPlayer, albumJourneys).also { it.start() }
         sleepTimer.attach(harmonyPlayer.exoPlayer, serviceScope)
         callback.attach(harmonyPlayer, crossfade!!, sleepTimer)
+    }
+
+    /**
+     * Tapping the media notification (or the lock-screen player) opens Harmony:
+     * it brings the running app back to the front, or starts it if it was
+     * closed. The launcher intent is used because this module can't see
+     * MainActivity; MainActivity is singleTask, so no second copy is created.
+     */
+    private fun openAppIntent(): PendingIntent? {
+        val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(
+            this, 0, launch,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
