@@ -1,6 +1,7 @@
 package com.harmony.playback.service.player
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -15,6 +16,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Overlaps a temporary player with the session player, which still owns the queue. */
 @UnstableApi
@@ -44,6 +49,16 @@ class CrossfadeController(
     private var triggered = false
     private var started = false
 
+    // The handoff: the second player keeps sounding until the session player,
+    // which has just jumped to the same song, is audible again.
+    private var swapPreview: ExoPlayer? = null
+    private var swapItem: MediaItem? = null
+    private var swapJob: Job? = null
+    private var ownSeek = false
+
+    /** How long the session player takes to start at a new position; learned at each handoff. */
+    private var seekLeadMs = INITIAL_SEEK_LEAD_MS
+
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) handoff()
@@ -62,12 +77,17 @@ class CrossfadeController(
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            cancelOverlap()
+            // Our own handoff moves the session player to the song already playing.
+            if (swapPreview == null || mediaItem != swapItem) cancelOverlap()
             triggered = false
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                if (ownSeek) {
+                    ownSeek = false
+                    return
+                }
                 cancelOverlap()
                 triggered = false
             }
@@ -152,6 +172,14 @@ class CrossfadeController(
         }
     }
 
+    /**
+     * The outgoing song has ended and the second player is at full volume on
+     * the next one. The session player has to jump into that song, and a jump
+     * to a new position takes a moment to start sounding. Stopping the second
+     * player first left that moment silent, so it keeps playing until the
+     * session player is audible, and a short equal-power swap hands over.
+     * The session player aims where the second player will be by then.
+     */
     private fun handoff() {
         val preview = previewPlayer ?: return
         if (!targetStillNext() || !preview.isPlaying) {
@@ -159,14 +187,52 @@ class CrossfadeController(
             return
         }
         val index = player.nextMediaItemIndex
-        val position = preview.currentPosition
         // Clear before seeking so our own callbacks cannot repeat the handoff.
-        releasePreview()
+        fadeJob?.cancel()
+        fadeJob = null
+        swapItem = nextItem
+        previewPlayer = null
+        nextItem = null
+        swapPreview = preview
+        preview.volume = 1f
         player.setPauseAtEndOfMediaItems(false)
-        player.seekTo(index, position)
-        player.volume = 1f
+        player.volume = 0f
+        val requestedAt = SystemClock.elapsedRealtime()
+        ownSeek = true
+        val target = (preview.currentPosition + seekLeadMs).let { if (preview.duration > 0) it.coerceAtMost(preview.duration - 1) else it }
+        player.seekTo(index, target)
         player.play()
         triggered = false
+        swapJob = scope.launch {
+            val audible = withTimeoutOrNull(SWAP_TIMEOUT_MS) {
+                while (!player.isPlaying) delay(10)
+                true
+            } == true
+            if (audible && swapPreview === preview) {
+                val latency = SystemClock.elapsedRealtime() - requestedAt
+                seekLeadMs = ((seekLeadMs * 3 + latency) / 4).coerceIn(MIN_SEEK_LEAD_MS, MAX_SEEK_LEAD_MS)
+                for (step in 1..SWAP_STEPS) {
+                    val g = step.toFloat() / SWAP_STEPS * (PI.toFloat() / 2f)
+                    player.volume = sin(g)
+                    preview.volume = cos(g)
+                    delay(SWAP_STEP_MS)
+                }
+            }
+            if (swapPreview === preview) finishSwap()
+        }
+    }
+
+    /** Ends the handoff: the session player plays alone at full volume. */
+    private fun finishSwap() {
+        val preview = swapPreview ?: return
+        swapPreview = null
+        swapItem = null
+        ownSeek = false
+        val job = swapJob
+        swapJob = null
+        runCatching { preview.release() }
+        player.volume = 1f
+        job?.cancel()
     }
 
     private fun releasePreview() {
@@ -180,8 +246,19 @@ class CrossfadeController(
 
     private fun cancelOverlap() {
         releasePreview()
+        finishSwap()
         player.setPauseAtEndOfMediaItems(false)
         player.volume = 1f
+    }
+
+    private companion object {
+        const val INITIAL_SEEK_LEAD_MS = 250L
+        const val MIN_SEEK_LEAD_MS = 40L
+        const val MAX_SEEK_LEAD_MS = 1_500L
+        /** Give up waiting and play the session player alone after this long. */
+        const val SWAP_TIMEOUT_MS = 3_000L
+        const val SWAP_STEPS = 6
+        const val SWAP_STEP_MS = 20L
     }
 
     fun stop() {
