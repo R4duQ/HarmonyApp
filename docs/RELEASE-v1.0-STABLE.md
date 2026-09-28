@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **104**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 103), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **105**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 104), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -38,6 +38,8 @@ certificate.
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
   line to set it for that device.
+- **Notification opens the app.** Tapping the playback notification or the lock-screen
+  player brings Harmony to the front, or starts it if it was closed.
 - Redesigned **Home** and **playlist detail** screens.
 - Redesigned **album page**: the cover as a record that turns while the album
   plays, a link to the artist, a quality badge (lossless, bit depth and sample
