@@ -27,6 +27,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,13 +49,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.MoreVert
@@ -66,10 +65,7 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.Tv
-import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -111,7 +107,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.harmony.core.model.AudioOutputType
+import com.harmony.core.model.OutputForm
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ShuffleMode
@@ -166,6 +162,13 @@ fun NowPlayingScreen(
     val isFavorite by viewModel.isCurrentFavorite.collectAsStateWithLifecycle()
     val journeyProgress by viewModel.journeyProgress.collectAsStateWithLifecycle()
     val smartStyle by viewModel.smartShuffleStyle.collectAsStateWithLifecycle()
+    val outputForms by viewModel.outputForms.collectAsStateWithLifecycle()
+    val outputChoice = OutputChoice(
+        form = com.harmony.core.model.OutputForms.effective(state.audioOutput, outputForms),
+        chosen = state.audioOutput.name?.let { outputForms.containsKey(com.harmony.core.model.OutputForms.key(it)) } == true,
+        pick = state.audioOutput.name?.takeIf { OutputIcons.canPickForm(state.audioOutput.type) && it.isNotBlank() }
+            ?.let { name -> { form -> viewModel.setOutputForm(name, form) } },
+    )
 
     var showQueue by remember { mutableStateOf(false) }
     var showShuffleSheet by remember { mutableStateOf(false) }
@@ -440,7 +443,7 @@ fun NowPlayingScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    MetaRow(state, journeyProgress, palette, centered = true)
+                    MetaRow(state, outputChoice, journeyProgress, palette, centered = true)
                     Spacer(Modifier.height(14.dp))
                     SeekBlock(
                         progress = dragFraction ?: animatedProgress,
@@ -512,7 +515,7 @@ fun NowPlayingScreen(
                 modifier = Modifier.padding(top = 8.dp),
             )
             MetaRow(
-                state, journeyProgress, palette,
+                state, outputChoice, journeyProgress, palette,
                 centered = false,
                 modifier = Modifier.padding(top = 7.dp),
             )
@@ -923,6 +926,7 @@ private fun NowPlayingAudioQuality(
 @Composable
 private fun MetaRow(
     state: PlayerState,
+    output: OutputChoice,
     journeyProgress: Float?,
     palette: PlayerPalette,
     centered: Boolean,
@@ -933,26 +937,7 @@ private fun MetaRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
     ) {
-        Icon(
-            imageVector = when (state.audioOutput.type) {
-                AudioOutputType.BLUETOOTH -> Icons.Rounded.Bluetooth
-                AudioOutputType.WIRED -> Icons.Rounded.Headphones
-                AudioOutputType.USB -> Icons.Rounded.Usb
-                AudioOutputType.HDMI -> Icons.Rounded.Tv
-                else -> Icons.Rounded.Speaker
-            },
-            contentDescription = "Audio output",
-            tint = palette.muted,
-            modifier = Modifier.size(13.dp),
-        )
-        Text(
-            state.audioOutput.label,
-            fontSize = 11.sp,
-            color = palette.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 5.dp),
-        )
+        OutputLabel(state, output, palette)
         AnimatedVisibility(visible = journeyProgress != null) {
             Text(
                 " · Journey ${((journeyProgress ?: 0f) * 100).toInt()}%",
@@ -974,6 +959,57 @@ private fun MetaRow(
                     color = palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** The device kind to draw, whether the listener picked it, and how to pick one (null when it can't apply). */
+private class OutputChoice(val form: OutputForm?, val chosen: Boolean, val pick: ((OutputForm?) -> Unit)?)
+
+/**
+ * Icon and name of the output. For headphones and speakers the icon follows
+ * the kind of device; a tap lets the listener correct it for that device.
+ */
+@Composable
+private fun OutputLabel(state: PlayerState, output: OutputChoice, palette: PlayerPalette) {
+    var open by remember { mutableStateOf(false) }
+    val pick = output.pick
+    Box {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .then(if (pick != null) Modifier.clickable(onClickLabel = "Choose the kind of device") { open = true } else Modifier)
+                .padding(horizontal = 2.dp, vertical = 3.dp),
+        ) {
+            Icon(
+                imageVector = OutputIcons.forOutput(state.audioOutput.type, output.form),
+                contentDescription = output.form?.label ?: "Audio output",
+                tint = palette.muted,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                state.audioOutput.label,
+                fontSize = 11.sp,
+                color = palette.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 5.dp),
+            )
+        }
+        if (pick != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (output.chosen) "Automatic" else "Automatic · current") },
+                leadingIcon = { Icon(OutputIcons.forOutput(state.audioOutput.type, null), null, Modifier.size(20.dp)) },
+                onClick = { pick(null); open = false },
+            )
+            OutputIcons.pickable(state.audioOutput.type).forEach { form ->
+                DropdownMenuItem(
+                    text = { Text(if (output.chosen && output.form == form) "${form.label} · current" else form.label) },
+                    leadingIcon = { Icon(OutputIcons.forForm(form), null, Modifier.size(20.dp)) },
+                    onClick = { pick(form); open = false },
                 )
             }
         }

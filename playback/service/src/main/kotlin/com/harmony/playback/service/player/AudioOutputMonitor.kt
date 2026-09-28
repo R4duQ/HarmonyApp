@@ -9,6 +9,8 @@ import android.os.Build
 import android.provider.Settings
 import com.harmony.core.model.AudioOutput
 import com.harmony.core.model.AudioOutputType
+import com.harmony.core.model.OutputForm
+import com.harmony.core.model.OutputForms
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +72,9 @@ class AudioOutputMonitor @Inject constructor(
         }.filter { it.isNotBlank() }.map { it.trim().lowercase() }.toSet()
     }
 
+    /** Open Android Auto controller connections; see [CarOutput]. */
+    @Volatile private var carConnections = 0
+
     private val _output = MutableStateFlow(currentOutput())
     val output: StateFlow<AudioOutput> = _output
 
@@ -89,7 +94,16 @@ class AudioOutputMonitor @Inject constructor(
         audioManager.registerAudioDeviceCallback(callback, null)
     }
 
-    private fun currentOutput(): AudioOutput {
+    /** Called by the media session when a controller connects or leaves. */
+    fun onControllerChanged(packageName: String, connected: Boolean) {
+        if (!CarOutput.isCarController(packageName)) return
+        synchronized(this) { carConnections = (carConnections + if (connected) 1 else -1).coerceAtLeast(0) }
+        _output.value = currentOutput()
+    }
+
+    private fun currentOutput(): AudioOutput = CarOutput.resolve(deviceOutput(), carConnections)
+
+    private fun deviceOutput(): AudioOutput {
         val devices = runCatching {
             audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         }.getOrNull() ?: return AudioOutput()
@@ -101,7 +115,17 @@ class AudioOutputMonitor @Inject constructor(
             ?: return AudioOutput()
 
         val (type, device) = best
-        return AudioOutput(type = type, name = deviceName(device))
+        val name = deviceName(device)
+        return AudioOutput(type = type, name = name, form = OutputForms.guess(type, formHint(device), name))
+    }
+
+    /** What Android's device type already says about the kind of device. */
+    private fun formHint(device: AudioDeviceInfo): OutputForm? = when (device.type) {
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> OutputForm.EARPHONES // has a mic: almost always in-ear
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> OutputForm.HEADPHONES
+        AudioDeviceInfo.TYPE_HEARING_AID -> OutputForm.HEARING_AID
+        AudioDeviceInfo.TYPE_BLE_SPEAKER -> OutputForm.SPEAKER
+        else -> null
     }
 
     /** See the class doc for why this isn't just productName. */
@@ -129,6 +153,9 @@ class AudioOutputMonitor @Inject constructor(
     private fun classify(device: AudioDeviceInfo): AudioOutputType? = when (device.type) {
         AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        AudioDeviceInfo.TYPE_HEARING_AID,
+        AudioDeviceInfo.TYPE_BLE_HEADSET, // LE Audio (API 31); the constants are inlined, so older phones just never match
+        AudioDeviceInfo.TYPE_BLE_SPEAKER,
         -> AudioOutputType.BLUETOOTH
 
         AudioDeviceInfo.TYPE_USB_HEADSET,

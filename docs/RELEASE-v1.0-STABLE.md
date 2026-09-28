@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **102**: higher than
-every earlier build, including the earlier 1.0 builds (100 and 101), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **103**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 102), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -20,6 +20,8 @@ certificate.
   - Per-song actions: 30 s preview, Keep, Replace, More like this and Not interested.
   - "Create playlist with the X available songs" saves what is ready now. The rest
     join the same playlist once they are downloaded.
+  - Tick or untick each missing song to choose which ones are downloaded, with
+    Select all and Select none. Unticked songs aren't downloaded.
   - Deezer and Apple Music are used with timeouts, retries and fallback. Offline, you
     can still build a playlist from your library.
 - **SpotiFLAC search** asks SpotiFLAC's own providers first, including Tidal. It then
@@ -35,11 +37,13 @@ certificate.
   plays, a link to the artist, a quality badge (lossless, bit depth and sample
   rate), tracks in album order split by disc, a line for each track missing from
   your library, "About this album" details and the artist's other albums.
-- **YouTube converter fix.** yt-dlp now only downloads the audio, and Harmony converts it
-  to FLAC with the same bundled FFmpeg that SpotiFLAC uses, instead of the FFmpeg setup
-  that failed on some phones with "The free FLAC conversion failed". Starting, converting
-  and saving each report their own error with a Details log. YouTube's bot check is no
-  longer shown as a login problem: no YouTube account or Premium is needed.
+- **YouTube converter fix.** The release build's code shrinker had removed classes the
+  YouTube downloader needs to unpack itself, so it could not start ("The free FLAC
+  conversion failed"). They are now kept, and the release build checks for them. yt-dlp
+  only downloads the audio, and Harmony converts it to FLAC with the same bundled FFmpeg
+  that SpotiFLAC uses. Starting, converting and saving each report their own error with
+  a Details log. YouTube's bot check is no longer shown as a login problem: no YouTube
+  account or Premium is needed.
 - **Android Auto.** The session stays alive when the phone app is swiped away.
   Connections are also written to a small diagnostic log, which you can read with
   `adb pull /sdcard/Android/data/com.harmony.app/files/android-auto-log.txt`.

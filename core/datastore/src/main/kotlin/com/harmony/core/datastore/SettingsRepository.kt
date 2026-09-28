@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.harmony.core.model.EqSettings
+import com.harmony.core.model.OutputForm
+import com.harmony.core.model.OutputForms
 import com.harmony.core.model.ReplayGainMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -74,6 +76,7 @@ class SettingsRepository @Inject constructor(
         val SMART_SHUFFLE_DISCOVERY = floatPreferencesKey("smart_shuffle_discovery_v2")
         val SMART_SHUFFLE_VARIETY = floatPreferencesKey("smart_shuffle_variety_v2")
         val EQ_USER_PRESETS = stringPreferencesKey("eq_user_presets_v1") // "name=csv;name=csv"
+        val OUTPUT_FORMS = stringPreferencesKey("output_forms_v1") // one "FORM<tab>device name" per line
         val LAST_QUEUE_IDS = stringPreferencesKey("last_queue_song_ids") // csv of Longs
         val LAST_QUEUE_INDEX = intPreferencesKey("last_queue_index")
         val LAST_POSITION_MS = longPreferencesKey("last_position_ms")
@@ -108,6 +111,24 @@ class SettingsRepository @Inject constructor(
             userEqPresets = decodePresets(p[Keys.EQ_USER_PRESETS]),
         )
     }
+
+    /** The kind of device the listener picked for each output, keyed by [OutputForms.key]. */
+    val outputForms: Flow<Map<String, OutputForm>> = context.store.data.map { decodeForms(it[Keys.OUTPUT_FORMS]) }
+
+    /** Saves what kind of device [name] is; null goes back to Harmony's own guess. */
+    suspend fun setOutputForm(name: String, form: OutputForm?) = edit { p ->
+        val key = OutputForms.key(name).replace('\t', ' ').replace('\n', ' ')
+        if (key.isBlank()) return@edit
+        val forms = decodeForms(p[Keys.OUTPUT_FORMS]).toMutableMap()
+        if (form == null) forms.remove(key) else forms[key] = form
+        p[Keys.OUTPUT_FORMS] = forms.entries.joinToString("\n") { (device, kind) -> "${kind.name}\t$device" }
+    }
+
+    private fun decodeForms(raw: String?): Map<String, OutputForm> =
+        raw?.lines()?.mapNotNull { line ->
+            val kind = runCatching { OutputForm.valueOf(line.substringBefore('\t')) }.getOrNull() ?: return@mapNotNull null
+            line.substringAfter('\t', "").takeIf { it.isNotBlank() }?.let { it to kind }
+        }?.toMap() ?: emptyMap()
 
     private fun decodePresets(raw: String?): Map<String, List<Float>> =
         raw?.split(';')?.mapNotNull { entry ->
