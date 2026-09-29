@@ -1,5 +1,6 @@
 package com.harmony.playback.service
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.IBinder
 import androidx.annotation.OptIn
@@ -75,9 +76,19 @@ class PlaybackService : MediaLibraryService() {
         AutoDiagnostics.init(this)
         val createStart = android.os.SystemClock.elapsedRealtime()
         super.onCreate()
-        mediaSession = MediaLibrarySession.Builder(this, harmonyPlayer.exoPlayer, callback)
+        val sessionBuilder = MediaLibrarySession.Builder(this, harmonyPlayer.exoPlayer, callback)
             .setId(SESSION_ID)
-            .build()
+        packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
+            sessionBuilder.setSessionActivity(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    launchIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+        }
+        mediaSession = sessionBuilder.build()
         AutoDiagnostics.log("session ready · ${android.os.SystemClock.elapsedRealtime() - createStart} ms (injection + player + session)")
         crossfade = CrossfadeController(this, harmonyPlayer.exoPlayer, serviceScope).also { it.start() }
         startPeriodicStateSaving()
@@ -271,3 +282,4 @@ class PlaybackService : MediaLibraryService() {
         const val MEDIA_BROWSER_ACTION = "android.media.browse.MediaBrowserService"
     }
 }
+
