@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **108**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 107), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **109**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 108), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -45,6 +45,10 @@ certificate.
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
   line to set it for that device.
+- **Closing the app closes the notification.** Swiping Harmony away stops playback and
+  removes its notification unless Android Auto is connected. Before, the system's media
+  controls, Bluetooth or a watch could be mistaken for the car, leaving music and a
+  notification that could not be dismissed.
 - **Notification opens the app.** Tapping the playback notification or the lock-screen
   player brings Harmony to the front, or starts it if it was closed.
 - Redesigned **Home** and **playlist detail** screens.
