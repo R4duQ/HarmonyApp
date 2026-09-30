@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **106**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 105), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **107**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 106), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -27,6 +27,9 @@ certificate.
 - **SpotiFLAC search** asks SpotiFLAC's own providers first, including Tidal. It then
   tries several phrasings on Deezer, then Apple Music, so titles with hyphens or
   missing diacritics are found.
+- **SpotiFLAC no longer hangs on "Resolving".** Selecting a result waits at most 8 s for
+  Deezer's details and a download waits at most 15 s for song.link; past that Harmony
+  continues with the data it already has.
 - **Downloads.** Before a batch starts, Harmony checks that the provider is ready.
   Downloads show per-song progress. Albums and selected tracks can be downloaded
   through SpotiFLAC or Soulseek.
