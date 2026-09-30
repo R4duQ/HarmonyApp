@@ -15,7 +15,9 @@ import android.provider.OpenableColumns
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -48,6 +50,9 @@ class MusicDownloadRepository @Inject constructor(
     @Volatile private var ytdlpUpdatedThisProcess = false
 
     private val bundledFfmpeg by lazy { BundledFfmpeg(context) }
+
+    /** Background lookups the caller stops waiting for at a deadline; see [awaitWithin]. */
+    private val lookupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val downloaderPreferences by lazy {
         context.getSharedPreferences("harmony_downloader", Context.MODE_PRIVATE)
@@ -133,65 +138,71 @@ class MusicDownloadRepository @Inject constructor(
         }
     }
 
-    suspend fun resolveSpotiFlacTrack(candidate: SpotiFlacSearchCandidate): IdentifiedTrack =
-        withContext(Dispatchers.IO) {
-            require(candidate.metadataId.isNotBlank()) { "The selected metadata result has no track ID." }
-            // Found on Apple Music: there is no Deezer id to look up. The download engine
-            // works from artist, title and duration; never hand it Apple's id as a Deezer one.
-            if (candidate.metadataId.startsWith(SpotiFlacTrackSearch.APPLE_PREFIX) ||
-                candidate.metadataId.startsWith(SpotiFlacTrackSearch.PROVIDER_PREFIX)) {
-                return@withContext candidate.toIdentifiedTrack().copy(metadataId = null)
-            }
-            val endpoint = "https://api.deezer.com/track/${URLEncoder.encode(candidate.metadataId, StandardCharsets.UTF_8.toString())}"
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10_000
-                readTimeout = 10_000
-                requestMethod = "GET"
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "Harmony/1.0 Android MetadataResolve")
-            }
-            try {
-                if (connection.responseCode !in 200..299) {
-                    return@withContext candidate.toIdentifiedTrack()
-                }
-                val body = connection.inputStream.bufferedReader().use { it.readText() }
-                val item = JSONObject(body)
-                if (item.has("error")) return@withContext candidate.toIdentifiedTrack()
-
-                val artist = item.optJSONObject("artist")?.optString("name")
-                    ?.takeIf { it.isNotBlank() }
-                    ?: candidate.artist
-                val title = item.optString("title_short")
-                    .ifBlank { item.optString("title") }
-                    .ifBlank { candidate.title }
-                val albumObject = item.optJSONObject("album")
-                val album = albumObject?.optString("title")
-                    ?.takeIf { it.isNotBlank() }
-                    ?: candidate.album
-                val cover = albumObject?.optString("cover_xl")
-                    ?.takeIf { it.isNotBlank() }
-                    ?: albumObject?.optString("cover_big")?.takeIf { it.isNotBlank() }
-                    ?: candidate.thumbnailUrl
-                val durationMs = item.optLong("duration")
-                    .takeIf { it > 0L }
-                    ?.times(1000L)
-                    ?: candidate.durationMs
-                val isrc = item.optString("isrc").trim().takeIf { it.isNotBlank() } ?: candidate.isrc
-
-                IdentifiedTrack(
-                    artist = artist,
-                    title = title,
-                    sourceTitle = "$artist - $title",
-                    thumbnailUrl = cover,
-                    album = album,
-                    durationMs = durationMs,
-                    isrc = isrc,
-                    metadataId = candidate.metadataId,
-                )
-            } finally {
-                connection.disconnect()
-            }
+    suspend fun resolveSpotiFlacTrack(candidate: SpotiFlacSearchCandidate): IdentifiedTrack {
+        require(candidate.metadataId.isNotBlank()) { "The selected metadata result has no track ID." }
+        // Found on Apple Music: there is no Deezer id to look up. The download engine
+        // works from artist, title and duration; never hand it Apple's id as a Deezer one.
+        if (candidate.metadataId.startsWith(SpotiFlacTrackSearch.APPLE_PREFIX) ||
+            candidate.metadataId.startsWith(SpotiFlacTrackSearch.PROVIDER_PREFIX)) {
+            return candidate.toIdentifiedTrack().copy(metadataId = null)
         }
+        // Deezer only adds the ISRC, album and a larger cover. The search result is
+        // enough to download, so a slow or unreachable Deezer must not hold the
+        // selection on "Resolving the selected metadata result" indefinitely.
+        return awaitWithin(RESOLVE_TIMEOUT_MS, lookupScope) { lookupDeezerTrack(candidate) }
+            ?: candidate.toIdentifiedTrack()
+    }
+
+    /** Deezer's full record for the candidate, or null if Deezer has none. Blocking. */
+    private fun lookupDeezerTrack(candidate: SpotiFlacSearchCandidate): IdentifiedTrack? {
+        val endpoint = "https://api.deezer.com/track/${URLEncoder.encode(candidate.metadataId, StandardCharsets.UTF_8.toString())}"
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 6_000
+            readTimeout = 6_000
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android MetadataResolve")
+        }
+        try {
+            if (connection.responseCode !in 200..299) return null
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val item = JSONObject(body)
+            if (item.has("error")) return null
+
+            val artist = item.optJSONObject("artist")?.optString("name")
+                ?.takeIf { it.isNotBlank() }
+                ?: candidate.artist
+            val title = item.optString("title_short")
+                .ifBlank { item.optString("title") }
+                .ifBlank { candidate.title }
+            val albumObject = item.optJSONObject("album")
+            val album = albumObject?.optString("title")
+                ?.takeIf { it.isNotBlank() }
+                ?: candidate.album
+            val cover = albumObject?.optString("cover_xl")
+                ?.takeIf { it.isNotBlank() }
+                ?: albumObject?.optString("cover_big")?.takeIf { it.isNotBlank() }
+                ?: candidate.thumbnailUrl
+            val durationMs = item.optLong("duration")
+                .takeIf { it > 0L }
+                ?.times(1000L)
+                ?: candidate.durationMs
+            val isrc = item.optString("isrc").trim().takeIf { it.isNotBlank() } ?: candidate.isrc
+
+            return IdentifiedTrack(
+                artist = artist,
+                title = title,
+                sourceTitle = "$artist - $title",
+                thumbnailUrl = cover,
+                album = album,
+                durationMs = durationMs,
+                isrc = isrc,
+                metadataId = candidate.metadataId,
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     private fun SpotiFlacSearchCandidate.toIdentifiedTrack(): IdentifiedTrack = IdentifiedTrack(
         artist = artist,
@@ -1393,6 +1404,8 @@ class MusicDownloadRepository @Inject constructor(
     private companion object {
         const val SPOTIFLAC_MIN_QUERY_CHARS = 3
         const val SPOTIFLAC_MAX_QUERY_LENGTH = 160
+        /** Longest the Deezer details for a selected result may hold up the selection. */
+        const val RESOLVE_TIMEOUT_MS = 8_000L
         const val PREF_LAST_YTDLP_UPDATE = "last_ytdlp_nightly_update_ms"
         const val PREF_DOWNLOAD_FOLDER_URI = "download_folder_uri"
         const val PREF_DOWNLOAD_FOLDER_LABEL = "download_folder_label"

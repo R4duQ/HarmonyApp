@@ -91,6 +91,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
     // a custom scheme; tying grant exchange to lifecycleScope can therefore
     // cancel a valid Tidal grant halfway through completion.
     private val verificationCallbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Background lookups the caller stops waiting for at a deadline; see [awaitWithin]. */
+    private val lookupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // downloadByStrategy can block in native/extension HTTP work. Keeping it on a
     // small dedicated executor makes the JNI boundary deterministic while a
@@ -165,7 +167,11 @@ class SpotiFlacDownloadEngine @Inject constructor(
             )
             nativeControl { Gobackend.resetDownloadCancel(itemId) }
 
-            val providerIds = withContext(Dispatchers.IO) { resolveProviderIdentifiers(track) }
+            // song.link only adds Tidal/Qobuz/Spotify ids; the track's own ids are enough to
+            // start, so a slow song.link must not hold the download on "Resolving".
+            val providerIds = awaitWithin(SONG_LINK_DEADLINE_MS, lookupScope) {
+                resolveProviderIdentifiers(track)
+            } ?: basicProviderIdentifiers(track)
             onProgress(
                 SpotiFlacTransferProgress(
                     stage = SpotiFlacStage.RESOLVING,
@@ -1597,6 +1603,18 @@ class SpotiFlacDownloadEngine @Inject constructor(
             partial.copyTo(destination, overwrite = true)
             partial.delete()
         }
+    }
+
+    /** The ids the track already carries, without asking song.link. */
+    private fun basicProviderIdentifiers(track: IdentifiedTrack): ProviderIdentifiers {
+        val deezerId = track.metadataId?.trim()?.takeIf { it.all(Char::isDigit) }
+        val spotifyId = track.spotifyId?.trim()?.takeIf { it.matches(SPOTIFY_TRACK_ID) }
+        return ProviderIdentifiers(
+            deezerId = deezerId,
+            deezerUrl = deezerId?.let { "https://www.deezer.com/track/$it" },
+            spotifyId = spotifyId,
+            spotifyUrl = spotifyId?.let { "https://open.spotify.com/track/$it" },
+        )
     }
 
     private fun resolveProviderIdentifiers(track: IdentifiedTrack): ProviderIdentifiers {
@@ -3385,6 +3403,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
         private const val REGISTRY_CONNECT_TIMEOUT_MS = 12_000
         private const val REGISTRY_READ_TIMEOUT_MS = 12_000
         private const val SONG_LINK_TIMEOUT_MS = 12_000
+        /** Longest the song.link lookup may hold a download on "Resolving". */
+        private const val SONG_LINK_DEADLINE_MS = 15_000L
         private const val ROUTER_WATCHDOG_MS = 210_000L
         private const val PROVIDER_WATCHDOG_MS = 95_000L
         private const val CANCEL_DELIVERY_TIMEOUT_MS = 8_000L
