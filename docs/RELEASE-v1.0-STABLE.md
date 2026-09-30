@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **106**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 105), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **109**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 108), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -27,6 +27,13 @@ certificate.
 - **SpotiFLAC search** asks SpotiFLAC's own providers first, including Tidal. It then
   tries several phrasings on Deezer, then Apple Music, so titles with hyphens or
   missing diacritics are found.
+- **SpotiFLAC engine 4.9.6** (was 4.9.5): stalled source resolution times out, a provider
+  asking for verification pauses fallback instead of counting the track as unavailable,
+  better matching of artist order, capitalization and title annotations, and ordinary
+  lossless downloads no longer pick spatial audio by accident.
+- **SpotiFLAC no longer hangs on "Resolving".** Selecting a result waits at most 8 s for
+  Deezer's details and a download waits at most 15 s for song.link; past that Harmony
+  continues with the data it already has.
 - **Downloads.** Before a batch starts, Harmony checks that the provider is ready.
   Downloads show per-song progress. Albums and selected tracks can be downloaded
   through SpotiFLAC or Soulseek.
@@ -38,6 +45,10 @@ certificate.
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
   line to set it for that device.
+- **Closing the app closes the notification.** Swiping Harmony away stops playback and
+  removes its notification unless Android Auto is connected. Before, the system's media
+  controls, Bluetooth or a watch could be mistaken for the car, leaving music and a
+  notification that could not be dismissed.
 - **Notification opens the app.** Tapping the playback notification or the lock-screen
   player brings Harmony to the front, or starts it if it was closed.
 - Redesigned **Home** and **playlist detail** screens.

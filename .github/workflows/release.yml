@@ -24,7 +24,7 @@ env:
   ANDROID_API_LEVEL: '35'
   ANDROID_BUILD_TOOLS: '35.0.0'
   NDK_VERSION: '29.0.14206865'
-  SPOTIFLAC_TAG: 'v4.9.5'
+  SPOTIFLAC_TAG: 'v4.9.6'
 
 jobs:
   release:
@@ -176,8 +176,8 @@ jobs:
             dist/Harmony-v${{ steps.version.outputs.version_name }}-x86_64.apk
             dist/SHA256SUMS.txt
             dist/APK-SIGNATURE.txt
-            vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.source.txt
-            vendor-maven/com/harmony/vendor/gobackend/4.9.5/gobackend-4.9.5.aar.sha256.txt
+            vendor-maven/com/harmony/vendor/gobackend/4.9.6/gobackend-4.9.6.aar.source.txt
+            vendor-maven/com/harmony/vendor/gobackend/4.9.6/gobackend-4.9.6.aar.sha256.txt
           if-no-files-found: error
           retention-days: 90
 

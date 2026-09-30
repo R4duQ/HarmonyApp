@@ -3395,7 +3395,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         private const val SPOTIFLAC_CALLBACK_SCHEME = "spotiflac"
         private const val SPOTIFLAC_SESSION_GRANT_HOST = "session-grant"
         private const val SPOTIFLAC_COMPLETE_GRANT_ACTION = "completeGrant"
-        private const val SPOTIFLAC_BACKEND_VERSION = "4.9.5"
+        private const val SPOTIFLAC_BACKEND_VERSION = "4.9.6"
         private val SPOTIFLAC_CALLBACK_HOSTS = setOf("callback", "spotify-callback", SPOTIFLAC_SESSION_GRANT_HOST)
         private const val PROGRESS_POLL_MS = 450L
         private const val PROVIDER_CONNECT_TIMEOUT_MS = 20_000

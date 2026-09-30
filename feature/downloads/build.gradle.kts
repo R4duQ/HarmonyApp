@@ -10,10 +10,10 @@ android {
 }
 
 dependencies {
-    // Local Maven dependency containing the real SpotiFLAC Mobile v4.9.5
+    // Local Maven dependency containing the real SpotiFLAC Mobile v4.9.6
     // GoMobile bridge. It is used by both debug and release variants so local
     // phone builds support current extensions that require downloadSegments.
-    implementation("com.harmony.vendor:gobackend:4.9.5")
+    implementation("com.harmony.vendor:gobackend:4.9.6")
     implementation(projects.core.ui)
     implementation(projects.core.common)
     implementation(projects.core.database)

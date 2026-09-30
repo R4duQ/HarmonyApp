@@ -56,6 +56,7 @@ class PlaybackService : MediaLibraryService() {
     @Inject lateinit var sleepTimer: SleepTimer
     @Inject lateinit var settingsRepository: com.harmony.core.datastore.SettingsRepository
     @Inject lateinit var albumJourneys: com.harmony.domain.library.repository.AlbumJourneyRepository
+    @Inject lateinit var audioOutput: com.harmony.playback.service.player.AudioOutputMonitor
 
     // Lazy: only touched when the app is swiped away, and the service must
     // not be the thing that decides when the in-app connection gets built.
@@ -176,8 +177,9 @@ class PlaybackService : MediaLibraryService() {
         val ids = snap?.first ?: emptyList()
         val index = snap?.second ?: 0
         val position = snap?.third ?: 0L
-        AutoDiagnostics.log("app swiped away · car bound=${browserBindings.carBrowserBound}")
-        if (browserBindings.onTaskRemoved() == TaskRemovedAction.KEEP_SESSION) {
+        val carConnected = audioOutput.carConnected
+        AutoDiagnostics.log("app swiped away · legacy browser bound=${browserBindings.carBrowserBound} · car controller=$carConnected")
+        if (browserBindings.onTaskRemoved(carConnected) == TaskRemovedAction.KEEP_SESSION) {
             // Android Auto is attached. Swiping the app away is a gesture on
             // the PHONE's screen; the car is a separate client of this same
             // session and is still using it. Tearing the session down here
