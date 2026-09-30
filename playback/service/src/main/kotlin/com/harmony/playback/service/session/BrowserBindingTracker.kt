@@ -57,9 +57,19 @@ class BrowserBindingTracker(private val legacyBrowserAction: String) {
         return true
     }
 
-    /** What swiping the app out of recents on the phone should do. */
-    fun onTaskRemoved(): TaskRemovedAction =
-        if (carBrowserBound) TaskRemovedAction.KEEP_SESSION else TaskRemovedAction.SHUT_DOWN
+    /**
+     * What swiping the app out of recents on the phone should do.
+     *
+     * A legacy binding alone is not proof of a car: the system's media controls
+     * (Android 11+ media resumption), Bluetooth and watch browsers bind with the
+     * same action. Counting those kept the session, and its notification, alive
+     * after the user closed the app, with nothing left that could dismiss it.
+     * So the session is kept only when a car controller has also connected
+     * ([carControllerConnected], from the controller's package name).
+     */
+    fun onTaskRemoved(carControllerConnected: Boolean): TaskRemovedAction =
+        if (carBrowserBound && carControllerConnected) TaskRemovedAction.KEEP_SESSION
+        else TaskRemovedAction.SHUT_DOWN
 
     enum class TaskRemovedAction {
         /**

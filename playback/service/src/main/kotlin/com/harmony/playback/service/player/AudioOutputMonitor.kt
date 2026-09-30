@@ -95,6 +95,9 @@ class AudioOutputMonitor @Inject constructor(
     }
 
     /** Called by the media session when a controller connects or leaves. */
+    /** Whether a car (Android Auto) controller is connected to the session now. */
+    val carConnected: Boolean get() = carConnections > 0
+
     fun onControllerChanged(packageName: String, connected: Boolean) {
         if (!CarOutput.isCarController(packageName)) return
         synchronized(this) { carConnections = (carConnections + if (connected) 1 else -1).coerceAtLeast(0) }

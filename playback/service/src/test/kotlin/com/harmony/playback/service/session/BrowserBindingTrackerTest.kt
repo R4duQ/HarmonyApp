@@ -23,7 +23,24 @@ class BrowserBindingTrackerTest {
         host.bind(APP_CONTROLLER)   // Harmony's own MediaController (process start)
         host.bind(CAR)              // Android Auto opens its browser
 
-        assertEquals(TaskRemovedAction.KEEP_SESSION, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.KEEP_SESSION, host.service.tracker.onTaskRemoved(carControllerConnected = true))
+    }
+
+    @Test
+    fun `system media controls bound without a car - swiping the app shuts the session down`() {
+        val host = FakeBindingHost(ModelService())
+        host.bind(APP_CONTROLLER)
+        host.bind(CAR)              // SystemUI media resumption uses the same legacy action
+
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = false))
+    }
+
+    @Test
+    fun `a car controller without a legacy binding does not keep the session`() {
+        val host = FakeBindingHost(ModelService())
+        host.bind(APP_CONTROLLER)
+
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -31,7 +48,7 @@ class BrowserBindingTrackerTest {
         val host = FakeBindingHost(ModelService())
         host.bind(APP_CONTROLLER)
 
-        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -41,7 +58,7 @@ class BrowserBindingTrackerTest {
         host.bind(CAR)
         host.unbind(CAR)
 
-        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -54,7 +71,7 @@ class BrowserBindingTrackerTest {
 
         assertEquals(1, host.service.onBindCalls[CAR])
         assertEquals(1, host.service.onRebindCalls[CAR])
-        assertEquals(TaskRemovedAction.KEEP_SESSION, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.KEEP_SESSION, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -69,7 +86,7 @@ class BrowserBindingTrackerTest {
         host.bind(CAR)
 
         assertEquals(0, host.service.onRebindCalls[CAR] ?: 0)
-        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -82,7 +99,7 @@ class BrowserBindingTrackerTest {
         val fresh = FakeBindingHost(ModelService())
         fresh.bind(CAR)
         assertEquals(1, fresh.service.onBindCalls[CAR])
-        assertEquals(TaskRemovedAction.KEEP_SESSION, fresh.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.KEEP_SESSION, fresh.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -91,7 +108,7 @@ class BrowserBindingTrackerTest {
         host.bind(APP_CONTROLLER)
         host.bind(CAR)
 
-        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -103,10 +120,10 @@ class BrowserBindingTrackerTest {
         host.bind(CAR)
         host.bind(CAR)
         host.unbind(CAR)
-        assertEquals(TaskRemovedAction.KEEP_SESSION, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.KEEP_SESSION, host.service.tracker.onTaskRemoved(carControllerConnected = true))
 
         host.unbind(CAR)
-        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     @Test
@@ -118,7 +135,7 @@ class BrowserBindingTrackerTest {
         host.bind(APP_CONTROLLER)
         host.unbind(APP_CONTROLLER)
 
-        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved())
+        assertEquals(TaskRemovedAction.SHUT_DOWN, host.service.tracker.onTaskRemoved(carControllerConnected = true))
     }
 
     /** Forwards binding callbacks the way PlaybackService does. */
