@@ -1,6 +1,6 @@
 # Third-party notices — Harmony 1.0
 
-Harmony can build and use the native backend from **SpotiFLAC Mobile v4.9.5**. SpotiFLAC Mobile is distributed under the MIT License. The build helper downloads its source from the official upstream repository and compiles only the Go backend used by Harmony; Harmony does not embed the Flutter UI.
+Harmony can build and use the native backend from **SpotiFLAC Mobile v4.9.6**. SpotiFLAC Mobile is distributed under the MIT License. The build helper downloads its source from the official upstream repository and compiles only the Go backend used by Harmony; Harmony does not embed the Flutter UI.
 
 Harmony can also download provider-extension packages listed by the **SpotiFLAC Extension** repository. That repository is distributed under the Apache License 2.0. Harmony 1.0 pins package URLs and SHA-256 values and verifies each downloaded package before execution.
 

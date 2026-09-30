@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **107**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 106), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **108**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 107), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -27,6 +27,10 @@ certificate.
 - **SpotiFLAC search** asks SpotiFLAC's own providers first, including Tidal. It then
   tries several phrasings on Deezer, then Apple Music, so titles with hyphens or
   missing diacritics are found.
+- **SpotiFLAC engine 4.9.6** (was 4.9.5): stalled source resolution times out, a provider
+  asking for verification pauses fallback instead of counting the track as unavailable,
+  better matching of artist order, capitalization and title annotations, and ordinary
+  lossless downloads no longer pick spatial audio by accident.
 - **SpotiFLAC no longer hangs on "Resolving".** Selecting a result waits at most 8 s for
   Deezer's details and a download waits at most 15 s for song.link; past that Harmony
   continues with the data it already has.

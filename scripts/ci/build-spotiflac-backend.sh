@@ -4,8 +4,8 @@ set -euo pipefail
 # Builds Harmony's typed GoMobile AAR from the pinned SpotiFLAC Mobile source.
 # Intended for GitHub-hosted Ubuntu runners and local Linux CI.
 
-SPOTIFLAC_TAG="${SPOTIFLAC_TAG:-v4.9.5}"
-SPOTIFLAC_VERSION="${SPOTIFLAC_VERSION:-4.9.5}"
+SPOTIFLAC_TAG="${SPOTIFLAC_TAG:-v4.9.6}"
+SPOTIFLAC_VERSION="${SPOTIFLAC_VERSION:-${SPOTIFLAC_TAG#v}}"
 EXPECTED_GO_VERSION="${EXPECTED_GO_VERSION:-1.26.6}"
 NDK_VERSION="${NDK_VERSION:-29.0.14206865}"
 ANDROID_API="${ANDROID_API:-24}"
