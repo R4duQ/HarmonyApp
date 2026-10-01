@@ -671,6 +671,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val blockedForThisDownload = linkedSetOf<String>()
         var lastFailure: JSONObject? = null
         var lastConversionFailure: SpotiFlacException? = null
+        // A provider that asks for verification is set aside while the others are
+        // tried; its challenge is surfaced only if none of them delivers the song.
+        var deferredVerification: SpotiFlacException? = null
         var gatewayRateLimitRetries = 0
 
         try {
@@ -991,7 +994,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
                         }
                         if (verificationUrl != null) put("verification_url_available", true)
                     }.toString(2)
-                    throw SpotiFlacException(
+                    val verificationFailure = SpotiFlacException(
                         message = if (verificationUrl != null) {
                             "$providerName requires provider verification. Open the provider challenge, finish it, return to Harmony, then use Check & retry."
                         } else {
@@ -1003,6 +1006,26 @@ class SpotiFlacDownloadEngine @Inject constructor(
                         verificationUrl = verificationUrl,
                         verificationChallenge = effectiveChallenge,
                     )
+                    // Since SpotiFLAC 4.9.6 every provider's signed session is checked
+                    // before it is tried, so one provider's challenge (often one with no
+                    // browser page to open) used to end the whole download while the
+                    // remaining providers were never asked. Try them first.
+                    if (remaining.size > 1) {
+                        deferredVerification = deferredVerification ?: verificationFailure
+                        blockedForThisDownload += currentProvider
+                        remaining.remove(currentProvider)
+                        cleanupStagingForRetry(jobDir)
+                        attemptIndex++
+                        onProgress(
+                            SpotiFlacTransferProgress(
+                                SpotiFlacStage.PROVIDERS,
+                                provider = currentProvider,
+                                detail = "$providerName asks for verification. Trying ${providerDisplay(remaining.first())} first…",
+                            ),
+                        )
+                        continue
+                    }
+                    throw actionableVerification(deferredVerification) ?: verificationFailure
                 }
 
                 // Some extension errors include the provider that rejected the
@@ -1017,8 +1040,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 }
 
                 // This provider was the final isolated candidate, so surface its
-                // concrete failure instead of replaying the same request.
-                throw friendlyBackendFailure(response, diagnostics)
+                // concrete failure instead of replaying the same request, unless an
+                // earlier provider asked for a verification the user can complete.
+                throw actionableVerification(deferredVerification) ?: friendlyBackendFailure(response, diagnostics)
             }
         } catch (failure: SpotiFlacException) {
             val conversion = lastConversionFailure
@@ -1041,6 +1065,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             }
         }
 
+        actionableVerification(deferredVerification)?.let { throw it }
         val failure = lastFailure ?: JSONObject().apply {
             put("success", false)
             put("error_type", "not_found")
@@ -1048,6 +1073,10 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
         throw friendlyBackendFailure(failure, diagnostics)
     }
+
+    /** A set-aside verification worth showing: one with a browser page the user can open. */
+    private fun actionableVerification(deferred: SpotiFlacException?): SpotiFlacException? =
+        deferred?.takeIf { it.verificationUrl != null }
 
     private suspend fun callDownloadWithWatchdog(
         request: JSONObject,
