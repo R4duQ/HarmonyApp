@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Explore
@@ -75,6 +77,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.CompositionLocalProvider
 import com.harmony.core.ui.component.LocalFloatingChromeHeight
+import com.harmony.core.ui.component.ReadableWidth
+import com.harmony.core.ui.component.isWideWindow
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
 
 object Routes {
     const val LIBRARY = "library"
@@ -109,6 +116,23 @@ object Routes {
 private fun androidx.navigation.NavController.popIfCurrent(
     entry: androidx.navigation.NavBackStackEntry,
 ): Boolean = currentBackStackEntry?.id == entry.id && popBackStack()
+
+/**
+ * A destination laid out for the window: on a tablet the page sits in a
+ * centred column of readable width (see [ReadableWidth]); on a phone it is
+ * exactly the plain destination. Now Playing is the one page that doesn't
+ * use this, because it lays itself out for the whole screen.
+ */
+private fun NavGraphBuilder.page(
+    route: String,
+    arguments: List<NamedNavArgument> = emptyList(),
+    content: @Composable (NavBackStackEntry) -> Unit,
+) = composable(route, arguments = arguments) { entry ->
+    if (isWideWindow()) ReadableWidth { content(entry) } else content(entry)
+}
+
+/** On a tablet the mini player and download banner stop growing at this width. */
+private val WideChromeMaxWidth = 720.dp
 
 private data class TopLevel(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
@@ -177,6 +201,16 @@ fun HarmonyApp(
     }
     val palette = animatedEditorialPalette(targetPalette)
 
+    // Tablets swap the bottom bar for a rail at the left edge. It stays on
+    // every page but Now Playing, so any section is one tap away even from
+    // an album or a playlist; the page moves over to make room for it.
+    val wide = isWideWindow()
+    val showRail = wide && currentRoute != Routes.NOW_PLAYING
+    val railSpace by animateDpAsState(
+        targetValue = if (showRail) NavRailClearance else 0.dp,
+        label = "rail-space",
+    )
+
     // Discover's "Search my library" hands off to the Library screen's own
     // search. It travels as an incrementing counter rather than a route
     // argument so Library's route, saved state and back-stack behaviour stay
@@ -200,6 +234,18 @@ fun HarmonyApp(
             launchSingleTop = true
             restoreState = true
         }
+    }
+
+    val navItems = topLevel.map { NavItem(it.label, it.icon) }
+    val topLevelIndex = topLevel.indexOfFirst { it.route == currentRoute }
+    val onSelectTopLevel: (Int) -> Unit = { index ->
+        val route = topLevel[index].route
+        // Only an ordinary tab tap resets search — this does NOT run when
+        // popping back from Now Playing, since that uses
+        // navController.popBackStack() directly and never goes through
+        // this handler.
+        if (route == Routes.LIBRARY) librarySearchResetSignal++
+        goTo(route)
     }
 
     LaunchedEffect(verificationReturnSignal) {
@@ -284,7 +330,7 @@ fun HarmonyApp(
                 // LibraryScreen's SongsTab/AlbumsTab/ArtistsTab.
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = innerPadding.calculateTopPadding()),
+                    .padding(top = innerPadding.calculateTopPadding(), start = railSpace),
                 // Motion defaults for every destination: a quick fade with a
                 // small upward drift, matched by a subtle fade-out. Visual
             // identity is untouched — screens just stop teleporting.
@@ -307,7 +353,7 @@ fun HarmonyApp(
                     ) { it / 24 }
             },
         ) {
-            composable(Routes.LIBRARY) {
+            page(Routes.LIBRARY) {
                 LibraryScreen(
                     onAlbumClick = { navController.navigate("album/$it") },
                     onArtistClick = { navController.navigate("artist/${android.net.Uri.encode(it)}") },
@@ -316,7 +362,7 @@ fun HarmonyApp(
                     resetSearchSignal = librarySearchResetSignal,
                 )
             }
-            composable(Routes.HOME) {
+            page(Routes.HOME) {
                 HomeScreen(
                     // The shell no longer reserves this space via Scaffold's
                     // bottomBar, so the floating chrome's height has to be
@@ -341,7 +387,7 @@ fun HarmonyApp(
                     onOpenNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
                 )
             }
-            composable(Routes.DISCOVER) {
+            page(Routes.DISCOVER) {
                 DiscoverScreen(
                     onOpenPlaylists = { goTo(Routes.PLAYLISTS) },
                     // The playlist Discover just saved opens over Discover; Back returns to the flow.
@@ -350,7 +396,7 @@ fun HarmonyApp(
                         onOpenDownloads = { goTo(Routes.DOWNLOADS) }) },
                 )
             }
-            composable(
+            page(
                 Routes.ALBUM,
                 arguments = listOf(navArgument("albumId") { type = NavType.LongType }),
             ) { entry ->
@@ -360,7 +406,7 @@ fun HarmonyApp(
                     onOpenAlbum = { navController.navigate("album/$it") },
                 )
             }
-            composable(
+            page(
                 "artist/{artistName}",
                 arguments = listOf(navArgument("artistName") { type = NavType.StringType }),
             ) {
@@ -368,7 +414,7 @@ fun HarmonyApp(
                     onAlbumClick = { navController.navigate("album/$it") },
                 )
             }
-            composable(Routes.PLAYLISTS) {
+            page(Routes.PLAYLISTS) {
                 PlaylistsScreen(
                     onPlaylistClick = { navController.navigate("playlist/$it") },
                     onSmartPlaylistClick = { navController.navigate("smart_playlist/${it.name}") },
@@ -377,7 +423,7 @@ fun HarmonyApp(
                     },
                 )
             }
-            composable(Routes.SPOTIFY_TRANSFER) {
+            page(Routes.SPOTIFY_TRANSFER) {
                 SpotifyPlaylistTransferScreen(
                     onBack = { navController.popBackStack() },
                     onOpenDownloads = {
@@ -389,25 +435,25 @@ fun HarmonyApp(
                     verificationReturnSignal = playlistVerificationReturnSignal,
                 )
             }
-            composable(
+            page(
                 Routes.PLAYLIST,
                 arguments = listOf(navArgument("playlistId") { type = NavType.LongType }),
             ) { entry ->
                 PlaylistDetailScreen(onBack = { navController.popIfCurrent(entry) })
             }
-            composable(
+            page(
                 Routes.SMART_PLAYLIST,
                 arguments = listOf(navArgument("smartType") { type = NavType.StringType }),
             ) { entry ->
                 PlaylistDetailScreen(onBack = { navController.popIfCurrent(entry) })
             }
-            composable(Routes.EQUALIZER) {
+            page(Routes.EQUALIZER) {
                 EqualizerScreen(onBack = { navController.popBackStack() })
             }
-            composable(Routes.DOWNLOADS) {
+            page(Routes.DOWNLOADS) {
                 DownloadsScreen(onOpenAlbum = { navController.navigate("album_download/${android.net.Uri.encode(it)}") { launchSingleTop = true } })
             }
-            composable(Routes.ALBUM_DOWNLOAD, arguments = listOf(navArgument("discoverId") { type = NavType.StringType })) { entry ->
+            page(Routes.ALBUM_DOWNLOAD, arguments = listOf(navArgument("discoverId") { type = NavType.StringType })) { entry ->
                 val id = entry.arguments?.getString("discoverId").orEmpty()
                 val album = ShflAlbumCatalog.albums.firstOrNull { it.id == id }
                 AlbumDownloadScreen(id, album?.title ?: "Album", album?.artist.orEmpty(),
@@ -415,7 +461,7 @@ fun HarmonyApp(
                     onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) { launchSingleTop = true } },
                     onReview = libraryActions::openReview, artistAliases = album?.artistAliases.orEmpty())
             }
-            composable(Routes.SETTINGS) {
+            page(Routes.SETTINGS) {
                 SettingsScreen(
                     onOpenFlacCheck = { navController.navigate(Routes.FLAC_CHECK) },
                     onOpenTagEditor = { navController.navigate(Routes.TAG_EDITOR) },
@@ -423,8 +469,8 @@ fun HarmonyApp(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(Routes.FLAC_CHECK) { FlacCheckScreen() }
-            composable(Routes.TAG_EDITOR) { TagEditorScreen() }
+            page(Routes.FLAC_CHECK) { FlacCheckScreen() }
+            page(Routes.TAG_EDITOR) { TagEditorScreen() }
             composable(
                 Routes.NOW_PLAYING,
                 // The player is spatially "below" everything (it expands up
@@ -468,9 +514,18 @@ fun HarmonyApp(
         // own, so a tap that lands exactly there reaches whatever is
         // visible underneath — which is correct, since that gap isn't part
         // of either control.
+        // On a tablet the chrome keeps to the page beside the rail and stops
+        // at a comfortable width instead of spanning the whole screen.
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(start = railSpace),
+        ) {
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
+                .then(if (wide) Modifier.widthIn(max = WideChromeMaxWidth) else Modifier)
                 .onSizeChanged {
                     // +8dp so the last row clears the glass rather than
                     // ending flush against its edge.
@@ -504,23 +559,27 @@ fun HarmonyApp(
                 // to the nav bar's.
                 Spacer(Modifier.height(10.dp))
             }
-            val topLevelIndex = topLevel.indexOfFirst { it.route == currentRoute }
-            if (topLevelIndex >= 0) {
+            if (!wide && topLevelIndex >= 0) {
                 LiquidGlassNavBar(
-                    items = topLevel.map { NavItem(it.label, it.icon) },
+                    items = navItems,
                     selectedIndex = topLevelIndex,
-                    onSelect = { index ->
-                        val route = topLevel[index].route
-                        // Only an ordinary tab tap resets search — this
-                        // does NOT run when popping back from Now Playing,
-                        // since that uses navController.popBackStack()
-                        // directly and never goes through this handler.
-                        if (route == Routes.LIBRARY) librarySearchResetSignal++
-                        goTo(route)
-                    },
+                    onSelect = onSelectTopLevel,
                     palette = palette,
                 )
             }
+        }
+        }
+
+        if (showRail) {
+            LiquidGlassNavRail(
+                items = navItems,
+                selectedIndex = topLevelIndex,
+                onSelect = onSelectTopLevel,
+                palette = palette,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start)),
+            )
         }
     }
     }

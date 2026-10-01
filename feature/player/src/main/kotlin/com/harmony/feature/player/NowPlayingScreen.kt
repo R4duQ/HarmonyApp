@@ -34,6 +34,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -146,6 +149,12 @@ import kotlin.math.abs
 /** Fraction of the artwork width a swipe must cross to commit a skip. */
 private const val SWIPE_SKIP_FRACTION = 0.22f
 
+/** Widest the portrait player's column grows, in dp (tablets held upright). */
+private const val PORTRAIT_MAX_CONTENT_DP = 600
+
+/** Widest the landscape player's two halves grow together, in dp (tablets on their side). */
+private const val LANDSCAPE_MAX_CONTENT_DP = 1040
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingScreen(
@@ -188,8 +197,20 @@ fun NowPlayingScreen(
         value = song?.let { resolveMiniPlayerAudioInfo(context, it) }
     }
     val palette = playerPalette()
-    val landscape =
-        LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // A tablet held upright gets the portrait layout, which spans the whole
+    // width on a phone. Across 800dp+ that blows the artwork up and spreads
+    // the controls apart, so the column keeps to a phone-like width and the
+    // page's tint fills the margins.
+    val sidePadding = when {
+        landscape && configuration.screenWidthDp > LANDSCAPE_MAX_CONTENT_DP + 48 ->
+            ((configuration.screenWidthDp - LANDSCAPE_MAX_CONTENT_DP) / 2).dp
+        landscape -> 24.dp
+        configuration.screenWidthDp > PORTRAIT_MAX_CONTENT_DP + 40 ->
+            ((configuration.screenWidthDp - PORTRAIT_MAX_CONTENT_DP) / 2).dp
+        else -> 20.dp
+    }
 
     // ---- YT-Music-style vertical gestures on the whole player ----
     // SWIPE DOWN (or the back button): the page follows your finger and, past
@@ -366,7 +387,7 @@ fun NowPlayingScreen(
                     onDragCancel = { gestureScope.launch { dragOffsetY.animateTo(0f) } },
                 )
             }
-            .padding(horizontal = if (landscape) 24.dp else 20.dp),
+            .padding(horizontal = sidePadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         PlayerTopBar(
@@ -412,9 +433,15 @@ fun NowPlayingScreen(
                         gestureScope = gestureScope,
                         onNext = viewModel::onNext,
                         onPrevious = viewModel::onPrevious,
+                        // The largest record of the right shape that fits BOTH this
+                        // half's width and 62% of its height. A fixed height alone
+                        // was fine on a phone, where height is always the limit, but
+                        // on a tablet it pushed the record past its half.
                         modifier = Modifier
                             .fillMaxHeight(0.62f)
-                            .aspectRatio(1f / 0.72f, matchHeightConstraintsFirst = true),
+                            .fillMaxWidth()
+                            .wrapContentSize()
+                            .aspectRatio(1f / 0.72f),
                     )
                     TitleBlock(
                         song = song,
@@ -435,11 +462,14 @@ fun NowPlayingScreen(
 
                 Spacer(Modifier.width(20.dp))
 
-                // Right half: everything you operate.
+                // Right half: everything you operate. Kept to a phone-like width
+                // on a tablet so the transport buttons stay within a thumb's reach.
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight(),
+                        .fillMaxHeight()
+                        .wrapContentWidth()
+                        .widthIn(max = 480.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
