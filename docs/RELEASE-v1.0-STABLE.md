@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **111**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 110), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **112**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 111), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -55,8 +55,8 @@ certificate.
 - **Notification opens the app.** Tapping the playback notification or the lock-screen
   player brings Harmony to the front, or starts it if it was closed.
 - **Tablet layout.** On tablets a glass navigation rail on the left replaces the bottom
-  bar, pages keep a readable width, and Now Playing stays compact upright and side by
-  side in landscape. Phones are unchanged.
+  bar; swipe up or down on it to move between sections. Pages keep a readable width, and
+  Now Playing stays compact upright and side by side in landscape. Phones are unchanged.
 - Redesigned **Home** and **playlist detail** screens.
 - Redesigned **album page**: the cover as a record that turns while the album
   plays, a link to the artist, a quality badge (lossless, bit depth and sample
