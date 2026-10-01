@@ -221,7 +221,6 @@ fun DownloadsScreen(
                 onIdentify = viewModel::searchSelectedSource,
                 onConvert = viewModel::downloadYouTubeAsFlac,
                 onToggleErrorDetails = viewModel::toggleErrorDetails,
-                onRecognize = onOpenRecognize,
             )
         }
 
@@ -242,6 +241,7 @@ fun DownloadsScreen(
                 onRefreshVerification = viewModel::refreshProviderVerification,
                 onCheckVerificationAndRetry = viewModel::checkProviderVerificationAndRetry,
                 onToggleErrorDetails = viewModel::toggleErrorDetails,
+                onRecognize = onOpenRecognize,
             )
         }
 
