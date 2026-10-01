@@ -36,6 +36,7 @@ class DownloadsViewModel @Inject constructor(
     private val settings: SettingsRepository,
     downloadStatusCenter: DownloadStatusCenter,
     @ApplicationContext private val context: Context,
+    private val recognitionHandoff: RecognitionHandoff,
 ) : ViewModel() {
     private val statusCenter = downloadStatusCenter.forOwner()
 
@@ -125,6 +126,18 @@ class DownloadsViewModel @Inject constructor(
     }
 
     init {
+        // A song recognised on the Recognize screen arrives here as a search:
+        // switch to SpotiFLAC and look it up, so its Download button is one
+        // tap away.
+        viewModelScope.launch {
+            recognitionHandoff.pending.collect { pending ->
+                if (pending == null) return@collect
+                val query = recognitionHandoff.take() ?: return@collect
+                selectPreferredDownloadSource(DownloadSource.SPOTIFLAC)
+                setQuery(query)
+                searchSelectedSource()
+            }
+        }
         // Mirror download activity into the app-scoped status centre so the
         // shell can show a banner on other screens. Derived from `state`
         // rather than hooked into each transfer call site: there are three

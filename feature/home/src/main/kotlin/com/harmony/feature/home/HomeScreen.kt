@@ -37,6 +37,7 @@ import java.util.Calendar
 @Composable
 fun HomeScreen(
     onOpenSettings: () -> Unit = {},
+    onOpenRecognize: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
     onOpenDiscover: () -> Unit = {},
@@ -73,7 +74,7 @@ fun HomeScreen(
 
     val callbacks = rememberUpdatedState(
         HomeCallbacks(
-            onOpenSettings, onOpenSearch, onOpenDownloads, onOpenDiscover, onOpenFlacCheck,
+            onOpenSettings, onOpenRecognize, onOpenSearch, onOpenDownloads, onOpenDiscover, onOpenFlacCheck,
             onOpenLibrary, onOpenNowPlaying, onOpenAlbum, onOpenPlaylist, onOpenPlaylists, onSongClick,
         ),
     )
@@ -81,6 +82,7 @@ fun HomeScreen(
         HomeActions(
             onOpenSearch = { callbacks.value.openSearch() },
             onOpenSettings = { callbacks.value.openSettings() },
+            onOpenRecognize = { callbacks.value.openRecognize() },
             onOpenNowPlaying = { callbacks.value.openNowPlaying() },
             onTogglePlayback = viewModel::togglePlayback,
             onStartMix = viewModel::startSmartMix,
@@ -138,6 +140,7 @@ fun HomeScreen(
 /** The navigation callbacks, held in one updated state so [HomeActions] can be built once. */
 private class HomeCallbacks(
     val openSettings: () -> Unit,
+    val openRecognize: () -> Unit,
     val openSearch: () -> Unit,
     val openDownloads: () -> Unit,
     val openDiscover: () -> Unit,

@@ -70,6 +70,7 @@ import com.harmony.core.ui.component.GlassSearchBar
 internal class HomeActions(
     val onOpenSearch: () -> Unit = {},
     val onOpenSettings: () -> Unit = {},
+    val onOpenRecognize: () -> Unit = {},
     val onOpenNowPlaying: () -> Unit = {},
     val onTogglePlayback: () -> Unit = {},
     val onStartMix: () -> Unit = {},
@@ -89,6 +90,7 @@ internal object HomeTags {
     const val LIST = "home_list"
     const val SEARCH = "home_search"
     const val SETTINGS = "home_settings"
+    const val RECOGNIZE = "home_recognize"
     const val CONTINUE = "home_continue"
     const val CONTINUE_PLAY = "home_continue_play"
     const val CONTINUE_LOADING = "home_continue_loading"
@@ -310,6 +312,14 @@ private fun Header(greeting: String, palette: EditorialPalette, actions: HomeAct
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            GlassIconButton(
+                icon = Icons.Rounded.GraphicEq,
+                contentDescription = "Recognize a song",
+                palette = palette,
+                onClick = actions.onOpenRecognize,
+                modifier = Modifier.testTag(HomeTags.RECOGNIZE),
+            )
+            Spacer(Modifier.width(8.dp))
             GlassIconButton(
                 icon = Icons.Rounded.Settings,
                 contentDescription = "Settings",
