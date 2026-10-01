@@ -354,7 +354,10 @@ class DiscoveryFlowViewModel @Inject constructor(
     fun goToReview() {
         preview.stop()
         viewModelScope.launch {
-            val idx = index.value ?: return@launch
+            // The library index is built in the background when the screen
+            // opens. A tap that lands before it is ready waits for it rather
+            // than being dropped (it used to do nothing at all).
+            val idx = index.filterNotNull().first()
             write { s ->
                 val d = s.draft ?: return@write s
                 if (d.items.isEmpty()) return@write s
@@ -430,7 +433,7 @@ class DiscoveryFlowViewModel @Inject constructor(
         transient.update { it.copy(creating = true) }
         viewModelScope.launch {
             try {
-                val idx = index.value ?: return@launch
+                val idx = index.filterNotNull().first()
                 val current = repository.state.value.batches.firstOrNull { it.id == batch.id } ?: return@launch
                 val progress = PlaylistPlacement.progress(current, idx)
                 val ids = PlaylistPlacement.toCreate(current, progress)
