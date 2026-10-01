@@ -100,6 +100,7 @@ object Routes {
     const val SMART_PLAYLIST = "smart_playlist/{smartType}"
     const val FLAC_CHECK = "flac_check"
     const val TAG_EDITOR = "tag_editor"
+    const val RECOGNIZE = "recognize"
 }
 
 /**
@@ -188,6 +189,7 @@ fun HarmonyApp(
         currentRoute == Routes.HOME -> amberPalette()
         currentRoute == Routes.DOWNLOADS -> amberPalette()
         currentRoute == Routes.SETTINGS -> stonePalette()
+        currentRoute == Routes.RECOGNIZE -> bluePalette()
         // Any destination added later without a palette still gets sane
         // chrome instead of an arbitrary section's colors.
         else -> EditorialPalette(
@@ -369,6 +371,7 @@ fun HarmonyApp(
                     // handed down explicitly — HomeScreen already takes it.
                     contentPadding = PaddingValues(bottom = chromeHeight),
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    onOpenRecognize = { navController.navigate(Routes.RECOGNIZE) { launchSingleTop = true } },
                     onOpenSearch = {
                         librarySearchText = null
                         librarySearchSignal++
@@ -451,7 +454,10 @@ fun HarmonyApp(
                 EqualizerScreen(onBack = { navController.popBackStack() })
             }
             page(Routes.DOWNLOADS) {
-                DownloadsScreen(onOpenAlbum = { navController.navigate("album_download/${android.net.Uri.encode(it)}") { launchSingleTop = true } })
+                DownloadsScreen(
+                    onOpenAlbum = { navController.navigate("album_download/${android.net.Uri.encode(it)}") { launchSingleTop = true } },
+                    onOpenRecognize = { navController.navigate(Routes.RECOGNIZE) { launchSingleTop = true } },
+                )
             }
             page(Routes.ALBUM_DOWNLOAD, arguments = listOf(navArgument("discoverId") { type = NavType.StringType })) { entry ->
                 val id = entry.arguments?.getString("discoverId").orEmpty()
@@ -467,6 +473,19 @@ fun HarmonyApp(
                     onOpenTagEditor = { navController.navigate(Routes.TAG_EDITOR) },
                     onOpenEqualizer = { navController.navigate(Routes.EQUALIZER) },
                     onBack = { navController.popBackStack() },
+                )
+            }
+            page(Routes.RECOGNIZE) {
+                com.harmony.feature.downloads.RecognizeScreen(
+                    onBack = { navController.popBackStack() },
+                    // A recognised song opens Downloads with SpotiFLAC already
+                    // searching for it; Back from there returns here.
+                    onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) { launchSingleTop = true } },
+                    onSearchLibrary = { query ->
+                        librarySearchText = query
+                        librarySearchSignal++
+                        goTo(Routes.LIBRARY)
+                    },
                 )
             }
             page(Routes.FLAC_CHECK) { FlacCheckScreen() }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -69,7 +70,11 @@ import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.analysis.model.SpectralReport
 
 @Composable
-fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsViewModel = hiltViewModel()) {
+fun DownloadsScreen(
+    onOpenAlbum: (String) -> Unit = {},
+    onOpenRecognize: () -> Unit = {},
+    viewModel: DownloadsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val identity = state.preferredDownloadSource.identity()
     val palette = animatedEditorialPalette(identity.palette)
@@ -216,6 +221,7 @@ fun DownloadsScreen(onOpenAlbum: (String) -> Unit = {}, viewModel: DownloadsView
                 onIdentify = viewModel::searchSelectedSource,
                 onConvert = viewModel::downloadYouTubeAsFlac,
                 onToggleErrorDetails = viewModel::toggleErrorDetails,
+                onRecognize = onOpenRecognize,
             )
         }
 
@@ -494,6 +500,7 @@ private fun SpotiFlacDownloadsLayout(
     onRefreshVerification: () -> Unit,
     onCheckVerificationAndRetry: () -> Unit,
     onToggleErrorDetails: () -> Unit,
+    onRecognize: () -> Unit = {},
 ) {
     // Check provider readiness early, without holding public metadata search
     // hostage to a browser callback. Verification is enforced by the engine
@@ -685,7 +692,14 @@ private fun SpotiFlacDownloadsLayout(
                     .fillMaxWidth()
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Don't know the name? Let Harmony listen for it.
+                TextButton(onClick = onRecognize) {
+                    Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = palette.ink, modifier = Modifier.size(16.dp))
+                    Text("Recognize", color = palette.ink, modifier = Modifier.padding(start = 4.dp))
+                }
+                Spacer(Modifier.width(6.dp))
                 EditorialPill(
                     text = if (state.isIdentifying && state.spotiFlacSearchResults.isEmpty()) {
                         "Searching…"
