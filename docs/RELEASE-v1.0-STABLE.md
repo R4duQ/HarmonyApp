@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **109**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 108), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **110**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 109), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -31,6 +31,9 @@ certificate.
   asking for verification pauses fallback instead of counting the track as unavailable,
   better matching of artist order, capitalization and title annotations, and ordinary
   lossless downloads no longer pick spatial audio by accident.
+- **A provider asking for verification no longer stops the download.** Since engine 4.9.6
+  each provider's session is checked first; a provider that asks for verification is now
+  set aside and the others are tried. Its challenge is shown only if none of them works.
 - **SpotiFLAC no longer hangs on "Resolving".** Selecting a result waits at most 8 s for
   Deezer's details and a download waits at most 15 s for song.link; past that Harmony
   continues with the data it already has.
