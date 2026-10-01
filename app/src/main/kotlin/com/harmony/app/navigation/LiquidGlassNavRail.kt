@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +33,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -38,6 +43,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
+import kotlin.math.roundToInt
 
 /** Width of the rail's glass capsule. */
 val NavRailWidth: Dp = 80.dp
@@ -70,6 +76,10 @@ fun LiquidGlassNavRail(
     modifier: Modifier = Modifier,
 ) {
     if (items.isEmpty()) return
+    val haptics = LocalHapticFeedback.current
+    // Read live by the drag gesture without restarting it mid-drag.
+    val currentIndex by rememberUpdatedState(selectedIndex)
+    val select by rememberUpdatedState(onSelect)
 
     // Same derivations as the bottom bar, so switching a device between
     // the two layouts never changes the look of the glass.
@@ -98,8 +108,40 @@ fun LiquidGlassNavRail(
                 spotColor = palette.ink,
             )
             .clip(RailShape)
+            // An opaque base under the glass. Nothing scrolls behind the rail
+            // (the page is laid out beside it), so translucency bought nothing
+            // here, and it let the drop shadow show through the glass as a
+            // dark bar down the middle of the rail.
+            .background(palette.field)
             .background(glass)
             .border(width = 1.dp, brush = rim, shape = RailShape)
+            // Same swipe as the bottom bar, turned upright: dragging walks the
+            // selection one destination per item of travel, with a tick at
+            // each step. From a page that isn't a destination it starts at
+            // the top.
+            .pointerInput(items.size) {
+                val step = ItemHeight.toPx()
+                var startIndex = 0
+                var emitted = 0
+                var total = 0f
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        startIndex = currentIndex.coerceAtLeast(0)
+                        emitted = startIndex
+                        total = 0f
+                    },
+                    onVerticalDrag = { change, amount ->
+                        change.consume()
+                        total += amount
+                        val target = (startIndex + (total / step).roundToInt()).coerceIn(0, items.lastIndex)
+                        if (target != emitted) {
+                            emitted = target
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            select(target)
+                        }
+                    },
+                )
+            }
             .padding(vertical = 8.dp),
     ) {
         if (selectedIndex in items.indices) {
