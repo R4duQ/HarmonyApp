@@ -19,14 +19,12 @@ sealed interface ListenPhase {
     data object Identifying : ListenPhase
     data class Found(val song: RecognizedSong) : ListenPhase
     data object NoMatch : ListenPhase
-    data class Failed(val message: String, val needsToken: Boolean = false) : ListenPhase
+    data class Failed(val message: String) : ListenPhase
 }
 
 data class RecognizeUiState(
     val phase: ListenPhase = ListenPhase.Idle,
     val history: List<RecognizedSong> = emptyList(),
-    /** Blank: AudD's free daily requests. */
-    val token: String = "",
 )
 
 @HiltViewModel
@@ -38,7 +36,7 @@ class RecognizeViewModel @Inject constructor(
     private var listening: Job? = null
 
     val state: StateFlow<RecognizeUiState> =
-        combine(phase, recognizer.history, recognizer.token) { p, h, t -> RecognizeUiState(p, h, t) }
+        combine(phase, recognizer.history) { p, h -> RecognizeUiState(p, h) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, RecognizeUiState())
 
     init { recognizer.load() }
@@ -59,7 +57,7 @@ class RecognizeViewModel @Inject constructor(
             phase.value = when (outcome) {
                 is RecognitionOutcome.Match -> ListenPhase.Found(outcome.song)
                 RecognitionOutcome.NoMatch -> ListenPhase.NoMatch
-                is RecognitionOutcome.Failed -> ListenPhase.Failed(outcome.message, outcome.needsToken)
+                is RecognitionOutcome.Failed -> ListenPhase.Failed(outcome.message)
             }
         }
     }
@@ -79,11 +77,6 @@ class RecognizeViewModel @Inject constructor(
     fun forget(song: RecognizedSong) {
         recognizer.forget(song)
         if ((phase.value as? ListenPhase.Found)?.song == song) phase.value = ListenPhase.Idle
-    }
-
-    fun setToken(value: String) {
-        recognizer.setToken(value)
-        if ((phase.value as? ListenPhase.Failed)?.needsToken == true) phase.value = ListenPhase.Idle
     }
 
     /** Queues a SpotiFLAC search for [song]; the caller then opens Downloads. */

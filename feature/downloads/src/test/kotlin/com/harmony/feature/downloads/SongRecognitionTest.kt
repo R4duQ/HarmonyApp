@@ -3,84 +3,124 @@ package com.harmony.feature.downloads
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.json.JSONObject
 import org.junit.Test
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.zip.CRC32
+import kotlin.math.PI
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 class SongRecognitionTest {
 
     private val match = """
-        {"status":"success","result":{"artist":"Imagine Dragons","title":"Warriors","album":"Warriors",
-         "release_date":"2014-09-18","label":"Universal Music","timecode":"00:40","song_link":"https://lis.tn/Warriors",
-         "deezer":{"id":82793030,"isrc":"USUM71414143","album":{"cover_xl":"https://cdn-images.dzcdn.net/xl.jpg"}},
-         "apple_music":{"isrc":"USUM71414143","artwork":{"url":"https://is1.mzstatic.com/{w}x{h}bb.jpg"}}}}
+        {"matches":[{"id":"20066955","offset":40.1,"timeskew":0.0001}],"timestamp":1,"timezone":"Europe/Bucharest",
+         "track":{"key":"20066955","title":"Warriors","subtitle":"Imagine Dragons","isrc":"USUM71414143",
+          "images":{"background":"https://is1-ssl.mzstatic.com/bg.jpg","coverart":"https://is1-ssl.mzstatic.com/400x400cc.jpg",
+                    "coverarthq":"https://is1-ssl.mzstatic.com/400x400cc-hq.jpg"},
+          "share":{"href":"https://www.shazam.com/track/20066955/warriors"},
+          "url":"https://www.shazam.com/track/20066955/warriors",
+          "sections":[{"type":"SONG","metadata":[{"title":"Album","text":"Warriors"},{"title":"Label","text":"KIDinaKORNER/Interscope Records"},
+                                                {"title":"Released","text":"2014"}]},{"type":"LYRICS","text":["..."]}]}}
     """.trimIndent()
 
     @Test fun `a match carries title, artist, year, link, cover and ISRC`() {
-        val outcome = AudDApi.parse(match, now = 42L) as RecognitionOutcome.Match
-        val song = outcome.song
+        val song = (ShazamApi.parse(200, match, now = 42L) as RecognitionOutcome.Match).song
         assertEquals("Warriors", song.title)
         assertEquals("Imagine Dragons", song.artist)
+        assertEquals("Warriors", song.album)
+        assertEquals("KIDinaKORNER/Interscope Records", song.label)
         assertEquals("2014", song.year)
-        assertEquals("https://lis.tn/Warriors", song.songLink)
-        assertEquals("https://cdn-images.dzcdn.net/xl.jpg", song.coverUrl)
+        assertEquals("https://www.shazam.com/track/20066955/warriors", song.songLink)
+        assertEquals("https://is1-ssl.mzstatic.com/400x400cc-hq.jpg", song.coverUrl)
         assertEquals("USUM71414143", song.isrc)
         assertEquals("Imagine Dragons - Warriors", song.searchQuery)
         assertEquals(42L, song.recognizedAt)
     }
 
-    @Test fun `apple artwork is used when deezer has no cover, sized up`() {
-        val body = """{"status":"success","result":{"artist":"A","title":"T","apple_music":{"artwork":{"url":"https://x/{w}x{h}bb.jpg"}}}}"""
-        val song = (AudDApi.parse(body, 0) as RecognitionOutcome.Match).song
-        assertEquals("https://x/1000x1000bb.jpg", song.coverUrl)
+    @Test fun `a sparse match still works`() {
+        val body = """{"matches":[{"id":"1"}],"track":{"title":"T","subtitle":"A","images":{"coverart":"https://x/c.jpg"},
+            "share":{"href":"https://www.shazam.com/track/1"}}}"""
+        val song = (ShazamApi.parse(200, body, 0) as RecognitionOutcome.Match).song
+        assertEquals("https://x/c.jpg", song.coverUrl)
+        assertEquals("https://www.shazam.com/track/1", song.songLink)
         assertEquals("", song.year)
+        assertEquals("", song.album)
     }
 
-    @Test fun `no result is no match, and so is a fingerprint of silence`() {
-        assertEquals(RecognitionOutcome.NoMatch, AudDApi.parse("""{"status":"success","result":null}""", 0))
-        assertEquals(RecognitionOutcome.NoMatch,
-            AudDApi.parse("""{"status":"error","error":{"error_code":300,"error_message":"Recognition failed"}}""", 0))
+    @Test fun `no matches is no match`() {
+        assertEquals(RecognitionOutcome.NoMatch, ShazamApi.parse(200, """{"matches":[],"retryms":4000,"tagid":"x"}""", 0))
+        assertEquals(RecognitionOutcome.NoMatch, ShazamApi.parse(200, """{"matches":[{"id":"1"}]}""", 0))
     }
 
-    @Test fun `token problems ask for a token, other errors do not`() {
-        for (code in listOf(900, 901, 902)) {
-            val outcome = AudDApi.parse("""{"status":"error","error":{"error_code":$code,"error_message":"x"}}""", 0)
-            assertTrue("code $code", (outcome as RecognitionOutcome.Failed).needsToken)
+    @Test fun `rate limits, server errors and garbage are failures`() {
+        assertTrue((ShazamApi.parse(429, "", 0) as RecognitionOutcome.Failed).message.contains("too many requests"))
+        assertTrue((ShazamApi.parse(503, "oops", 0) as RecognitionOutcome.Failed).message.contains("HTTP 503"))
+        assertTrue(ShazamApi.parse(200, "<html>502</html>", 0) is RecognitionOutcome.Failed)
+    }
+
+    @Test fun `the request carries the signature, its length and the time zone`() {
+        val signature = ShazamSignature(32_000, listOf(listOf(ShazamSignature.Peak(3, 9000, 9000)), emptyList(), emptyList(), emptyList()))
+        val body = JSONObject(ShazamApi.body(signature, 1_700_000_000_000L, "Europe/Bucharest"))
+        assertEquals("Europe/Bucharest", body.getString("timezone"))
+        assertEquals(1_700_000_000_000L, body.getLong("timestamp"))
+        assertEquals(2000, body.getJSONObject("signature").getInt("samplems"))
+        assertTrue(body.getJSONObject("signature").getString("uri").startsWith("data:audio/vnd.shazam.sig;base64,"))
+        assertTrue(ShazamApi.url("A-B", "c-d").startsWith("https://amp.shazam.com/discovery/v5/en/US/android/-/tag/A-B/c-d?"))
+    }
+
+    @Test fun `the signature has Shazam's header, a valid checksum and delta-coded peaks`() {
+        val peaks = listOf(ShazamSignature.Peak(2, 0x1234, 0x0567), ShazamSignature.Peak(5, 7000, 8000), ShazamSignature.Peak(400, 7100, 8100))
+        val bytes = ShazamSignature(48_000, listOf(emptyList(), peaks, emptyList(), emptyList())).encode()
+        val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(0xCAFE2580.toInt(), b.getInt(0))
+        assertEquals(CRC32().apply { update(bytes, 8, bytes.size - 8) }.value.toInt(), b.getInt(4))
+        assertEquals(bytes.size - 48, b.getInt(8))
+        assertEquals(0x94119C00.toInt(), b.getInt(12))
+        assertEquals(3 shl 27, b.getInt(28))
+        assertEquals(48_000 + 3840, b.getInt(40))
+        assertEquals(0x7C0000, b.getInt(44))
+        assertEquals(0x40000000, b.getInt(48))
+        assertEquals(bytes.size - 48, b.getInt(52))
+        assertEquals(0x60030041, b.getInt(56))            // band 520-1450 Hz
+        // 2 (+0x1234, 0x0567), 3 more, then a jump of 395 passes written as 0xFF + absolute pass
+        assertEquals(5 + 5 + 5 + 5, b.getInt(60))
+        assertArrayEquals(byteArrayOf(2, 0x34, 0x12, 0x67, 0x05, 3), bytes.copyOfRange(64, 70))
+        assertEquals(0xFF.toByte(), bytes[74])
+        assertEquals(400, b.getInt(75))
+        assertEquals(0.toByte(), bytes[79])
+        assertEquals(0, bytes.size % 4)
+    }
+
+    @Test fun `tone bursts become peaks at their pitch, silence gives none`() {
+        val rate = ShazamSignature.SAMPLE_RATE
+        val pcm = ShortArray(rate * 6) { i ->
+            val inBurst = (i % rate) < rate / 10   // 100 ms of 1 kHz every second
+            if (inBurst) (12_000 * sin(2 * PI * 1000 * i / rate)).toInt().toShort() else 0
         }
-        val other = AudDApi.parse("""{"status":"error","error":{"error_code":500,"error_message":"Bad file"}}""", 0)
-                as RecognitionOutcome.Failed
-        assertEquals("Recognition failed: Bad file", other.message)
-        assertTrue(!other.needsToken)
-        assertTrue(AudDApi.parse("<html>502</html>", 0) is RecognitionOutcome.Failed)
+        val signature = ShazamSignature.of(pcm)
+        assertEquals(rate * 6, signature.numberSamples)
+        assertTrue("peaks: ${signature.peakCount}", signature.peakCount > 0)
+        assertTrue(signature.bands[0].isEmpty() && signature.bands[2].isEmpty() && signature.bands[3].isEmpty())
+        for (peak in signature.bands[1]) {
+            val hz = peak.frequencyBin * (16000.0 / 2 / 1024 / 64)
+            assertEquals(1000.0, hz, 15.0)
+        }
+        assertEquals(0, ShazamSignature.of(ShortArray(rate * 4)).peakCount)
     }
 
-    @Test fun `the request has the token only when there is one, and the file last`() {
-        val wav = byteArrayOf(1, 2, 3)
-        val withToken = String(AudDApi.multipartBody("B", " tok ", wav), Charsets.ISO_8859_1)
-        assertTrue("name=\"api_token\"\r\n\r\ntok\r\n" in withToken)
-        assertTrue("name=\"return\"\r\n\r\ndeezer,apple_music,spotify\r\n" in withToken)
-        assertTrue(withToken.endsWith("\u0001\u0002\u0003\r\n--B--\r\n"))
-        val without = String(AudDApi.multipartBody("B", "  ", wav), Charsets.ISO_8859_1)
-        assertTrue("api_token" !in without)
-    }
-
-    @Test fun `the wav header describes 16-bit mono at the given rate`() {
-        val wav = Pcm.wav(shortArrayOf(1, -1, 300), 22_050)
-        val b = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN)
-        assertEquals("RIFF", String(wav, 0, 4))
-        assertEquals(36 + 6, b.getInt(4))
-        assertEquals("WAVE", String(wav, 8, 4))
-        assertEquals(1, b.getShort(22).toInt())          // mono
-        assertEquals(22_050, b.getInt(24))               // sample rate
-        assertEquals(44_100, b.getInt(28))               // byte rate
-        assertEquals(16, b.getShort(34).toInt())         // bits per sample
-        assertEquals(6, b.getInt(40))                    // data size
-        assertEquals(300, b.getShort(48).toInt())
-        assertEquals(50, wav.size)
-    }
-
-    @Test fun `decimation averages pairs and drops an odd tail`() {
-        assertArrayEquals(shortArrayOf(15, -5), Pcm.decimateBy2(shortArrayOf(10, 20, 0, -10, 99)))
+    @Test fun `resampling keeps the tune and drops what 16 kHz can't hold`() {
+        val from = 44_100
+        val tone = { hz: Double -> ShortArray(from) { (10_000 * sin(2 * PI * hz * it / from)).toInt().toShort() } }
+        val low = Pcm.resample(tone(1000.0), from, from, 16_000)
+        assertEquals(16_000, low.size)
+        val crossings = (1 until low.size).count { low[it - 1] < 0 && low[it] >= 0 }
+        assertEquals(1000.0, crossings.toDouble(), 3.0)
+        assertEquals(10_000 / sqrt(2.0) / 32768, Pcm.level(low).toDouble(), 0.01)
+        val high = Pcm.resample(tone(12_000.0), from, from, 16_000)
+        assertTrue(Pcm.level(high) < Pcm.level(low) / 20)
+        assertArrayEquals(shortArrayOf(1, 2), Pcm.resample(shortArrayOf(1, 2, 3), 2, 16_000, 16_000))
         assertEquals(0f, Pcm.level(ShortArray(100)), 0f)
         assertEquals(1f, Pcm.level(ShortArray(10) { Short.MIN_VALUE }), 0.001f)
     }

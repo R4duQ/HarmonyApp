@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **113**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 112), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **114**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 113), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -24,11 +24,12 @@ certificate.
     Select all and Select none. Unticked songs aren't downloaded.
   - Deezer and Apple Music are used with timeouts, retries and fallback. Offline, you
     can still build a playlist from your library.
-- **Recognize** names the song playing near you, like Shazam. Tap the button on Home or
-  in Downloads and Harmony listens for 10 seconds and asks AudD. Download sends the
+- **Recognize** names the song playing near you with Shazam. Tap the button on Home or
+  in Downloads and Harmony listens for up to 12 seconds; it asks Shazam after 4, 8 and 12
+  seconds and stops at the first match. No account or key is needed. Download sends the
   song straight to a SpotiFLAC search, My library looks it up in your files, and the
-  last 30 recognitions are kept. AudD allows a few free recognitions a day; add your own
-  AudD token for more. The microphone is used only while listening and nothing is stored.
+  last 30 recognitions are kept. Only a fingerprint of the sound is sent, never the
+  recording. This uses Shazam's private app interface, so Shazam can limit or change it.
 - **SpotiFLAC search** asks SpotiFLAC's own providers first, including Tidal. It then
   tries several phrasings on Deezer, then Apple Music, so titles with hyphens or
   missing diacritics are found.

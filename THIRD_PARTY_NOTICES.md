@@ -10,4 +10,6 @@ Harmony's Discover screen includes a curated selection of album facts, public al
 
 Album edition/track metadata and optional song previews use **Deezer** public endpoints. Previews are requested only on an explicit Listen action when a matching local recording is unavailable. The selected public song's artist/title are sent in that lookup; Harmony's stored taste profile is not uploaded. Availability varies by recording and territory. Preview playback is separate from the selected full-track download engine.
 
+Recognize computes Shazam audio fingerprints on the phone with a Kotlin port of the signature generator from **SongRec** (github.com/marin-m/SongRec, GNU General Public License v3.0; its Python version, also reflected in **ShazamIO**, MIT License) and sends only that fingerprint to Shazam's song-lookup service. Harmony is not affiliated with, sponsored by, or endorsed by Shazam or Apple; Shazam is a trademark of Apple Inc. Song names, artwork and links shown after a match come from Shazam.
+
 Upstream license files and copyright notices remain authoritative for the respective upstream projects.
