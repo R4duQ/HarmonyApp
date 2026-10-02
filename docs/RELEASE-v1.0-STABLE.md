@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **116**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 115), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **117**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 116), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -69,6 +69,12 @@ certificate.
 - **Tablet layout.** On tablets a glass navigation rail on the left replaces the bottom
   bar; swipe up or down on it to move between sections. Pages keep a readable width, and
   Now Playing stays compact upright and side by side in landscape. Phones are unchanged.
+- **Vinyl mode** in Library (the record button on Songs) is redesigned. Each song is now a real
+  record, with grooves, track gaps and its artwork as the label, riding a lit rail. The centre
+  record grows and spins under a fixed sheen. Its card shows the album, the audio quality
+  (HI-RES 24/96, LOSSLESS 16/44.1 or the bitrate) and the length, with a round Play button.
+  Delete moved into a menu, away from Play. A counter shows where you are ("8 of 1,240"), and
+  the card is now readable in dark mode.
 - Redesigned **Home** and **playlist detail** screens.
 - Redesigned **album page**: the cover as a record that turns while the album
   plays, a link to the artist, a quality badge (lossless, bit depth and sample
