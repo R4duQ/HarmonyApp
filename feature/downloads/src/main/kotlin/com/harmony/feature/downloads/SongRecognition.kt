@@ -2,18 +2,15 @@ package com.harmony.feature.downloads
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
-/** A song AudD recognised from the microphone. */
+/** A song Shazam recognised from the microphone. */
 data class RecognizedSong(
     val title: String,
     val artist: String,
     val album: String = "",
     val releaseDate: String = "",
     val label: String = "",
-    /** AudD's lis.tn page, which links the song on every streaming service. */
+    /** Shazam's page for the song, which links it on the streaming services. */
     val songLink: String = "",
     val coverUrl: String = "",
     val isrc: String = "",
@@ -27,86 +24,68 @@ data class RecognizedSong(
 sealed interface RecognitionOutcome {
     data class Match(val song: RecognizedSong) : RecognitionOutcome
     data object NoMatch : RecognitionOutcome
-    /** [needsToken]: the free requests are used up or the token is wrong; ask for one. */
-    data class Failed(val message: String, val needsToken: Boolean = false) : RecognitionOutcome
+    data class Failed(val message: String) : RecognitionOutcome
 }
 
 /**
- * The AudD music recognition API (https://docs.audd.io): one multipart POST
- * with a short recording, answered with the song or `result: null`.
+ * Shazam's song lookup, as the Shazam app itself calls it: one JSON POST with
+ * the fingerprint ([ShazamSignature]) of a few seconds of sound, answered
+ * with the song or an empty `matches` list. No account or key is involved.
  *
- * A token is optional. Without one AudD answers a small number of requests a
- * day, which is enough to try the feature; past that it returns error 901
- * and Harmony asks for a token.
+ * This is not a public API. Shazam can change or block it at any time, and
+ * it answers 429 when one connection asks too often.
  */
-internal object AudDApi {
-    const val ENDPOINT = "https://api.audd.io/"
+internal object ShazamApi {
+    fun url(uuid1: String, uuid2: String): String =
+        "https://amp.shazam.com/discovery/v5/en/US/android/-/tag/$uuid1/$uuid2" +
+            "?sync=true&webv3=true&sampling=true&connected=&shazamapiversion=v3&sharehub=true" +
+            "&hubv5minorversion=v5.1&hidelb=true&video=v3"
 
-    /** Extra catalogues to attach: they carry the cover art and the ISRC. */
-    private const val RETURN = "deezer,apple_music,spotify"
+    fun body(signature: ShazamSignature, timestampMs: Long, timezone: String): String = JSONObject()
+        .put("timezone", timezone)
+        .put("signature", JSONObject().put("uri", signature.dataUri()).put("samplems", signature.durationMs))
+        .put("timestamp", timestampMs)
+        .put("context", JSONObject())
+        .put("geolocation", JSONObject())
+        .toString()
 
-    fun multipartBody(boundary: String, token: String?, wav: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream(wav.size + 1024)
-        fun field(name: String, value: String) {
-            out.write("--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n".toByteArray())
+    fun parse(httpCode: Int, body: String, now: Long): RecognitionOutcome {
+        if (httpCode == 429) {
+            return RecognitionOutcome.Failed("Shazam is getting too many requests from this connection. Wait a minute and try again.")
         }
-        token?.trim()?.takeIf(String::isNotEmpty)?.let { field("api_token", it) }
-        field("return", RETURN)
-        out.write(
-            ("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"harmony-listen.wav\"\r\n" +
-                "Content-Type: audio/wav\r\n\r\n").toByteArray(),
-        )
-        out.write(wav)
-        out.write("\r\n--$boundary--\r\n".toByteArray())
-        return out.toByteArray()
-    }
-
-    fun parse(body: String, now: Long): RecognitionOutcome {
+        if (httpCode !in 200..299) {
+            return RecognitionOutcome.Failed("Shazam didn't answer (HTTP $httpCode). Try again in a moment.")
+        }
         val root = runCatching { JSONObject(body) }.getOrNull()
-            ?: return RecognitionOutcome.Failed("The recognition service sent an unreadable answer. Try again.")
-        if (root.optString("status") != "success") {
-            val error = root.optJSONObject("error")
-            val code = error?.optInt("error_code") ?: 0
-            return when (code) {
-                900 -> RecognitionOutcome.Failed("The AudD token isn't valid. Check it and paste it again.", needsToken = true)
-                901 -> RecognitionOutcome.Failed("The free recognitions for today are used up. Add your own AudD token to keep going.", needsToken = true)
-                902 -> RecognitionOutcome.Failed("Your AudD token has no recognitions left. Top it up on audd.io or use another token.", needsToken = true)
-                // Fingerprinting found nothing usable: silence, noise or speech.
-                300 -> RecognitionOutcome.NoMatch
-                else -> RecognitionOutcome.Failed(
-                    error?.optString("error_message")?.takeIf(String::isNotBlank)
-                        ?.let { "Recognition failed: $it" }
-                        ?: "Recognition failed. Try again.",
-                )
-            }
-        }
-        val result = root.optJSONObject("result") ?: return RecognitionOutcome.NoMatch
-        val title = result.optString("title").trim()
-        val artist = result.optString("artist").trim()
+            ?: return RecognitionOutcome.Failed("Shazam sent an unreadable answer. Try again.")
+        val track = root.optJSONObject("track")
+        if ((root.optJSONArray("matches")?.length() ?: 0) == 0 || track == null) return RecognitionOutcome.NoMatch
+        val title = track.optString("title").trim()
+        val artist = track.optString("subtitle").trim()
         if (title.isEmpty() && artist.isEmpty()) return RecognitionOutcome.NoMatch
 
-        val deezer = result.optJSONObject("deezer")
-        val apple = result.optJSONObject("apple_music")
-        val spotify = result.optJSONObject("spotify")
-        val cover = deezer?.optJSONObject("album")?.optString("cover_xl")?.takeIf(String::isNotBlank)
-            ?: apple?.optJSONObject("artwork")?.optString("url")?.takeIf(String::isNotBlank)
-                ?.replace("{w}", "1000")?.replace("{h}", "1000")
-            ?: spotify?.optJSONObject("album")?.optJSONArray("images")?.optJSONObject(0)?.optString("url")
-            ?: ""
-        val isrc = deezer?.optString("isrc")?.takeIf(String::isNotBlank)
-            ?: apple?.optString("isrc")?.takeIf(String::isNotBlank)
-            ?: spotify?.optJSONObject("external_ids")?.optString("isrc")
-            ?: ""
+        // The song section lists Album, Label and Released as title/text pairs.
+        val details = HashMap<String, String>()
+        val sections = track.optJSONArray("sections")
+        for (i in 0 until (sections?.length() ?: 0)) {
+            val metadata = sections?.optJSONObject(i)?.optJSONArray("metadata") ?: continue
+            for (j in 0 until metadata.length()) {
+                val entry = metadata.optJSONObject(j) ?: continue
+                val text = entry.optString("text").trim()
+                if (text.isNotEmpty()) details.putIfAbsent(entry.optString("title"), text)
+            }
+        }
+        val images = track.optJSONObject("images")
         return RecognitionOutcome.Match(
             RecognizedSong(
                 title = title,
                 artist = artist,
-                album = result.optString("album").trim(),
-                releaseDate = result.optString("release_date").trim(),
-                label = result.optString("label").trim(),
-                songLink = result.optString("song_link").trim(),
-                coverUrl = cover,
-                isrc = isrc.trim(),
+                album = details["Album"].orEmpty(),
+                releaseDate = details["Released"].orEmpty(),
+                label = details["Label"].orEmpty(),
+                songLink = track.optString("url").ifBlank { track.optJSONObject("share")?.optString("href").orEmpty() }.trim(),
+                coverUrl = (images?.optString("coverarthq")?.takeIf(String::isNotBlank) ?: images?.optString("coverart")).orEmpty().trim(),
+                isrc = track.optString("isrc").trim(),
                 recognizedAt = now,
             ),
         )
@@ -115,15 +94,7 @@ internal object AudDApi {
 
 /** 16-bit mono PCM helpers for the microphone recording. */
 internal object Pcm {
-    /**
-     * Halves the sample rate by averaging each pair of samples. Averaging is
-     * a crude low-pass, enough to keep the fold-over out of the band a
-     * fingerprint uses, and it halves the upload.
-     */
-    fun decimateBy2(samples: ShortArray): ShortArray =
-        ShortArray(samples.size / 2) { i -> ((samples[2 * i].toInt() + samples[2 * i + 1].toInt()) / 2).toShort() }
-
-    /** Loudness of a block, 0..1, for the listening animation. */
+    /** Loudness of the first [count] samples, 0..1. */
     fun level(samples: ShortArray, count: Int = samples.size): Float {
         if (count <= 0) return 0f
         var sum = 0.0
@@ -131,17 +102,37 @@ internal object Pcm {
         return kotlin.math.sqrt(sum / count).toFloat().coerceIn(0f, 1f)
     }
 
-    /** A canonical RIFF/WAVE file around [samples]. */
-    fun wav(samples: ShortArray, sampleRate: Int): ByteArray {
-        val dataBytes = samples.size * 2
-        val buffer = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN)
-        buffer.put("RIFF".toByteArray()).putInt(36 + dataBytes).put("WAVE".toByteArray())
-        buffer.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1)
-            .putInt(sampleRate).putInt(sampleRate * 2).putShort(2).putShort(16)
-        buffer.put("data".toByteArray()).putInt(dataBytes)
-        samples.forEach { buffer.putShort(it) }
-        return buffer.array()
+    /**
+     * Converts the first [count] samples from [from] Hz to [to] Hz with a
+     * windowed-sinc low-pass, so nothing above the new Nyquist folds back
+     * into the bands the fingerprint uses. Only needed on phones that can't
+     * record at 16 kHz directly.
+     */
+    fun resample(samples: ShortArray, count: Int, from: Int, to: Int): ShortArray {
+        if (from == to) return samples.copyOf(count)
+        val ratio = from.toDouble() / to
+        val cutoff = 0.45 * minOf(1.0, to.toDouble() / from) // cycles per input sample
+        val out = ShortArray((count / ratio).toInt())
+        for (i in out.indices) {
+            val centre = i * ratio
+            val first = maxOf(0, kotlin.math.ceil(centre - TAPS).toInt())
+            val last = minOf(count - 1, kotlin.math.floor(centre + TAPS).toInt())
+            var acc = 0.0
+            var weight = 0.0
+            for (k in first..last) {
+                val x = k - centre
+                val sinc = if (x == 0.0) 1.0 else kotlin.math.sin(2 * kotlin.math.PI * cutoff * x) / (2 * kotlin.math.PI * cutoff * x)
+                val window = 0.5 + 0.5 * kotlin.math.cos(kotlin.math.PI * x / (TAPS + 1))
+                val w = sinc * window
+                acc += samples[k] * w
+                weight += w
+            }
+            out[i] = (if (weight == 0.0) 0.0 else acc / weight).toInt().coerceIn(-32768, 32767).toShort()
+        }
+        return out
     }
+
+    private const val TAPS = 24
 }
 
 /** The last recognitions, newest first, as stored in preferences. */

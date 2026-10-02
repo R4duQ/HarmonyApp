@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -35,21 +34,15 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,18 +79,16 @@ class RecognizeActions(
     val onOpenLink: (RecognizedSong) -> Unit = {},
     val onShow: (RecognizedSong) -> Unit = {},
     val onForget: (RecognizedSong) -> Unit = {},
-    val onSaveToken: (String) -> Unit = {},
 )
 
 internal object RecognizeTags {
     const val LISTEN = "recognize_listen"
     const val RESULT = "recognize_result"
-    const val TOKEN = "recognize_token"
 }
 
 /**
  * "What's this song?": listens through the microphone, names the song with
- * AudD, and hands it to SpotiFLAC or the library in one tap.
+ * Shazam, and hands it to SpotiFLAC or the library in one tap.
  */
 @Composable
 fun RecognizeScreen(
@@ -126,7 +117,6 @@ fun RecognizeScreen(
             },
             onShow = viewModel::show,
             onForget = viewModel::forget,
-            onSaveToken = viewModel::setToken,
         )
     }
     RecognizeContent(state, bluePalette(), actions)
@@ -134,7 +124,6 @@ fun RecognizeScreen(
 
 @Composable
 fun RecognizeContent(state: RecognizeUiState, palette: EditorialPalette, actions: RecognizeActions) {
-    var editingToken by rememberSaveable { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxSize()
@@ -157,10 +146,6 @@ fun RecognizeContent(state: RecognizeUiState, palette: EditorialPalette, actions
         ListenButton(state.phase, palette, actions.onListen)
         Spacer(Modifier.height(22.dp))
         StatusText(state.phase, palette)
-        val failed = state.phase as? ListenPhase.Failed
-        if (failed?.needsToken == true) {
-            TextButton(onClick = { editingToken = true }) { Text("Add AudD token", color = palette.ink) }
-        }
 
         (state.phase as? ListenPhase.Found)?.let { found ->
             Spacer(Modifier.height(20.dp))
@@ -178,16 +163,6 @@ fun RecognizeContent(state: RecognizeUiState, palette: EditorialPalette, actions
         }
 
         Spacer(Modifier.height(24.dp))
-        TokenRow(state.token, palette, onEdit = { editingToken = true })
-        Spacer(Modifier.height(24.dp))
-    }
-
-    if (editingToken) {
-        TokenDialog(
-            current = state.token,
-            onDismiss = { editingToken = false },
-            onSave = { actions.onSaveToken(it); editingToken = false },
-        )
     }
 }
 
@@ -245,9 +220,9 @@ private fun ListenButton(phase: ListenPhase, palette: EditorialPalette, onListen
 @Composable
 private fun StatusText(phase: ListenPhase, palette: EditorialPalette) {
     val (title, detail) = when (phase) {
-        ListenPhase.Idle -> "Tap to recognize" to "Hold your phone near the music. Harmony listens for 10 seconds."
+        ListenPhase.Idle -> "Tap to recognize" to "Hold your phone near the music. Harmony listens for up to 12 seconds."
         is ListenPhase.Listening -> "Listening…" to "Keep the music playing. Tap to stop."
-        ListenPhase.Identifying -> "Identifying…" to "Matching the recording with AudD."
+        ListenPhase.Identifying -> "Identifying…" to "Matching the sound with Shazam."
         is ListenPhase.Found -> "Found it" to ""
         ListenPhase.NoMatch -> "No match" to "Try again closer to the speaker, or when the song has vocals or a clear melody."
         is ListenPhase.Failed -> "Couldn't recognize" to phase.message
@@ -322,49 +297,6 @@ private fun HistoryRow(song: RecognizedSong, palette: EditorialPalette, actions:
             Icon(Icons.Rounded.Download, contentDescription = "Download ${song.title}", tint = palette.ink)
         }
     }
-}
-
-@Composable
-private fun TokenRow(token: String, palette: EditorialPalette, onEdit: () -> Unit) {
-    GlassCard(palette = palette, modifier = Modifier.padding(horizontal = 20.dp).testTag(RecognizeTags.TOKEN), onClick = onEdit) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Key, null, tint = palette.ink, modifier = Modifier.size(20.dp))
-            Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                Text("AudD token", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = palette.ink)
-                Text(
-                    if (token.isBlank()) "Not set: using AudD's few free recognitions a day."
-                    else "Saved (…${token.takeLast(4)}). Recognitions count against your AudD account.",
-                    fontSize = 12.sp, lineHeight = 16.sp, color = palette.muted,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(if (token.isBlank()) "Add" else "Change", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = palette.ink)
-        }
-    }
-}
-
-@Composable
-private fun TokenDialog(current: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var value by rememberSaveable { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("AudD token") },
-        text = {
-            Column {
-                Text(
-                    "Create a free account at audd.io, copy the API token from your dashboard and paste it here. " +
-                        "Leave it empty to use AudD's few free recognitions a day.",
-                    fontSize = 13.sp, lineHeight = 18.sp,
-                )
-                OutlinedTextField(
-                    value = value, onValueChange = { value = it }, singleLine = true,
-                    label = { Text("API token") }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(value) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 /** "just now", "5 min ago", "3 h ago", "2 d ago". */
