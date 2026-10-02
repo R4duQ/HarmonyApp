@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **115**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 114), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **116**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 115), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
