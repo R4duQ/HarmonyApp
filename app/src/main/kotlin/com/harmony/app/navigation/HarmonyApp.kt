@@ -189,7 +189,7 @@ fun HarmonyApp(
         currentRoute == Routes.HOME -> amberPalette()
         currentRoute == Routes.DOWNLOADS -> amberPalette()
         currentRoute == Routes.SETTINGS -> stonePalette()
-        currentRoute == Routes.RECOGNIZE -> bluePalette()
+        currentRoute == Routes.RECOGNIZE -> lavenderPalette()
         // Any destination added later without a palette still gets sane
         // chrome instead of an arbitrary section's colors.
         else -> EditorialPalette(

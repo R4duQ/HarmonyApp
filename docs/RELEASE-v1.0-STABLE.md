@@ -25,7 +25,9 @@ certificate.
   - Deezer and Apple Music are used with timeouts, retries and fallback. Offline, you
     can still build a playlist from your library.
 - **Recognize** names the song playing near you with Shazam, including songs heard live,
-  across a room or through a crowd. Tap the button on Home or in Downloads. Harmony
+  across a room or through a crowd. Tap the button on Home or in Downloads: a glowing
+  orb on a moving aurora listens, its ring of bars follows the sound, and the five
+  attempts light up as it goes; a match takes over the stage with its cover. Harmony
   listens for up to 20 seconds and asks Shazam after 4, 8, 12, 16 and 20 seconds, each time
   with the latest 12 seconds, so talking or applause at the start drops out; it stops at
   the first match. It records without the phone's voice noise filter (which treats music
