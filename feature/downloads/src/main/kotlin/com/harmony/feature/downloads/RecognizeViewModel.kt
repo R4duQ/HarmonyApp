@@ -15,6 +15,7 @@ import javax.inject.Inject
 /** Where the Recognize screen is in one listen. */
 sealed interface ListenPhase {
     data object Idle : ListenPhase
+    /** [level]: a loudness meter, 0 (silence) to 1 (loud). */
     data class Listening(val progress: Float = 0f, val level: Float = 0f) : ListenPhase
     data object Identifying : ListenPhase
     data class Found(val song: RecognizedSong) : ListenPhase

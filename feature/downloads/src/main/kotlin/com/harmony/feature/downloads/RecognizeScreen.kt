@@ -177,7 +177,7 @@ private fun ListenButton(phase: ListenPhase, palette: EditorialPalette, onListen
         label = "listen-ripple",
     )
     // The button breathes with what the microphone hears.
-    val level by animateFloatAsState(((listening?.level ?: 0f) * 6f).coerceIn(0f, 1f), tween(120), label = "listen-level")
+    val level by animateFloatAsState((listening?.level ?: 0f).coerceIn(0f, 1f), tween(120), label = "listen-level")
     val progress = listening?.progress ?: if (phase == ListenPhase.Identifying) 1f else 0f
 
     Box(Modifier.size(250.dp), contentAlignment = Alignment.Center) {
@@ -220,7 +220,7 @@ private fun ListenButton(phase: ListenPhase, palette: EditorialPalette, onListen
 @Composable
 private fun StatusText(phase: ListenPhase, palette: EditorialPalette) {
     val (title, detail) = when (phase) {
-        ListenPhase.Idle -> "Tap to recognize" to "Hold your phone near the music. Harmony listens for up to 12 seconds."
+        ListenPhase.Idle -> "Tap to recognize" to "Hold your phone near the music. Harmony listens for up to 20 seconds."
         is ListenPhase.Listening -> "Listening…" to "Keep the music playing. Tap to stop."
         ListenPhase.Identifying -> "Identifying…" to "Matching the sound with Shazam."
         is ListenPhase.Found -> "Found it" to ""

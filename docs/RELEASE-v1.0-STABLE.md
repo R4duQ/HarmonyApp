@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **114**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 113), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **115**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 114), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -24,12 +24,16 @@ certificate.
     Select all and Select none. Unticked songs aren't downloaded.
   - Deezer and Apple Music are used with timeouts, retries and fallback. Offline, you
     can still build a playlist from your library.
-- **Recognize** names the song playing near you with Shazam. Tap the button on Home or
-  in Downloads and Harmony listens for up to 12 seconds; it asks Shazam after 4, 8 and 12
-  seconds and stops at the first match. No account or key is needed. Download sends the
-  song straight to a SpotiFLAC search, My library looks it up in your files, and the
-  last 30 recognitions are kept. Only a fingerprint of the sound is sent, never the
-  recording. This uses Shazam's private app interface, so Shazam can limit or change it.
+- **Recognize** names the song playing near you with Shazam, including songs heard live,
+  across a room or through a crowd. Tap the button on Home or in Downloads. Harmony
+  listens for up to 20 seconds and asks Shazam after 4, 8, 12, 16 and 20 seconds, each time
+  with the latest 12 seconds, so talking or applause at the start drops out; it stops at
+  the first match. It records without the phone's voice noise filter (which treats music
+  as noise), brings quiet recordings up to a normal level, and keeps going if one attempt
+  loses the connection. No account or key is needed. Download sends the song straight to
+  a SpotiFLAC search, My library looks it up in your files, and the last 30 recognitions
+  are kept. Only a fingerprint of the sound is sent, never the recording. This uses
+  Shazam's private app interface, so Shazam can limit or change it.
 - **SpotiFLAC search** asks SpotiFLAC's own providers first, including Tidal. It then
   tries several phrasings on Deezer, then Apple Music, so titles with hyphens or
   missing diacritics are found.
