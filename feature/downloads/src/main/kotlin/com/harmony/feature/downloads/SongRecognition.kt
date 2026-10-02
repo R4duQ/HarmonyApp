@@ -24,7 +24,8 @@ data class RecognizedSong(
 sealed interface RecognitionOutcome {
     data class Match(val song: RecognizedSong) : RecognitionOutcome
     data object NoMatch : RecognitionOutcome
-    data class Failed(val message: String) : RecognitionOutcome
+    /** [retryable]: a network or server hiccup; a later attempt in the same listen may work. */
+    data class Failed(val message: String, val retryable: Boolean = false) : RecognitionOutcome
 }
 
 /**
@@ -54,10 +55,10 @@ internal object ShazamApi {
             return RecognitionOutcome.Failed("Shazam is getting too many requests from this connection. Wait a minute and try again.")
         }
         if (httpCode !in 200..299) {
-            return RecognitionOutcome.Failed("Shazam didn't answer (HTTP $httpCode). Try again in a moment.")
+            return RecognitionOutcome.Failed("Shazam didn't answer (HTTP $httpCode). Try again in a moment.", retryable = true)
         }
         val root = runCatching { JSONObject(body) }.getOrNull()
-            ?: return RecognitionOutcome.Failed("Shazam sent an unreadable answer. Try again.")
+            ?: return RecognitionOutcome.Failed("Shazam sent an unreadable answer. Try again.", retryable = true)
         val track = root.optJSONObject("track")
         if ((root.optJSONArray("matches")?.length() ?: 0) == 0 || track == null) return RecognitionOutcome.NoMatch
         val title = track.optString("title").trim()
@@ -103,6 +104,32 @@ internal object Pcm {
     }
 
     /**
+     * Brings a recording to the level of an ordinary close-up one: removes
+     * the DC offset and amplifies so the loudest 0.1 % of samples reach
+     * half of full scale, at most [MAX_GAIN] times.
+     *
+     * Harmony records without the phone's automatic gain, so a song across
+     * the room arrives far quieter than in the Shazam app. Gain doesn't move
+     * the fingerprint's peaks, but it keeps their loudness values in the
+     * usual range instead of tens of decibels below it.
+     */
+    fun normalize(samples: ShortArray): ShortArray {
+        if (samples.isEmpty()) return samples
+        val mean = samples.sumOf { it.toLong() }.toDouble() / samples.size
+        val magnitudes = IntArray(samples.size) { kotlin.math.abs(samples[it] - mean).toInt() }.apply { sort() }
+        val loud = magnitudes[((magnitudes.size - 1) * 0.999).toInt()].coerceAtLeast(1)
+        val gain = (TARGET_PEAK / loud).coerceIn(1.0, MAX_GAIN)
+        return ShortArray(samples.size) { ((samples[it] - mean) * gain).toInt().coerceIn(-32768, 32767).toShort() }
+    }
+
+    /** A loudness (0..1 RMS) as a meter position: -65 dBFS and below is 0, -20 dBFS and above is 1. */
+    fun meter(level: Float): Float {
+        if (level <= 0f) return 0f
+        val db = 20 * kotlin.math.log10(level.toDouble())
+        return ((db + 65) / 45).toFloat().coerceIn(0f, 1f)
+    }
+
+    /**
      * Converts the first [count] samples from [from] Hz to [to] Hz with a
      * windowed-sinc low-pass, so nothing above the new Nyquist folds back
      * into the bands the fingerprint uses. Only needed on phones that can't
@@ -133,6 +160,8 @@ internal object Pcm {
     }
 
     private const val TAPS = 24
+    private const val TARGET_PEAK = 16_384.0
+    const val MAX_GAIN = 64.0
 }
 
 /** The last recognitions, newest first, as stored in preferences. */

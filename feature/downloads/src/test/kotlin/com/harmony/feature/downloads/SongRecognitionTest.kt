@@ -2,6 +2,7 @@ package com.harmony.feature.downloads
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.json.JSONObject
 import org.junit.Test
@@ -54,10 +55,55 @@ class SongRecognitionTest {
         assertEquals(RecognitionOutcome.NoMatch, ShazamApi.parse(200, """{"matches":[{"id":"1"}]}""", 0))
     }
 
-    @Test fun `rate limits, server errors and garbage are failures`() {
-        assertTrue((ShazamApi.parse(429, "", 0) as RecognitionOutcome.Failed).message.contains("too many requests"))
-        assertTrue((ShazamApi.parse(503, "oops", 0) as RecognitionOutcome.Failed).message.contains("HTTP 503"))
-        assertTrue(ShazamApi.parse(200, "<html>502</html>", 0) is RecognitionOutcome.Failed)
+    @Test fun `rate limits stop the listen, server hiccups let it try again`() {
+        val limited = ShazamApi.parse(429, "", 0) as RecognitionOutcome.Failed
+        assertTrue(limited.message.contains("too many requests"))
+        assertFalse(limited.retryable)
+        val down = ShazamApi.parse(503, "oops", 0) as RecognitionOutcome.Failed
+        assertTrue(down.message.contains("HTTP 503"))
+        assertTrue(down.retryable)
+        assertTrue((ShazamApi.parse(200, "<html>502</html>", 0) as RecognitionOutcome.Failed).retryable)
+    }
+
+    @Test fun `each attempt fingerprints the latest 12 seconds`() {
+        assertEquals(0, RecognitionWindow.start(filled = 8 * 16_000, rate = 16_000, windowSeconds = 12))
+        assertEquals(0, RecognitionWindow.start(filled = 12 * 16_000, rate = 16_000, windowSeconds = 12))
+        assertEquals(8 * 16_000, RecognitionWindow.start(filled = 20 * 16_000, rate = 16_000, windowSeconds = 12))
+        assertEquals(4 * 44_100, RecognitionWindow.start(filled = 16 * 44_100, rate = 44_100, windowSeconds = 12))
+    }
+
+    @Test fun `a quiet recording is brought up to an ordinary level without moving its peaks`() {
+        val rate = ShazamSignature.SAMPLE_RATE
+        val loud = ShortArray(rate * 6) { i ->
+            val inBurst = (i % rate) < rate / 10
+            if (inBurst) (12_000 * sin(2 * PI * 1000 * i / rate)).toInt().toShort() else 0
+        }
+        val quiet = ShortArray(loud.size) { (loud[it] / 40 + 3).toShort() }      // -32 dB with a DC offset
+        val raised = Pcm.normalize(quiet)
+        assertEquals(16_384.0, raised.maxOf { kotlin.math.abs(it.toInt()) }.toDouble(), 600.0)
+        assertEquals(0.0, raised.average(), 2.0)
+        fun peaks(s: ShazamSignature) = s.bands.flatten().associate { (it.fftPass to it.frequencyBin / 64) to it.magnitude }
+        val reference = peaks(ShazamSignature.of(loud))
+        val before = peaks(ShazamSignature.of(quiet))
+        val after = peaks(ShazamSignature.of(raised))
+        // Gain moves none of the song's peaks (rounding the quiet copy adds faint harmonics of its own)...
+        assertTrue(before.keys.containsAll(reference.keys))
+        assertTrue(after.keys.containsAll(reference.keys))
+        // ...but brings their loudness back to where the full-volume recording has it.
+        val gap = { p: Map<Pair<Int, Int>, Int> -> reference.keys.map { reference.getValue(it) - p.getValue(it) }.average() }
+        assertTrue("quiet ${gap(before)}", gap(before) > 9_000)
+        assertEquals(0.0, gap(after), 1_000.0)
+        // Hiss alone is raised at most 64 times, not to full volume.
+        val hiss = ShortArray(rate) { if (it % 2 == 0) 2 else -2 }
+        assertTrue(Pcm.normalize(hiss).maxOf { kotlin.math.abs(it.toInt()) } <= 2 * 64)
+        assertEquals(0, Pcm.normalize(ShortArray(0)).size)
+    }
+
+    @Test fun `the meter reads quiet rooms as well as loud ones`() {
+        assertEquals(0f, Pcm.meter(0f), 0f)
+        assertEquals(0f, Pcm.meter(0.0003f), 0.01f)          // about -70 dBFS
+        assertEquals(0.44f, Pcm.meter(0.0056f), 0.02f)       // about -45 dBFS
+        assertEquals(1f, Pcm.meter(0.2f), 0f)
     }
 
     @Test fun `the request carries the signature, its length and the time zone`() {
