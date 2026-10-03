@@ -10,6 +10,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -44,7 +45,7 @@ import com.harmony.core.model.Song
  */
 @OptIn(UnstableApi::class)
 class HarmonyPlayer(
-    context: Context,
+    private val context: Context,
     private val replayGainProcessor: ReplayGainAudioProcessor,
     private val equalizerProcessor: EqualizerAudioProcessor,
     private val levelMeterProcessor: LevelMeterAudioProcessor,
@@ -63,37 +64,14 @@ class HarmonyPlayer(
     private var retriesForCurrentItem = 0
     private var failedItemsInARow = 0
 
+    /** The EQ as last applied, so a crossfade's second player can be given the same. */
+    private var eqSettings = com.harmony.core.model.EqSettings()
+
     init {
-        val renderersFactory = object : DefaultRenderersFactory(context) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink {
-                return DefaultAudioSink.Builder(context)
-                    // Float output must be OFF: Media3's DefaultAudioSink
-                    // BYPASSES the custom audio-processor chain entirely when
-                    // float output is enabled — which silently disabled both
-                    // ReplayGain and the EQ from day one (the original comment
-                    // here claimed the opposite; it was wrong). With float
-                    // output off, processors receive 16-bit PCM and actually
-                    // run; both processors convert to float internally for
-                    // their math, so quality is preserved where it matters.
-                    .setEnableFloatOutput(false)
-                    // Meter LAST: it should report what actually reaches the
-                    // speaker, so it has to sit after ReplayGain's scaling and
-                    // the EQ's filtering rather than measuring the raw decode.
-                    .setAudioProcessors(
-                        arrayOf(replayGainProcessor, equalizerProcessor, levelMeterProcessor),
-                    )
-                    .build()
-            }
-        }.apply {
-            // Prefer Media3's own decoders (FLAC, Opus, etc. via extensions if
-            // present) before falling back to MediaCodec, for consistent
-            // gapless behaviour across OEM codec implementations.
-            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-        }
+        // Meter LAST: it should report what actually reaches the speaker, so
+        // it has to sit after ReplayGain's scaling and the EQ's filtering
+        // rather than measuring the raw decode.
+        val renderersFactory = renderersFactory(arrayOf(replayGainProcessor, equalizerProcessor, levelMeterProcessor))
 
         exoPlayer = ExoPlayer.Builder(context, renderersFactory)
             .setAudioAttributes(
@@ -237,8 +215,12 @@ class HarmonyPlayer(
     }
 
     private fun applyReplayGainForCurrentItem() {
-        val song = exoPlayer.currentMediaItem?.mediaId?.let(songsById::get)
-        val extras = exoPlayer.currentMediaItem?.mediaMetadata?.extras
+        replayGainProcessor.setGainDb(replayGainDbFor(exoPlayer.currentMediaItem))
+    }
+
+    private fun replayGainDbFor(item: MediaItem?): Float {
+        val song = item?.mediaId?.let(songsById::get)
+        val extras = item?.mediaMetadata?.extras
         val track = ReplayGainMetadata.gain(extras, ReplayGainMetadata.TRACK) ?: song?.replayGainTrackDb
         val album = ReplayGainMetadata.gain(extras, ReplayGainMetadata.ALBUM) ?: song?.replayGainAlbumDb
         val gainDb = when (replayGainMode) {
@@ -246,11 +228,64 @@ class HarmonyPlayer(
             ReplayGainMode.TRACK -> track
             ReplayGainMode.ALBUM -> album ?: track
         }
-        replayGainProcessor.setGainDb(gainDb ?: 0f)
+        return gainDb ?: 0f
     }
 
-    fun setEqualizer(settings: com.harmony.core.model.EqSettings) =
+    fun setEqualizer(settings: com.harmony.core.model.EqSettings) {
+        eqSettings = settings
         equalizerProcessor.apply(settings)
+    }
+
+    // -- Crossfade -----------------------------------------------------------
+
+    /**
+     * The second player a crossfade overlaps with this one, for [item].
+     *
+     * It gets its own ReplayGain (at [item]'s gain) and EQ (at the current
+     * settings) so it sounds exactly as this player will once it takes the
+     * song over. A plain player skipped both, and the level or tone jumped at
+     * the handover. No level meter: the visualiser follows this player.
+     */
+    fun createCrossfadePlayer(item: MediaItem): ExoPlayer {
+        val replayGain = ReplayGainAudioProcessor().apply { setGainDb(replayGainDbFor(item)) }
+        val equalizer = EqualizerAudioProcessor().also { it.apply(eqSettings) }
+        return ExoPlayer.Builder(context, renderersFactory(arrayOf(replayGain, equalizer)))
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                /* handleAudioFocus = */ false,
+            )
+            .build()
+    }
+
+    private fun renderersFactory(processors: Array<AudioProcessor>): DefaultRenderersFactory =
+        object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    // Float output must be OFF: Media3's DefaultAudioSink
+                    // BYPASSES the custom audio-processor chain entirely when
+                    // float output is enabled — which silently disabled both
+                    // ReplayGain and the EQ from day one (the original comment
+                    // here claimed the opposite; it was wrong). With float
+                    // output off, processors receive 16-bit PCM and actually
+                    // run; both processors convert to float internally for
+                    // their math, so quality is preserved where it matters.
+                    .setEnableFloatOutput(false)
+                    .setAudioProcessors(processors)
+                    .build()
+            }
+        }.apply {
+            // Prefer Media3's own decoders (FLAC, Opus, etc. via extensions if
+            // present) before falling back to MediaCodec, for consistent
+            // gapless behaviour across OEM codec implementations.
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        }
 
     fun release() = exoPlayer.release()
 
