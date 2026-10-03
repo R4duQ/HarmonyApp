@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -249,6 +250,8 @@ fun EqualizerScreen(
      */
     onBack: (() -> Unit)? = null,
     viewModel: EqualizerViewModel = hiltViewModel(),
+    /** The Auto tab; a slot so previews can show it without the microphone and player behind it. */
+    autoTab: @Composable (EditorialPalette) -> Unit = { AutoTab(it) },
 ) {
     val eq by viewModel.eq.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableIntStateOf(-1) }
@@ -308,17 +311,21 @@ fun EqualizerScreen(
         }
 
         EditorialTabs(
-            tabs = listOf(EditorialTab("Simple"), EditorialTab("Advanced"), EditorialTab("Winamp")),
+            tabs = listOf(EditorialTab("Simple"), EditorialTab("Advanced"), EditorialTab("Winamp"), EditorialTab("Auto")),
             selected = tab,
             onSelect = { selectedTab = it },
             palette = palette,
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
+            // Four tabs don't fit a narrow phone at this size: let them scroll rather than squeeze.
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp, vertical = 12.dp),
         )
 
         when (tab) {
             0 -> SimpleTab(viewModel, palette, onCustom = { selectedTab = 1 })
             1 -> AdvancedTab(viewModel, palette)
             WINAMP_TAB -> WinampTab(eq, viewModel, palette)
+            AUTO_TAB -> autoTab(palette)
         }
     }
 }
@@ -775,6 +782,7 @@ private fun AdvancedTab(viewModel: EqualizerViewModel, palette: EditorialPalette
 // =====================================================================
 
 private const val WINAMP_TAB = 2
+private const val AUTO_TAB = 3
 
 @Composable
 private fun WinampTab(eq: EqSettings, viewModel: EqualizerViewModel, palette: EditorialPalette) {

@@ -7,6 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.EqStyle
 import com.harmony.core.model.WinampEqDesign
+import com.harmony.domain.playback.AutoEqLive
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.cos
@@ -48,6 +49,12 @@ import kotlin.math.tanh
  * equalizer (see WinampEqDesign), with its own preamp instead of the auto
  * pre-amp; smoothing and the soft limiter apply to both.
  *
+ * The automatic equalizer ([AutoEqLayer]) runs after either, reading its
+ * inputs from [AutoEqLive]; the pre-amp makes room for its boosts too. The
+ * processor stays in the chain whenever the format suits it and passes
+ * audio through untouched while there is nothing to do, so switching the
+ * equalizer on mid-song takes effect at once instead of at the next seek.
+ *
  * Filter design: RBJ peaking EQ per band, low-shelf @100 Hz, high-shelf
  * @8 kHz. Supports 16-bit int and float PCM input (16-bit is the real path:
  * DefaultAudioSink bypasses custom processors entirely in float-output mode,
@@ -57,7 +64,10 @@ import kotlin.math.tanh
  * references — no locks, no allocation on the audio path.
  */
 @UnstableApi
-class EqualizerAudioProcessor : BaseAudioProcessor() {
+class EqualizerAudioProcessor(
+    /** The main player's equalizer reports the tone correction to the screen; a crossfade's doesn't. */
+    private val publishesAutoEq: Boolean = false,
+) : BaseAudioProcessor() {
 
     private class Coeffs(val b0: Float, val b1: Float, val b2: Float, val a1: Float, val a2: Float)
 
@@ -89,8 +99,24 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var winamp: WinampFilterBank? = null
 
+    /** The listener's own settings change the sound. */
     @Volatile
-    private var enabled = false
+    private var manualActive = false
+
+    /** The equalizer's master switch. */
+    @Volatile
+    private var eqOn = false
+
+    /** Audio thread only. Rebuilt when the format changes or the automatic part is switched back on. */
+    private var auto: AutoEqLayer? = null
+
+    private class TrackRequest(val id: String?)
+
+    @Volatile
+    private var trackRequest: TrackRequest? = null
+    private var trackHandled: TrackRequest? = null
+    private var currentTrack: String? = null
+    private var publishCountdown = 0
 
     /** Auto pre-amp target (linear); audio thread eases toward it. */
     @Volatile
@@ -121,8 +147,14 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     fun apply(settings: EqSettings) {
         if (settings == pendingSettings) return // skip redundant rebuild churn
         pendingSettings = settings
-        enabled = settings.enabled && !settings.isFlat()
+        eqOn = settings.enabled
+        manualActive = settings.enabled && !settings.isFlat()
         if (sampleRate > 0) rebuild()
+    }
+
+    /** The song now coming through, so the automatic tone correction starts over for it. */
+    fun setTrack(mediaId: String?) {
+        trackRequest = TrackRequest(mediaId)
     }
 
     private fun EqSettings.isFlat() = when (style) {
@@ -203,8 +235,8 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         targetPreamp = 10f.pow(preampDb / 20f)
     }
 
-    override fun isActive(): Boolean =
-        super.isActive() && enabled && (winamp != null || stages.isNotEmpty())
+    // Active whenever configured; see the class doc.
+    override fun isActive(): Boolean = super.isActive()
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val localStages = stages
@@ -227,12 +259,35 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
 
         val output = replaceOutputBuffer(remaining)
 
+        val request = trackRequest
+        if (request !== trackHandled) {
+            trackHandled = request
+            currentTrack = request?.id
+            auto?.startTrack(currentTrack)
+        }
+        val autoOn = eqOn && AutoEqLive.active
+        if (!autoOn) auto = null
+        val layer = if (!autoOn || channels <= 0) null else {
+            auto?.takeIf { it.sampleRate == sampleRate && it.channels == channels }
+                ?: AutoEqLayer(sampleRate, channels, ToneMemory.shared).also {
+                    it.startTrack(currentTrack)
+                    auto = it
+                }
+        }
+        layer?.apply {
+            toneEnabled = AutoEqLive.toneEnabled
+            roomDb = AutoEqLive.roomDb
+            noiseDb = AutoEqLive.noiseDb
+        }
+
         // Pass through untouched rather than risk an out-of-bounds read on
         // the audio thread. If a rebuild raced a format change the filter
         // state may be sized for a different channel layout, and an
         // ArrayIndexOutOfBoundsException here kills the whole process. A few
         // unequalised buffers during a format switch is the cheaper failure.
-        if (channels <= 0 || localStages.any { !it.fits(channels) } || (bank != null && bank.channels != channels)) {
+        if (channels <= 0 || !(manualActive || layer != null) ||
+            localStages.any { !it.fits(channels) } || (bank != null && bank.channels != channels)
+        ) {
             output.put(scratch)
             output.flip()
             return
@@ -240,7 +295,10 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
 
         var frameCh = 0
         var preamp = currentPreamp
-        val target = targetPreamp
+        val autoHeadroom = layer?.headroomDb ?: 0f
+        val target = if (autoHeadroom > 0f) targetPreamp * 10f.pow(-autoHeadroom / 20f) else targetPreamp
+        var mono = 0f
+        val lastCh = channels - 1
         // ~10 ms exponential ease at 48 kHz (per FRAME, so channel-coherent).
         val ease = PREAMP_EASE
 
@@ -251,8 +309,13 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
                     bank?.glide(ease)
                 }
                 var sample = scratch.float
+                if (layer != null) {
+                    mono += sample
+                    if (frameCh == lastCh) { layer.analyze(mono / channels); mono = 0f }
+                }
                 if (bank != null) sample = bank.process(sample, frameCh)
                 for (stage in localStages) sample = stage.process(sample, frameCh)
+                if (layer != null) sample = layer.process(sample, frameCh)
                 output.putFloat(softLimit(sample * preamp))
                 frameCh = (frameCh + 1) % channels
             }
@@ -263,8 +326,13 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
                     bank?.glide(ease)
                 }
                 var sample = scratch.short / 32768f
+                if (layer != null) {
+                    mono += sample
+                    if (frameCh == lastCh) { layer.analyze(mono / channels); mono = 0f }
+                }
                 if (bank != null) sample = bank.process(sample, frameCh)
                 for (stage in localStages) sample = stage.process(sample, frameCh)
+                if (layer != null) sample = layer.process(sample, frameCh)
                 output.putShort(
                     (softLimit(sample * preamp) * 32767f).roundToInt().toShort()
                 )
@@ -273,6 +341,13 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         }
         currentPreamp = preamp
         output.flip()
+        if (publishesAutoEq && layer != null) {
+            publishCountdown -= remaining / (channels * if (encoding == C.ENCODING_PCM_FLOAT) 4 else 2)
+            if (publishCountdown <= 0) {
+                publishCountdown = sampleRate / 2
+                AutoEqLive.publishTone(layer.toneDb, layer.heardSeconds)
+            }
+        }
     }
 
     /**

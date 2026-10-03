@@ -76,6 +76,21 @@ certificate.
   real response curve, and sliders that glow from green to red. Tap a slider to jump, drag it,
   double-tap it to centre. The Winamp settings are kept apart from the Simple/Advanced ones,
   and touching either side picks which equalizer plays.
+- **Automatic equalizer.** A fourth Equalizer tab, Auto, adjusts the sound on its own, in three
+  parts that can each be switched on alone, on top of your own Simple, Advanced or Winamp settings:
+  - *Song by song*: Harmony listens to each song as it plays and evens out its tone towards a
+    typical well-mastered record, at most a few dB (a little body for thin recordings, a little less
+    edge for harsh ones). It fades in over the first seconds, and a song played again starts with its
+    correction right away.
+  - *Speaker & room*: Measure plays about 8 seconds of pink noise through the speaker and listens with
+    the microphone, then takes out what the speaker and the room add or swallow. Each speaker keeps
+    its own measurement and is used again whenever it plays. Deep bass is never boosted, so a small
+    speaker isn't pushed into distortion.
+  - *Noise around you*: on headphones, the microphone listens to your surroundings while music plays
+    and lifts what the noise covers up (bass on a bus, the middle in a crowd), rising in about 2 s and
+    falling back in about 6 s. A notification shows while this is on; nothing is recorded or sent.
+  A live curve shows what each part is doing. The equalizer also now switches on and off at once,
+  instead of at the next seek or song.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the

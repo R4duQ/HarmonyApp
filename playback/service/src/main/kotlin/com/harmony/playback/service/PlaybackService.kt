@@ -57,6 +57,7 @@ class PlaybackService : MediaLibraryService() {
     @Inject lateinit var settingsRepository: com.harmony.core.datastore.SettingsRepository
     @Inject lateinit var albumJourneys: com.harmony.domain.library.repository.AlbumJourneyRepository
     @Inject lateinit var audioOutput: com.harmony.playback.service.player.AudioOutputMonitor
+    @Inject lateinit var autoEq: com.harmony.playback.service.autoeq.AutoEqCoordinator
 
     // Lazy: only touched when the app is swiped away, and the service must
     // not be the thing that decides when the in-app connection gets built.
@@ -97,6 +98,10 @@ class PlaybackService : MediaLibraryService() {
         albumListening = AlbumListeningMonitor(harmonyPlayer.exoPlayer, albumJourneys).also { it.start() }
         sleepTimer.attach(harmonyPlayer.exoPlayer, serviceScope)
         callback.attach(harmonyPlayer, crossfade!!, sleepTimer)
+        autoEq.start(serviceScope)
+        harmonyPlayer.exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) = autoEq.setPlaying(isPlaying)
+        })
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
@@ -264,6 +269,7 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         albumListening?.stop()
+        autoEq.stop()
         crossfade?.stop()
         sleepTimer.detach()
         callback.close()

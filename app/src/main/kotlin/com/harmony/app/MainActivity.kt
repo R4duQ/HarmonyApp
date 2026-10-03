@@ -10,7 +10,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.harmony.app.navigation.HarmonyApp
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.core.datastore.ThemeMode
@@ -19,8 +22,12 @@ import com.harmony.core.ui.theme.HarmonyTheme
 import com.harmony.feature.downloads.SpotiFlacDownloadEngine
 import com.harmony.feature.downloads.SpotiFlacRequestOwner
 import com.harmony.feature.downloads.SpotifyPlaylistClient
+import com.harmony.playback.service.autoeq.NoiseListeningService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import java.util.Locale
 import javax.inject.Inject
 
@@ -41,6 +48,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        startNoiseListeningWhenWanted()
         handleIncomingIntent(intent)
         setContent {
             val settings by settingsRepository.settings
@@ -105,6 +113,24 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         playbackConnection.ensureConnected()
+    }
+
+    /**
+     * The automatic equalizer's noise listener may only be started while the
+     * app is on screen, so it is started here: each time the app comes to the
+     * front, and when noise adaptation is switched on in the app.
+     */
+    private fun startNoiseListeningWhenWanted() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                settingsRepository.settings
+                    .map { it.eq.enabled && it.autoEq.noise }
+                    .distinctUntilChanged()
+                    .collect { wanted ->
+                        if (wanted) NoiseListeningService.startIfWanted(this@MainActivity, settingsRepository)
+                    }
+            }
+        }
     }
 
     private fun handleIncomingIntent(sourceIntent: Intent?) {

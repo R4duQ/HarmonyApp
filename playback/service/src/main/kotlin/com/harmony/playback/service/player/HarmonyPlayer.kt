@@ -93,6 +93,7 @@ class HarmonyPlayer(
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 applyReplayGainForCurrentItem()
+                equalizerProcessor.setTrack(mediaItem?.mediaId)
                 // A new item gets a fresh retry budget. Retrying the SAME
                 // item calls prepare() without a transition, so the counter
                 // only resets when we genuinely move on.
@@ -248,7 +249,10 @@ class HarmonyPlayer(
      */
     fun createCrossfadePlayer(item: MediaItem): ExoPlayer {
         val replayGain = ReplayGainAudioProcessor().apply { setGainDb(replayGainDbFor(item)) }
-        val equalizer = EqualizerAudioProcessor().also { it.apply(eqSettings) }
+        val equalizer = EqualizerAudioProcessor().also {
+            it.apply(eqSettings)
+            it.setTrack(item.mediaId)
+        }
         return ExoPlayer.Builder(context, renderersFactory(arrayOf(replayGain, equalizer)))
             .setAudioAttributes(
                 AudioAttributes.Builder()
