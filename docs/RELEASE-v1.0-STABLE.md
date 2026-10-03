@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **117**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 116), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **118**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 117), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -54,8 +54,13 @@ certificate.
   through SpotiFLAC or Soulseek.
 - **FLAC compatibility fix.** FFmpeg runs from its own verified library set.
 - **Smart Shuffle** reshuffles the queue correctly.
-- **Crossfade** no longer goes silent for half a second when the fade ends: the
-  next song keeps playing while the player takes over.
+- **Crossfade** ends without a hitch. When the fade finishes, Harmony's main player has to
+  take the next song over from the crossfade player. It used to do that before it was
+  actually making sound, and up to ~200 ms out of step, which was heard as a short catch
+  or skip. Now it waits until the main player is audible, brings it into step within a
+  few milliseconds while it is still muted, and only then swaps them. The crossfade
+  player also uses the same ReplayGain and EQ, so loudness and tone no longer jump at
+  that moment.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the

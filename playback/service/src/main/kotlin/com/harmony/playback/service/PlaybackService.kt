@@ -91,7 +91,8 @@ class PlaybackService : MediaLibraryService() {
         }
         mediaSession = sessionBuilder.build()
         AutoDiagnostics.log("session ready · ${android.os.SystemClock.elapsedRealtime() - createStart} ms (injection + player + session)")
-        crossfade = CrossfadeController(this, harmonyPlayer.exoPlayer, serviceScope).also { it.start() }
+        crossfade = CrossfadeController(this, harmonyPlayer.exoPlayer, serviceScope, harmonyPlayer::createCrossfadePlayer)
+            .also { it.start() }
         startPeriodicStateSaving()
         albumListening = AlbumListeningMonitor(harmonyPlayer.exoPlayer, albumJourneys).also { it.start() }
         sleepTimer.attach(harmonyPlayer.exoPlayer, serviceScope)

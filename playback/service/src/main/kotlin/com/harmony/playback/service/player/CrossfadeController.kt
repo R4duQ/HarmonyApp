@@ -6,6 +6,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
@@ -16,10 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlin.math.abs
 
 /** Overlaps a temporary player with the session player, which still owns the queue. */
 @UnstableApi
@@ -27,7 +25,12 @@ class CrossfadeController(
     context: Context,
     private val player: ExoPlayer,
     private val scope: CoroutineScope,
-    private val previewFactory: () -> ExoPlayer = {
+    /**
+     * Builds the second player for [MediaItem]. The session passes one with
+     * the same ReplayGain and EQ as the session player, so the handoff
+     * changes neither loudness nor tone; this plain one is the fallback.
+     */
+    private val previewFactory: (MediaItem) -> ExoPlayer = {
         ExoPlayer.Builder(context, DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER))
             .build().apply {
@@ -58,6 +61,9 @@ class CrossfadeController(
 
     /** How long the session player takes to start at a new position; learned at each handoff. */
     private var seekLeadMs = INITIAL_SEEK_LEAD_MS
+
+    /** The session player's own speed while it is being nudged into step; restored afterwards. */
+    private var nudgedFrom: PlaybackParameters? = null
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -135,7 +141,7 @@ class CrossfadeController(
 
     private fun startOverlap(item: MediaItem) {
         try {
-            val preview = previewFactory()
+            val preview = previewFactory(item)
             previewPlayer = preview
             nextItem = item
             preview.addListener(object : Player.Listener {
@@ -174,11 +180,21 @@ class CrossfadeController(
 
     /**
      * The outgoing song has ended and the second player is at full volume on
-     * the next one. The session player has to jump into that song, and a jump
-     * to a new position takes a moment to start sounding. Stopping the second
-     * player first left that moment silent, so it keeps playing until the
-     * session player is audible, and a short equal-power swap hands over.
-     * The session player aims where the second player will be by then.
+     * the next one. The session player has to take over that song without a
+     * gap and without a jump:
+     *
+     * 1. It seeks, muted, to where the second player will be once it starts.
+     * 2. Harmony waits until it is really sounding: its position moving, not
+     *    just "playing", which it reports before the first sample is out.
+     * 3. Its offset from the second player is measured. A seek never lands
+     *    exactly, and swapping while they are 50-200 ms apart is the hitch
+     *    you hear, so the muted player runs a little faster or slower until
+     *    the two are within a few milliseconds.
+     * 4. Only then does a short equal-power swap hand over.
+     *
+     * The second player keeps sounding at full volume the whole time, so none
+     * of this is audible. Whatever happens, after [ALIGN_BUDGET_MS] the swap
+     * goes ahead anyway.
      */
     private fun handoff() {
         val preview = previewPlayer ?: return
@@ -197,29 +213,118 @@ class CrossfadeController(
         preview.volume = 1f
         player.setPauseAtEndOfMediaItems(false)
         player.volume = 0f
-        val requestedAt = SystemClock.elapsedRealtime()
-        ownSeek = true
-        val target = (preview.currentPosition + seekLeadMs).let { if (preview.duration > 0) it.coerceAtMost(preview.duration - 1) else it }
-        player.seekTo(index, target)
+        aimAt(index, preview)
         player.play()
         triggered = false
         swapJob = scope.launch {
-            val audible = withTimeoutOrNull(SWAP_TIMEOUT_MS) {
-                while (!player.isPlaying) delay(10)
-                true
-            } == true
-            if (audible && swapPreview === preview) {
-                val latency = SystemClock.elapsedRealtime() - requestedAt
-                seekLeadMs = ((seekLeadMs * 3 + latency) / 4).coerceIn(MIN_SEEK_LEAD_MS, MAX_SEEK_LEAD_MS)
-                for (step in 1..SWAP_STEPS) {
-                    val g = step.toFloat() / SWAP_STEPS * (PI.toFloat() / 2f)
-                    player.volume = sin(g)
-                    preview.volume = cos(g)
-                    delay(SWAP_STEP_MS)
-                }
+            alignWith(index, preview)
+            if (swapPreview !== preview) return@launch
+            restoreSpeed()
+            for (step in 1..SWAP_STEPS) {
+                val (incoming, outgoing) = HandoffAlignment.swapGains(step.toFloat() / SWAP_STEPS)
+                player.volume = incoming
+                preview.volume = outgoing
+                delay(SWAP_STEP_MS)
             }
             if (swapPreview === preview) finishSwap()
         }
+    }
+
+    /** Seeks the session player, muted, to where the second player will be once it starts sounding. */
+    private fun aimAt(index: Int, preview: ExoPlayer) {
+        ownSeek = true
+        val target = (preview.currentPosition + seekLeadMs)
+            .let { if (preview.duration > 0) it.coerceAtMost(preview.duration - 1) else it }
+        player.seekTo(index, target)
+    }
+
+    /** Steps 2 and 3 of [handoff]. Returns when the two players are in step, or out of time. */
+    private suspend fun alignWith(index: Int, preview: ExoPlayer) {
+        val deadline = SystemClock.elapsedRealtime() + ALIGN_BUDGET_MS
+        fun inTime() = SystemClock.elapsedRealtime() < deadline && swapPreview === preview && preview.isPlaying
+        var learned = false
+        var reseeks = 0
+        while (inTime()) {
+            if (!awaitSounding(::inTime)) return
+            // The audio clock reads a little loose for the first moments after a start.
+            delay(SETTLE_MS)
+            if (!inTime()) return
+            while (inTime()) {
+                val offset = offsetFrom(preview)
+                if (!learned) {
+                    seekLeadMs = HandoffAlignment.nextLead(seekLeadMs, offset)
+                    learned = true
+                }
+                if (abs(offset) > HandoffAlignment.RESEEK_OVER_MS && reseeks < MAX_RESEEKS) {
+                    // Too far to close by speed in time: aim again, with the lead just learned.
+                    reseeks++
+                    restoreSpeed()
+                    aimAt(index, preview)
+                    break
+                }
+                val factor = HandoffAlignment.catchUpFactor(offset)
+                if (factor == null) {
+                    // In step at its own speed: ready to swap.
+                    if (nudgedFrom == null) return
+                    // In step while nudged. A speed change only reaches the
+                    // speaker once the audio already queued has played, so
+                    // go back to normal speed and check again after that.
+                    restoreSpeed()
+                    delay(SETTLE_MS)
+                    continue
+                }
+                nudge(factor)
+                delay(NUDGE_STEP_MS)
+            }
+        }
+    }
+
+    /**
+     * Waits until the session player's position has clearly moved on from
+     * where it started: then audio is really coming out. Between its internal
+     * updates ExoPlayer extrapolates the position by a few ms even before the
+     * first sample plays, so a tiny advance doesn't count.
+     */
+    private suspend fun awaitSounding(inTime: () -> Boolean): Boolean {
+        var start = -1L
+        while (inTime()) {
+            if (!player.isPlaying) {
+                start = -1L
+            } else {
+                val position = player.currentPosition
+                if (start < 0) start = position
+                else if (position - start >= SOUNDING_MS) return true
+            }
+            delay(10)
+        }
+        return false
+    }
+
+    /** How far the session player is ahead of the second one (negative: behind), in ms. */
+    private suspend fun offsetFrom(preview: ExoPlayer): Long {
+        fun read() = player.currentPosition - preview.currentPosition
+        val a = read()
+        delay(5)
+        val b = read()
+        delay(5)
+        return HandoffAlignment.median(a, b, read())
+    }
+
+    /** Plays the muted session player at [factor] times its own speed. */
+    private fun nudge(factor: Float) {
+        val own = nudgedFrom ?: player.playbackParameters.also { nudgedFrom = it }
+        // In 1 % steps, and only when it changes: each change is queued behind
+        // the audio already buffered, so fewer of them settle faster.
+        val speed = own.speed * (Math.round(factor * 100f) / 100f)
+        if (player.playbackParameters.speed == speed) return
+        // Pitch as it was; HarmonyPlayer re-applies tape mode if that is on. It's muted either way.
+        player.playbackParameters = PlaybackParameters(speed, own.pitch)
+    }
+
+    private fun restoreSpeed() {
+        val own = nudgedFrom ?: return
+        nudgedFrom = null
+        player.playbackParameters = own
     }
 
     /** Ends the handoff: the session player plays alone at full volume. */
@@ -228,6 +333,7 @@ class CrossfadeController(
         swapPreview = null
         swapItem = null
         ownSeek = false
+        restoreSpeed()
         val job = swapJob
         swapJob = null
         runCatching { preview.release() }
@@ -253,11 +359,14 @@ class CrossfadeController(
 
     private companion object {
         const val INITIAL_SEEK_LEAD_MS = 250L
-        const val MIN_SEEK_LEAD_MS = 40L
-        const val MAX_SEEK_LEAD_MS = 1_500L
-        /** Give up waiting and play the session player alone after this long. */
-        const val SWAP_TIMEOUT_MS = 3_000L
-        const val SWAP_STEPS = 6
+        /** After this long the swap goes ahead whether or not the players are in step. */
+        const val ALIGN_BUDGET_MS = 4_500L
+        const val SETTLE_MS = 250L
+        const val SOUNDING_MS = 40L
+        const val NUDGE_STEP_MS = 40L
+        const val MAX_RESEEKS = 1
+        /** The swap itself: 200 ms, short enough that a few ms of offset can't be heard. */
+        const val SWAP_STEPS = 10
         const val SWAP_STEP_MS = 20L
     }
 
