@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.harmony.core.model.EqSettings
+import com.harmony.core.model.EqStyle
 import com.harmony.core.model.OutputForm
 import com.harmony.core.model.OutputForms
 import com.harmony.core.model.ReplayGainMode
@@ -69,6 +70,9 @@ class SettingsRepository @Inject constructor(
         val EQ_BANDS = stringPreferencesKey("eq_bands_csv_v1")
         val EQ_BASS = floatPreferencesKey("eq_bass")
         val EQ_TREBLE = floatPreferencesKey("eq_treble")
+        val EQ_STYLE = stringPreferencesKey("eq_style")
+        val EQ_WINAMP_BANDS = stringPreferencesKey("eq_winamp_bands_csv_v1")
+        val EQ_WINAMP_PREAMP = floatPreferencesKey("eq_winamp_preamp")
         val ENERGY = floatPreferencesKey("energy_slider") // -1 sentinel = off
         val SOULSEEK_FORMAT = stringPreferencesKey("soulseek_format_preference")
         val SMART_SHUFFLE_STYLE = stringPreferencesKey("smart_shuffle_style_v2")
@@ -101,6 +105,12 @@ class SettingsRepository @Inject constructor(
                     ?: List(EqSettings.BAND_COUNT) { 0f },
                 bassBoostDb = p[Keys.EQ_BASS] ?: 0f,
                 trebleBoostDb = p[Keys.EQ_TREBLE] ?: 0f,
+                style = p[Keys.EQ_STYLE]?.let { name -> EqStyle.entries.firstOrNull { it.name == name } } ?: EqStyle.HARMONY,
+                winampGainsDb = p[Keys.EQ_WINAMP_BANDS]?.split(',')
+                    ?.mapNotNull { it.toFloatOrNull() }
+                    ?.takeIf { it.size == EqSettings.BAND_COUNT }
+                    ?: List(EqSettings.BAND_COUNT) { 0f },
+                winampPreampDb = p[Keys.EQ_WINAMP_PREAMP] ?: 0f,
             ),
             energySliderValue = p[Keys.ENERGY]?.takeIf { it >= 0f },
             soulseekFormatPreference = p[Keys.SOULSEEK_FORMAT] ?: "FLAC_ONLY",
@@ -213,6 +223,9 @@ class SettingsRepository @Inject constructor(
         it[Keys.EQ_BANDS] = eq.bandGainsDb.joinToString(",")
         it[Keys.EQ_BASS] = eq.bassBoostDb
         it[Keys.EQ_TREBLE] = eq.trebleBoostDb
+        it[Keys.EQ_STYLE] = eq.style.name
+        it[Keys.EQ_WINAMP_BANDS] = eq.winampGainsDb.joinToString(",")
+        it[Keys.EQ_WINAMP_PREAMP] = eq.winampPreampDb
     }
 
     private suspend inline fun edit(

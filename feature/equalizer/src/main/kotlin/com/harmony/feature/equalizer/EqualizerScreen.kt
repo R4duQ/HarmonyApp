@@ -33,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.core.model.EqSettings
+import com.harmony.core.model.EqStyle
+import com.harmony.core.model.WinampEqDesign
 import com.harmony.core.ui.component.EditorialCard
 import com.harmony.core.ui.component.EditorialChoiceChips
 import com.harmony.core.ui.component.EditorialCircleButton
@@ -111,12 +114,13 @@ class EqualizerViewModel @Inject constructor(
         viewModelScope.launch { settings.deleteUserEqPreset(name) }
     }
 
-    fun applyGains(gains: List<Float>) = update { it.copy(bandGainsDb = gains, enabled = true) }
+    fun applyGains(gains: List<Float>) = update { it.copy(bandGainsDb = gains, enabled = true, style = EqStyle.HARMONY) }
 
     fun setEnabled(on: Boolean) = update { it.copy(enabled = on) }
 
     fun setBand(index: Int, gainDb: Float) = update { current ->
         current.copy(
+            style = EqStyle.HARMONY,
             bandGainsDb = current.bandGainsDb.toMutableList()
                 .also { it[index] = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB) },
         )
@@ -132,13 +136,14 @@ class EqualizerViewModel @Inject constructor(
         val clamped = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB)
         current.copy(
             enabled = true,
+            style = EqStyle.HARMONY,
             bandGainsDb = current.bandGainsDb.mapIndexed { i, g ->
                 if (i in range) clamped else g
             },
         )
     }
 
-    fun reset() = update { it.copy(bandGainsDb = List(EqSettings.BAND_COUNT) { 0f }) }
+    fun reset() = update { it.copy(bandGainsDb = List(EqSettings.BAND_COUNT) { 0f }, style = EqStyle.HARMONY) }
 
     /**
      * Simple-tab preset applied as ONE atomic write. The first version
@@ -151,6 +156,7 @@ class EqualizerViewModel @Inject constructor(
     fun applySimplePreset(bass: Float, mid: Float, treble: Float) = update { current ->
         current.copy(
             enabled = true,
+            style = EqStyle.HARMONY,
             bandGainsDb = current.bandGainsDb.mapIndexed { i, _ ->
                 when (i) {
                     in BASS_BANDS -> bass
@@ -159,6 +165,41 @@ class EqualizerViewModel @Inject constructor(
                 }.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB)
             },
         )
+    }
+
+    // ---- Winamp tab --------------------------------------------------
+    //
+    // The Winamp curve is kept apart from the Simple/Advanced one, so
+    // switching engines never loses either. Touching a Winamp control makes
+    // Winamp the engine that plays, the way touching the dials makes it
+    // Harmony's again.
+
+    fun setWinampBand(index: Int, gainDb: Float) = update { current ->
+        current.copy(
+            enabled = true,
+            style = EqStyle.WINAMP,
+            winampGainsDb = current.winampGainsDb.toMutableList()
+                .also { it[index] = gainDb.coerceIn(-WinampEqDesign.MAX_DB, WinampEqDesign.MAX_DB) },
+        )
+    }
+
+    fun setWinampPreamp(gainDb: Float) = update {
+        it.copy(enabled = true, style = EqStyle.WINAMP, winampPreampDb = gainDb.coerceIn(-WinampEqDesign.MAX_DB, WinampEqDesign.MAX_DB))
+    }
+
+    fun applyWinampPreset(name: String) {
+        val (preamp, gains) = WinampEqDesign.PRESETS.firstOrNull { it.first == name }?.second ?: return
+        update { it.copy(enabled = true, style = EqStyle.WINAMP, winampPreampDb = preamp, winampGainsDb = gains.toList()) }
+    }
+
+    fun resetWinamp() = update {
+        it.copy(style = EqStyle.WINAMP, winampPreampDb = 0f, winampGainsDb = List(EqSettings.BAND_COUNT) { 0f })
+    }
+
+    /** Winamp's ON button: lights Winamp if anything else is playing, turns the EQ off if Winamp is. */
+    fun toggleWinamp() = update { current ->
+        if (current.enabled && current.style == EqStyle.WINAMP) current.copy(enabled = false)
+        else current.copy(enabled = true, style = EqStyle.WINAMP)
     }
 
     private fun update(transform: (EqSettings) -> EqSettings) {
@@ -210,7 +251,12 @@ fun EqualizerScreen(
     viewModel: EqualizerViewModel = hiltViewModel(),
 ) {
     val eq by viewModel.eq.collectAsStateWithLifecycle()
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(-1) }
+    // Open on the tab of the engine that is playing, once the stored settings are in.
+    LaunchedEffect(eq.style) {
+        if (selectedTab < 0 && eq.style == EqStyle.WINAMP) selectedTab = WINAMP_TAB
+    }
+    val tab = selectedTab.coerceAtLeast(0)
     val palette = bluePalette()
 
     Column(
@@ -249,7 +295,11 @@ fun EqualizerScreen(
                     color = palette.ink,
                 )
                 Text(
-                    if (eq.enabled) "On — applied to everything playing" else "Off — audio passes through untouched",
+                    when {
+                        !eq.enabled -> "Off — audio passes through untouched"
+                        eq.style == EqStyle.WINAMP -> "On — playing through Winamp's EQ"
+                        else -> "On — applied to everything playing"
+                    },
                     fontSize = 12.sp,
                     color = palette.muted,
                 )
@@ -258,16 +308,17 @@ fun EqualizerScreen(
         }
 
         EditorialTabs(
-            tabs = listOf(EditorialTab("Simple"), EditorialTab("Advanced")),
-            selected = selectedTab,
+            tabs = listOf(EditorialTab("Simple"), EditorialTab("Advanced"), EditorialTab("Winamp")),
+            selected = tab,
             onSelect = { selectedTab = it },
             palette = palette,
             modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
         )
 
-        when (selectedTab) {
+        when (tab) {
             0 -> SimpleTab(viewModel, palette, onCustom = { selectedTab = 1 })
             1 -> AdvancedTab(viewModel, palette)
+            WINAMP_TAB -> WinampTab(eq, viewModel, palette)
         }
     }
 }
@@ -715,6 +766,47 @@ private fun AdvancedTab(viewModel: EqualizerViewModel, palette: EditorialPalette
             containerColor = palette.field,
             titleContentColor = palette.ink,
             textContentColor = palette.ink,
+        )
+    }
+}
+
+// =====================================================================
+//  WINAMP tab: Winamp 2's equalizer, sound and look
+// =====================================================================
+
+private const val WINAMP_TAB = 2
+
+@Composable
+private fun WinampTab(eq: EqSettings, viewModel: EqualizerViewModel, palette: EditorialPalette) {
+    val actions = remember(viewModel) {
+        WinampEqActions(
+            onToggle = viewModel::toggleWinamp,
+            onBand = viewModel::setWinampBand,
+            onPreamp = viewModel::setWinampPreamp,
+            onPreset = viewModel::applyWinampPreset,
+            onReset = viewModel::resetWinamp,
+        )
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = LocalFloatingChromeHeight.current)
+            .padding(horizontal = 20.dp),
+    ) {
+        WinampEqPanel(eq, actions, Modifier.fillMaxWidth())
+        Text(
+            if (eq.enabled && eq.style == EqStyle.WINAMP) {
+                "Playing through Winamp's filters: ten one-octave bands from 60 Hz to 16 kHz, ±20 dB, " +
+                    "with its preamp and presets. Double-tap a slider to centre it."
+            } else {
+                "Winamp's equalizer, with its own ten bands and presets. Press ON, pick a preset or move a " +
+                    "slider to play through it; your Simple and Advanced settings stay as they are."
+            },
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            color = palette.muted,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 14.dp),
         )
     }
 }

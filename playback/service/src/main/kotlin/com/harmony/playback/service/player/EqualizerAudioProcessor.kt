@@ -5,6 +5,8 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.harmony.core.model.EqSettings
+import com.harmony.core.model.EqStyle
+import com.harmony.core.model.WinampEqDesign
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.cos
@@ -41,6 +43,10 @@ import kotlin.math.tanh
  *     ~0.92 full scale (e.g. pathological inter-band summation, or ReplayGain
  *     boost stacking upstream) is rounded off with a tanh knee instead of
  *     squared off by a clamp. Below the knee the signal passes bit-exact.
+ *
+ * Winamp mode swaps the band filters for [WinampFilterBank], the Winamp
+ * equalizer (see WinampEqDesign), with its own preamp instead of the auto
+ * pre-amp; smoothing and the soft limiter apply to both.
  *
  * Filter design: RBJ peaking EQ per band, low-shelf @100 Hz, high-shelf
  * @8 kHz. Supports 16-bit int and float PCM input (16-bit is the real path:
@@ -79,6 +85,10 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var stages: Array<Stage> = emptyArray()
 
+    /** Winamp mode's filter bank, instead of [stages]; null in Harmony mode. */
+    @Volatile
+    private var winamp: WinampFilterBank? = null
+
     @Volatile
     private var enabled = false
 
@@ -115,8 +125,10 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         if (sampleRate > 0) rebuild()
     }
 
-    private fun EqSettings.isFlat() =
-        bandGainsDb.all { it == 0f } && bassBoostDb == 0f && trebleBoostDb == 0f
+    private fun EqSettings.isFlat() = when (style) {
+        EqStyle.WINAMP -> winampGainsDb.all { it == 0f } && winampPreampDb == 0f
+        EqStyle.HARMONY -> bandGainsDb.all { it == 0f } && bassBoostDb == 0f && trebleBoostDb == 0f
+    }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
@@ -138,6 +150,11 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     @Synchronized
     private fun rebuild() {
         val s = pendingSettings
+        if (s.style == EqStyle.WINAMP) {
+            rebuildWinamp(s)
+            return
+        }
+        winamp = null
         val list = ArrayList<Stage>(EqSettings.BAND_COUNT + 2)
         val sr = sampleRate.toFloat()
 
@@ -163,10 +180,35 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         targetPreamp = 10f.pow(-headroomDb / 20f)
     }
 
-    override fun isActive(): Boolean = super.isActive() && enabled && stages.isNotEmpty()
+    /**
+     * Winamp mode: its parallel band-pass bank and its own preamp, as Winamp
+     * had it. No automatic headroom here: the preamp is the user's, and the
+     * Winamp presets bring their own (Rock lowers it 7 dB, for instance). The
+     * soft limiter still catches anything that would clip.
+     *
+     * The bank is kept while the format stays the same, so moving a slider
+     * glides instead of restarting the filters.
+     */
+    private fun rebuildWinamp(s: EqSettings) {
+        stages = emptyArray()
+        val channels = channelCount.coerceAtLeast(1)
+        val existing = winamp
+        val bank = if (existing != null && existing.sampleRate == sampleRate && existing.channels == channels) {
+            existing.also { it.setGains(s.winampGainsDb) }
+        } else {
+            WinampFilterBank(sampleRate, channels).also { it.setGains(s.winampGainsDb); it.settle() }
+        }
+        winamp = bank
+        val preampDb = s.winampPreampDb.coerceIn(-WinampEqDesign.MAX_DB, WinampEqDesign.MAX_DB)
+        targetPreamp = 10f.pow(preampDb / 20f)
+    }
+
+    override fun isActive(): Boolean =
+        super.isActive() && enabled && (winamp != null || stages.isNotEmpty())
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val localStages = stages
+        val bank = winamp
         val channels = channelCount
         val remaining = inputBuffer.remaining()
 
@@ -190,7 +232,7 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
         // state may be sized for a different channel layout, and an
         // ArrayIndexOutOfBoundsException here kills the whole process. A few
         // unequalised buffers during a format switch is the cheaper failure.
-        if (channels <= 0 || localStages.any { !it.fits(channels) }) {
+        if (channels <= 0 || localStages.any { !it.fits(channels) } || (bank != null && bank.channels != channels)) {
             output.put(scratch)
             output.flip()
             return
@@ -204,16 +246,24 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
 
         if (encoding == C.ENCODING_PCM_FLOAT) {
             while (scratch.remaining() >= 4) {
-                if (frameCh == 0) preamp += (target - preamp) * ease
+                if (frameCh == 0) {
+                    preamp += (target - preamp) * ease
+                    bank?.glide(ease)
+                }
                 var sample = scratch.float
+                if (bank != null) sample = bank.process(sample, frameCh)
                 for (stage in localStages) sample = stage.process(sample, frameCh)
                 output.putFloat(softLimit(sample * preamp))
                 frameCh = (frameCh + 1) % channels
             }
         } else {
             while (scratch.remaining() >= 2) {
-                if (frameCh == 0) preamp += (target - preamp) * ease
+                if (frameCh == 0) {
+                    preamp += (target - preamp) * ease
+                    bank?.glide(ease)
+                }
                 var sample = scratch.short / 32768f
+                if (bank != null) sample = bank.process(sample, frameCh)
                 for (stage in localStages) sample = stage.process(sample, frameCh)
                 output.putShort(
                     (softLimit(sample * preamp) * 32767f).roundToInt().toShort()
