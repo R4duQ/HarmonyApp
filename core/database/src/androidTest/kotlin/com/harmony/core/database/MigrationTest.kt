@@ -48,6 +48,27 @@ class MigrationTest {
         helper.runMigrationsAndValidate(TEST_DB, 3, true, DatabaseModule.MIGRATION_2_3)
     }
 
+    /** Same schema; only songs with mis-decoded tags are marked to be read again. */
+    @Test
+    @Throws(IOException::class)
+    fun migrate3To4MarksMisDecodedTagsForRescan() {
+        helper.createDatabase(TEST_DB, 3).use { db ->
+            fun insert(id: Long, title: String) = db.execSQL(
+                "INSERT INTO songs (id, uri, title, artist, album, albumId, durationMs, fileSizeBytes, fileHash, " +
+                    "lastModified, dateAdded, storageVolume) VALUES (?, ?, ?, 'A', 'B', 1, 1, 1, 'h', 500, 1, 'v')",
+                arrayOf<Any>(id, "content://$id", title),
+            )
+            insert(1, "Bucureºti")
+            insert(2, "Ștefan")
+            insert(3, "Hello")
+        }
+        val db = helper.runMigrationsAndValidate(TEST_DB, 4, true, DatabaseModule.MIGRATION_3_4)
+        db.query("SELECT id, lastModified FROM songs ORDER BY id").use { c ->
+            val marked = buildMap { while (c.moveToNext()) put(c.getLong(0), c.getLong(1)) }
+            org.junit.Assert.assertEquals(mapOf(1L to -1L, 2L to 500L, 3L to 500L), marked)
+        }
+    }
+
     /**
      * The path a user upgrading from the very first build actually takes.
      * Running the migrations back to back catches the case where each step is
@@ -59,10 +80,11 @@ class MigrationTest {
         helper.createDatabase(TEST_DB, 1).close()
         helper.runMigrationsAndValidate(
             TEST_DB,
-            3,
+            4,
             true,
             DatabaseModule.MIGRATION_1_2,
             DatabaseModule.MIGRATION_2_3,
+            DatabaseModule.MIGRATION_3_4,
         )
     }
 

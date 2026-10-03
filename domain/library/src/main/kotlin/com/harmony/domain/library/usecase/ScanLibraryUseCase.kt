@@ -57,6 +57,8 @@ class ScanLibraryUseCase @Inject constructor(
                             writer.upsert(pending.toList())
                             pending.clear()
                         }
+                        // Files read again may have moved to another album or artist row.
+                        if (event.updated > 0) writer.pruneOrphans()
                     }
                     else -> Unit
                 }

@@ -28,7 +28,7 @@ import com.harmony.core.database.entity.SongFtsEntity
  * control for exactly that purpose.
  */
 @Database(
-    version = 3,
+    version = 4,
     exportSchema = true,
     entities = [
         SongEntity::class,

@@ -36,4 +36,9 @@ class LibraryWriteGatewayImpl @Inject constructor(
         if (uris.isEmpty()) return
         songDao.deleteFilesAndPrune(uris)
     }
+
+    override suspend fun pruneOrphans() {
+        songDao.pruneEmptyAlbums()
+        songDao.pruneEmptyArtists()
+    }
 }

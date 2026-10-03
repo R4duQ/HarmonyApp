@@ -3,12 +3,14 @@ package com.harmony.core.media.metadata
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import com.harmony.core.common.text.TagTextRepair
 import com.harmony.core.media.artwork.ArtworkCache
 import com.harmony.core.media.model.MediaCandidate
 import com.harmony.core.media.scanner.FileHasher
 import com.harmony.core.model.Song
 import com.harmony.domain.library.model.ScannedTrack
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,13 +78,26 @@ class MetadataExtractor @Inject constructor(
         fun tag(vararg keys: String): String? = keys
             .firstNotNullOfOrNull { key -> tags[key]?.trim()?.takeIf { it.isNotEmpty() } }
 
-        val title = mmr.title
-            ?: tag("TITLE", "TIT2")
-            ?: candidate.displayName.substringBeforeLast('.')
-        val artist = mmr.artist ?: tag("ARTIST", "TPE1") ?: UNKNOWN
-        val albumName = mmr.album ?: tag("ALBUM", "TALB") ?: UNKNOWN
-        val albumArtist = mmr.albumArtist ?: tag("ALBUMARTIST", "ALBUM ARTIST", "TPE2")
-        val genre = mmr.genre ?: tag("GENRE", "TCON")
+        val rawTitle = mmr.title ?: tag("TITLE", "TIT2")
+        val rawArtist = mmr.artist ?: tag("ARTIST", "TPE1")
+        val rawAlbum = mmr.album ?: tag("ALBUM", "TALB")
+        val rawAlbumArtist = mmr.albumArtist ?: tag("ALBUMARTIST", "ALBUM ARTIST", "TPE2")
+
+        /**
+         * Romanian tags decoded with the wrong charset ("ºtefan", "È™tefan")
+         * are put right here, before anything is stored or grouped. The weak
+         * sign (ã for ă) is trusted when the phone is in Romanian or another
+         * field of this same file showed a strong one.
+         */
+        val romanian = Locale.getDefault().language == "ro" ||
+            listOf(rawTitle, rawArtist, rawAlbum, rawAlbumArtist).any(TagTextRepair::hasStrongMarker)
+        fun fix(text: String?): String? = TagTextRepair.repair(text, romanian)
+
+        val title = fix(rawTitle) ?: candidate.displayName.substringBeforeLast('.')
+        val artist = fix(rawArtist) ?: UNKNOWN
+        val albumName = fix(rawAlbum) ?: UNKNOWN
+        val albumArtist = fix(rawAlbumArtist)
+        val genre = fix(mmr.genre ?: tag("GENRE", "TCON"))
         val year = mmr.year ?: tag("DATE", "YEAR", "TDRC", "TYER")?.take(4)?.toIntOrNull()
         val trackNumber = mmr.trackNumber
             ?: tag("TRACKNUMBER", "TRCK")?.substringBefore('/')?.trim()?.toIntOrNull()
@@ -99,9 +114,9 @@ class MetadataExtractor @Inject constructor(
             // keying on it would pile unrelated records onto one shelf. Passing
             // null lets albumId() fall back to the folder, which is what it is
             // there for.
-            albumId = albumId(album = mmr.album ?: tag("ALBUM", "TALB"), folder = candidate.folder),
+            albumId = albumId(album = fix(rawAlbum), folder = candidate.folder),
             albumArtist = albumArtist,
-            composer = mmr.composer ?: tag("COMPOSER", "TCOM"),
+            composer = fix(mmr.composer ?: tag("COMPOSER", "TCOM")),
             year = year,
             genre = genre,
             discNumber = discNumber,
@@ -112,7 +127,7 @@ class MetadataExtractor @Inject constructor(
             bitDepth = mmr.bitDepth,
             channels = mmr.channels,
             artworkUri = mmr.artworkUri,
-            embeddedLyrics = tags["LYRICS"] ?: tags["UNSYNCEDLYRICS"],
+            embeddedLyrics = fix(tags["LYRICS"] ?: tags["UNSYNCEDLYRICS"]),
             replayGainTrackDb = ReplayGainTags.trackGainDb(tags),
             replayGainAlbumDb = ReplayGainTags.albumGainDb(tags),
         )
