@@ -48,7 +48,7 @@ object PlaybackProvidesModule {
     @Provides
     @ServiceScoped
     fun provideEqualizerProcessor(): com.harmony.playback.service.player.EqualizerAudioProcessor =
-        com.harmony.playback.service.player.EqualizerAudioProcessor()
+        com.harmony.playback.service.player.EqualizerAudioProcessor(publishesAutoEq = true)
 
     @Provides
     @ServiceScoped

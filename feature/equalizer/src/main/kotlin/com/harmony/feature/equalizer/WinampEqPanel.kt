@@ -396,14 +396,14 @@ private fun WinampSlider(
  * doesn't move it; a drag takes over once it passes the touch slop.
  */
 private suspend fun PointerInputScope.sliderGestures(onChange: (Float) -> Unit) {
-    var lastTapUp = 0L
+    var lastTapUp: Long? = null // none yet
     var lastTapY = 0f
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
         val pad = THUMB_HALF.toPx()
         val drag = awaitVerticalTouchSlopOrCancellation(down.id) { c, _ -> c.consume() }
         if (drag != null) {
-            lastTapUp = 0L
+            lastTapUp = null
             onChange(valueAt(drag.position.y, size.height.toFloat(), pad))
             verticalDrag(drag.id) { c ->
                 c.consume()
@@ -414,9 +414,9 @@ private suspend fun PointerInputScope.sliderGestures(onChange: (Float) -> Unit) 
         val up = currentEvent.changes.firstOrNull { it.id == down.id }
         if (up == null || up.pressed || up.isConsumed) return@awaitEachGesture // taken by the page scroll
         up.consume()
-        val again = up.uptimeMillis - lastTapUp < viewConfiguration.doubleTapTimeoutMillis
+        val again = lastTapUp?.let { up.uptimeMillis - it < viewConfiguration.doubleTapTimeoutMillis } == true
         if (again && abs(down.position.y - lastTapY) < DOUBLE_TAP_REACH.toPx()) {
-            lastTapUp = 0L
+            lastTapUp = null
             onChange(0f)
         } else {
             lastTapUp = up.uptimeMillis

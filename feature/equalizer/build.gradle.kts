@@ -13,6 +13,11 @@ dependencies {
     implementation(projects.core.ui)
     implementation(projects.core.model)
     implementation(projects.core.datastore)
+    // Automatic equalizer: the microphone, and the player to pause while measuring.
+    implementation(projects.core.media)
+    implementation(projects.domain.playback)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.ktx)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.compose.material.icons)
     implementation(libs.kotlinx.coroutines.android)

@@ -8,11 +8,13 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.harmony.core.model.AutoEqSettings
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.EqStyle
 import com.harmony.core.model.OutputForm
 import com.harmony.core.model.OutputForms
 import com.harmony.core.model.ReplayGainMode
+import com.harmony.core.model.RoomCorrection
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -46,6 +48,9 @@ data class UserSettings(
     val userEqPresets: Map<String, List<Float>> = emptyMap(),
     /** Name of a SoulseekFormatPreference entry; kept as a String so :core:datastore stays feature-agnostic. */
     val soulseekFormatPreference: String = "FLAC_ONLY",
+    val autoEq: AutoEqSettings = AutoEqSettings(),
+    /** Speaker/room corrections measured with the microphone, keyed by AutoEqDesign.outputKey. */
+    val roomCorrections: Map<String, RoomCorrection> = emptyMap(),
 )
 
 /**
@@ -81,6 +86,10 @@ class SettingsRepository @Inject constructor(
         val SMART_SHUFFLE_VARIETY = floatPreferencesKey("smart_shuffle_variety_v2")
         val EQ_USER_PRESETS = stringPreferencesKey("eq_user_presets_v1") // "name=csv;name=csv"
         val OUTPUT_FORMS = stringPreferencesKey("output_forms_v1") // one "FORM<tab>device name" per line
+        val AUTO_EQ_TONE = booleanPreferencesKey("auto_eq_tone")
+        val AUTO_EQ_ROOM = booleanPreferencesKey("auto_eq_room")
+        val AUTO_EQ_NOISE = booleanPreferencesKey("auto_eq_noise")
+        val ROOM_CORRECTIONS = stringPreferencesKey("room_corrections_v1") // one "key<tab>label<tab>millis<tab>csv" per line
         val LAST_QUEUE_IDS = stringPreferencesKey("last_queue_song_ids") // csv of Longs
         val LAST_QUEUE_INDEX = intPreferencesKey("last_queue_index")
         val LAST_POSITION_MS = longPreferencesKey("last_position_ms")
@@ -119,8 +128,48 @@ class SettingsRepository @Inject constructor(
             smartShuffleDiscovery = (p[Keys.SMART_SHUFFLE_DISCOVERY] ?: 0.45f).coerceIn(0f, 1f),
             smartShuffleVariety = (p[Keys.SMART_SHUFFLE_VARIETY] ?: 0.45f).coerceIn(0f, 1f),
             userEqPresets = decodePresets(p[Keys.EQ_USER_PRESETS]),
+            autoEq = AutoEqSettings(
+                tone = p[Keys.AUTO_EQ_TONE] ?: false,
+                room = p[Keys.AUTO_EQ_ROOM] ?: false,
+                noise = p[Keys.AUTO_EQ_NOISE] ?: false,
+            ),
+            roomCorrections = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]),
         )
     }
+
+    suspend fun setAutoEq(auto: AutoEqSettings) = edit {
+        it[Keys.AUTO_EQ_TONE] = auto.tone
+        it[Keys.AUTO_EQ_ROOM] = auto.room
+        it[Keys.AUTO_EQ_NOISE] = auto.noise
+    }
+
+    /** Files [correction] under [key] (AutoEqDesign.outputKey), replacing an older measurement. */
+    suspend fun saveRoomCorrection(key: String, correction: RoomCorrection) = edit { p ->
+        val all = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]).toMutableMap()
+        all[key] = correction
+        p[Keys.ROOM_CORRECTIONS] = encodeRoomCorrections(all)
+    }
+
+    suspend fun deleteRoomCorrection(key: String) = edit { p ->
+        val all = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]) - key
+        p[Keys.ROOM_CORRECTIONS] = encodeRoomCorrections(all)
+    }
+
+    private fun clean(text: String) = text.replace('\t', ' ').replace('\n', ' ')
+
+    private fun encodeRoomCorrections(all: Map<String, RoomCorrection>): String =
+        all.entries.joinToString("\n") { (key, c) ->
+            listOf(clean(key), clean(c.label), c.measuredAtMs.toString(), c.gainsDb.joinToString(",")).joinToString("\t")
+        }
+
+    private fun decodeRoomCorrections(raw: String?): Map<String, RoomCorrection> =
+        raw?.lines()?.mapNotNull { line ->
+            val parts = line.split('\t')
+            if (parts.size != 4) return@mapNotNull null
+            val gains = parts[3].split(',').mapNotNull { it.toFloatOrNull() }
+            if (gains.size != EqSettings.BAND_COUNT) return@mapNotNull null
+            parts[0] to RoomCorrection(gains, parts[2].toLongOrNull() ?: 0L, parts[1])
+        }?.toMap() ?: emptyMap()
 
     /** The kind of device the listener picked for each output, keyed by [OutputForms.key]. */
     val outputForms: Flow<Map<String, OutputForm>> = context.store.data.map { decodeForms(it[Keys.OUTPUT_FORMS]) }
