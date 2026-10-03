@@ -11,6 +11,12 @@ data class EqSettings(
     val bandGainsDb: List<Float> = List(BAND_COUNT) { 0f },
     val bassBoostDb: Float = 0f,
     val trebleBoostDb: Float = 0f,
+    /** Which equalizer runs: Harmony's own, or the Winamp one. Each keeps its own settings. */
+    val style: EqStyle = EqStyle.HARMONY,
+    /** Winamp mode: one gain per [WinampEqDesign.FREQUENCIES_HZ] band, -20..+20 dB. */
+    val winampGainsDb: List<Float> = List(BAND_COUNT) { 0f },
+    /** Winamp mode's preamp, -20..+20 dB, applied after the bands. */
+    val winampPreampDb: Float = 0f,
 ) {
     companion object {
         const val BAND_COUNT = 10
@@ -27,3 +33,6 @@ data class EqSettings(
         )
     }
 }
+
+enum class EqStyle { HARMONY, WINAMP }
+

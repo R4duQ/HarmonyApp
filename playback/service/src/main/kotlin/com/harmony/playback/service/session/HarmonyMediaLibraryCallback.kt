@@ -211,6 +211,11 @@ class HarmonyMediaLibraryCallback @Inject constructor(
                     bandGainsDb = (args.getFloatArray(ARG_EQ_BANDS) ?: FloatArray(10)).toList(),
                     bassBoostDb = args.getFloat(ARG_EQ_BASS, 0f),
                     trebleBoostDb = args.getFloat(ARG_EQ_TREBLE, 0f),
+                    style = args.getString(ARG_EQ_STYLE)
+                        ?.let { name -> com.harmony.core.model.EqStyle.entries.firstOrNull { it.name == name } }
+                        ?: com.harmony.core.model.EqStyle.HARMONY,
+                    winampGainsDb = (args.getFloatArray(ARG_EQ_WINAMP_BANDS) ?: FloatArray(10)).toList(),
+                    winampPreampDb = args.getFloat(ARG_EQ_WINAMP_PREAMP, 0f),
                 )
             )
             else -> return Futures.immediateFuture(
@@ -643,5 +648,8 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         const val ARG_EQ_BANDS = "eqBands"
         const val ARG_EQ_BASS = "eqBass"
         const val ARG_EQ_TREBLE = "eqTreble"
+        const val ARG_EQ_STYLE = "eqStyle"
+        const val ARG_EQ_WINAMP_BANDS = "eqWinampBands"
+        const val ARG_EQ_WINAMP_PREAMP = "eqWinampPreamp"
     }
 }

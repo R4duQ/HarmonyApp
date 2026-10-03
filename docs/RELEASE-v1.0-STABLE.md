@@ -67,6 +67,15 @@ certificate.
   few milliseconds while it is still muted, and only then swaps them. The crossfade
   player also uses the same ReplayGain and EQ, so loudness and tone no longer jump at
   that moment.
+- **Winamp equalizer.** A third Equalizer tab, Winamp, plays music through Winamp's own
+  equalizer: ten one-octave bands at 60, 170, 310 and 600 Hz and 1, 3, 6, 12, 14 and 16 kHz,
+  ±20 dB each, plus a preamp. It uses the same filters as the eq-xmms reconstruction of
+  Winamp's equalizer, which XMMS and VLC also use, so bands overlap and add up the way they
+  did in Winamp. Its 18 presets are included (Rock, Dance, Full Bass, Large Hall, Techno and
+  the rest). The panel looks like Winamp 2: an ON light, PRESETS, a black display with the
+  real response curve, and sliders that glow from green to red. Tap a slider to jump, drag it,
+  double-tap it to centre. The Winamp settings are kept apart from the Simple/Advanced ones,
+  and touching either side picks which equalizer plays.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the

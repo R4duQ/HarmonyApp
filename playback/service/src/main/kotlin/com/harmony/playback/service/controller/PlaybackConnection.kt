@@ -522,6 +522,9 @@ class PlaybackConnection @Inject constructor(
                 putFloatArray(HarmonyMediaLibraryCallback.ARG_EQ_BANDS, settings.bandGainsDb.toFloatArray())
                 putFloat(HarmonyMediaLibraryCallback.ARG_EQ_BASS, settings.bassBoostDb)
                 putFloat(HarmonyMediaLibraryCallback.ARG_EQ_TREBLE, settings.trebleBoostDb)
+                putString(HarmonyMediaLibraryCallback.ARG_EQ_STYLE, settings.style.name)
+                putFloatArray(HarmonyMediaLibraryCallback.ARG_EQ_WINAMP_BANDS, settings.winampGainsDb.toFloatArray())
+                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_WINAMP_PREAMP, settings.winampPreampDb)
             },
         )
     }
