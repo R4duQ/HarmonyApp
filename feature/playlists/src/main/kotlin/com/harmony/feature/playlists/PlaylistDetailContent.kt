@@ -88,6 +88,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.harmony.core.ui.component.Artwork
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import com.harmony.core.model.SmartPlaylistType
 import com.harmony.core.model.Song
 import com.harmony.core.ui.component.EditorialPalette
@@ -110,6 +117,8 @@ internal data class PlaylistDetailUi(
     /** The playlist was deleted (or never existed) while this page was open. */
     val missing: Boolean = false,
     val nowPlayingId: Long? = null,
+    /** When a user playlist was made; null for smart playlists or while loading. */
+    val createdAt: Long? = null,
 )
 
 /** Everything the page can ask for. Plain lambdas so previews and tests can pass no-ops. */
@@ -259,13 +268,16 @@ internal fun PlaylistDetailContent(
                     .testTag(PlaylistDetailTags.LIST),
                 contentPadding = PaddingValues(bottom = bottomPadding + 16.dp),
             ) {
+                // Everything above the songs is one item, so the rows keep
+                // their indices (the reorder and scroll logic count on it).
                 item(key = "hero", contentType = "hero") {
-                    Column(Modifier.onSizeChanged { heroHeight = it.height.coerceAtLeast(1) }) {
+                    Column {
                         Hero(
                             ui = ui,
                             palette = palette,
                             topInset = with(LocalDensity.current) { topBarHeight.toDp() },
                             modifier = Modifier
+                                .onSizeChanged { heroHeight = it.height.coerceAtLeast(1) }
                                 .testTag(PlaylistDetailTags.HERO)
                                 .swipeDownToDismiss(dismissState, onDismiss, canStart = { atTop }),
                         )
@@ -277,15 +289,28 @@ internal fun PlaylistDetailContent(
                                 onShuffle = { songs?.takeIf { it.isNotEmpty() }?.let(actions.onShuffle) },
                             )
                         }
-                        Spacer(Modifier.height(14.dp))
-                        Box(
-                            Modifier
-                                .padding(horizontal = HeroSide)
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(palette.line.copy(alpha = palette.line.alpha * 0.8f)),
-                        )
-                        Spacer(Modifier.height(6.dp))
+                        if (!songs.isNullOrEmpty() && !ui.missing) {
+                            Column(
+                                Modifier.padding(start = HeroSide - 8.dp, end = HeroSide - 8.dp, top = 18.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                StatTiles(songs, palette)
+                                AboutCard(songs, palette)
+                                TopArtists(songs, palette)
+                                SongsHeader(songs, ui.editable, palette, Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp))
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        } else {
+                            Spacer(Modifier.height(14.dp))
+                            Box(
+                                Modifier
+                                    .padding(horizontal = HeroSide)
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(palette.line.copy(alpha = palette.line.alpha * 0.8f)),
+                            )
+                            Spacer(Modifier.height(6.dp))
+                        }
                     }
                 }
 
@@ -335,6 +360,7 @@ internal fun PlaylistDetailContent(
                             val haptics = LocalHapticFeedback.current
                             SongRow(
                                 song = song,
+                                position = index,
                                 palette = palette,
                                 playing = song.id == ui.nowPlayingId,
                                 dragging = isDragging,
@@ -401,6 +427,7 @@ internal fun PlaylistDetailContent(
                                 )
                             }
                         }
+                        item(key = "footer") { PlaylistFooter(display, ui.createdAt, palette) }
                     }
                 }
             }
@@ -581,123 +608,211 @@ private fun Hero(
     modifier: Modifier = Modifier,
 ) {
     val songs = ui.songs
-    Column(
-        modifier
-            .fillMaxWidth()
-            .padding(top = topInset, start = HeroSide, end = HeroSide),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        BoxWithConstraints(
+    val artwork = remember(songs) { PlaylistDetailFormat.coverArtwork(songs.orEmpty()) }
+    Box(modifier.fillMaxWidth()) {
+        HeroBackdrop(artwork.firstOrNull(), palette, Modifier.matchParentSize())
+        Column(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp)
-                // A soft pool of the accent under the cover — the glass
-                // page's one bit of colour, and what keeps a cover-less
-                // playlist from looking like a grey placeholder page. Drawn
-                // behind rather than laid out, so it costs no height.
-                .drawBehind {
-                    drawCircle(
-                        Brush.radialGradient(
-                            listOf(palette.accent.copy(alpha = 0.20f), Color.Transparent),
-                            center = center,
-                            radius = size.height * 0.75f,
-                        ),
-                        radius = size.height * 0.75f,
-                    )
-                },
-            contentAlignment = Alignment.Center,
+                .padding(top = topInset, start = HeroSide, end = HeroSide),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // At large font sizes the text below needs the height more than
-            // the artwork does, so the cover gives some of it back.
-            val fontScale = LocalDensity.current.fontScale
-            val shrink = if (fontScale > 1.3f) 0.78f else 1f
-            val cover = min(maxWidth * 0.72f, 280.dp) * shrink
-            if (songs == null && !ui.missing) {
-                SkeletonBlock(palette, Modifier.size(cover), RoundedCornerShape(cover * 0.085f))
-            } else {
-                PlaylistCover(
-                    artwork = remember(songs) { PlaylistDetailFormat.coverArtwork(songs.orEmpty()) },
-                    palette = palette,
-                    smartType = ui.smartType,
-                    size = cover,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-        Text(
-            if (ui.smartType != null) "SMART PLAYLIST" else "PLAYLIST",
-            fontSize = 11.sp,
-            letterSpacing = 1.8.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = palette.accent,
-        )
-        Spacer(Modifier.height(6.dp))
-        if (ui.title == null) {
-            SkeletonBlock(palette, Modifier.width(190.dp).height(28.dp), RoundedCornerShape(8.dp))
-        } else {
-            // Long names step down a size so they wrap into two or three
-            // balanced lines instead of three lines of one word each.
-            val long = ui.title.length > 24
-            Text(
-                ui.title,
-                fontSize = if (long) 24.sp else 28.sp,
-                lineHeight = if (long) 29.sp else 33.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp,
-                color = palette.ink,
-                textAlign = TextAlign.Center,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .semantics { heading() }
-                    .testTag(PlaylistDetailTags.TITLE),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        when {
-            ui.missing -> Unit
-            songs != null && songs.isEmpty() && ui.smartType == null -> Unit
-            songs == null -> SkeletonBlock(palette, Modifier.width(140.dp).height(14.dp), RoundedCornerShape(6.dp))
-            else -> {
-                val summary = remember(songs) { PlaylistDetailFormat.summary(songs) }
-                val artists = remember(songs) { PlaylistDetailFormat.artists(songs) }
-                Text(
-                    summary,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = palette.muted,
-                    textAlign = TextAlign.Center,
-                )
-                if (artists != null) {
-                    Text(
-                        artists,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        color = palette.muted,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    // A soft pool of the accent under the cover, so a cover-less
+                    // playlist doesn't look like a grey placeholder page. Drawn
+                    // behind rather than laid out, so it costs no height.
+                    .drawBehind {
+                        drawCircle(
+                            Brush.radialGradient(
+                                listOf(palette.accent.copy(alpha = 0.20f), Color.Transparent),
+                                center = center,
+                                radius = size.height * 0.75f,
+                            ),
+                            radius = size.height * 0.75f,
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                // At large font sizes the text below needs the height more than
+                // the artwork does, so the cover gives some of it back.
+                val fontScale = LocalDensity.current.fontScale
+                val shrink = if (fontScale > 1.3f) 0.78f else 1f
+                val cover = min(maxWidth * 0.66f, 260.dp) * shrink
+                if (songs == null && !ui.missing) {
+                    SkeletonBlock(palette, Modifier.size(cover), RoundedCornerShape(cover * 0.085f))
+                } else {
+                    CoverStack(artwork, palette, ui.smartType, cover)
                 }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (ui.smartType != null) "SMART PLAYLIST" else "PLAYLIST",
+                    fontSize = 11.sp,
+                    letterSpacing = 1.8.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = palette.accent,
+                )
                 if (ui.smartType != null) {
                     Text(
-                        "Updates automatically",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.accent,
+                        "LIVE",
+                        fontSize = 9.sp,
+                        letterSpacing = 1.2.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.onAccent,
                         modifier = Modifier
-                            .padding(top = 10.dp)
+                            .padding(start = 8.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(palette.accent.copy(alpha = 0.12f))
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .background(palette.accent)
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            if (ui.title == null) {
+                SkeletonBlock(palette, Modifier.width(190.dp).height(28.dp), RoundedCornerShape(8.dp))
+            } else {
+                // Long names step down a size so they wrap into two or three
+                // balanced lines instead of three lines of one word each.
+                val long = ui.title.length > 24
+                Text(
+                    ui.title,
+                    fontSize = if (long) 26.sp else 32.sp,
+                    lineHeight = if (long) 31.sp else 37.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.7).sp,
+                    color = palette.ink,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .semantics { heading() }
+                        .testTag(PlaylistDetailTags.TITLE),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            when {
+                ui.missing -> Unit
+                songs != null && songs.isEmpty() && ui.smartType == null -> Unit
+                songs == null -> SkeletonBlock(palette, Modifier.width(140.dp).height(14.dp), RoundedCornerShape(6.dp))
+                else -> {
+                    val artists = remember(songs) { PlaylistDetailFormat.artists(songs, shown = 2) }
+                    if (artists != null) {
+                        Text(
+                            "with $artists",
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            color = palette.muted,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (ui.smartType != null) {
+                        Text(
+                            smartRule(ui.smartType),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            color = palette.muted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    val playing = remember(songs, ui.nowPlayingId) { songs.firstOrNull { it.id == ui.nowPlayingId } }
+                    if (playing != null) {
+                        NowPlayingChip(playing, palette, Modifier.padding(top = 14.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+/** What a smart playlist collects, in one line. */
+private fun smartRule(type: SmartPlaylistType): String = when (type) {
+    SmartPlaylistType.FAVORITES -> "Every song you've marked as a favourite · updates automatically"
+    SmartPlaylistType.MOST_PLAYED -> "Your most played songs · updates automatically"
+    SmartPlaylistType.RECENTLY_ADDED -> "The newest songs in your library · updates automatically"
+    SmartPlaylistType.RECENTLY_PLAYED -> "What you've played lately · updates automatically"
+    SmartPlaylistType.HIGHEST_ENERGY -> "Your most energetic songs · updates automatically"
+    SmartPlaylistType.LOWEST_ENERGY -> "Your calmest songs · updates automatically"
+}
+
+/**
+ * The lead cover, enlarged and blurred into a wash of its colours behind
+ * the header, fading out into the page. Blur needs Android 12; older phones
+ * keep the plain glass page and the accent pool.
+ */
+@Composable
+private fun HeroBackdrop(artwork: String?, palette: EditorialPalette, modifier: Modifier) {
+    if (artwork == null || android.os.Build.VERSION.SDK_INT < 31) return
+    Box(
+        modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                // Fade to nothing towards the bottom, so the glass page takes over.
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black, 0.55f to Color.Black.copy(alpha = 0.7f), 1f to Color.Transparent),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    ) {
+        Artwork(
+            artwork,
+            contentDescription = null,
+            cornerRadius = 0.dp,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = 1.5f
+                    scaleY = 1.5f
+                    alpha = if (palette.field.luminance() < 0.5f) 0.55f else 0.38f
+                }
+                .blur(60.dp, BlurredEdgeTreatment.Rectangle),
+        )
+        // Keep the title readable on any cover.
+        Box(Modifier.fillMaxSize().background(palette.field.copy(alpha = 0.25f)))
+    }
+}
+
+/**
+ * The playlist's cover with two more of its records peeking out behind it,
+ * tilted, like a stack in a crate. Fewer than three covers: just the cover.
+ */
+@Composable
+private fun CoverStack(artwork: List<String>, palette: EditorialPalette, smartType: SmartPlaylistType?, size: Dp) {
+    Box(contentAlignment = Alignment.Center) {
+        if (artwork.size >= 3) {
+            val back = size * 0.86f
+            listOf(-9f to artwork[2], 8f to artwork[1]).forEachIndexed { i, (angle, uri) ->
+                Box(
+                    Modifier
+                        .graphicsLayer {
+                            rotationZ = angle
+                            translationX = (if (i == 0) -1 else 1) * size.toPx() * 0.17f
+                            translationY = size.toPx() * 0.02f
+                        }
+                        .shadow(10.dp, RoundedCornerShape(back * 0.08f))
+                        .size(back),
+                ) {
+                    Artwork(uri, contentDescription = null, modifier = Modifier.fillMaxSize(), cornerRadius = back * 0.08f)
+                    // Pushed back: a little darker than the cover in front.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(back * 0.08f))
+                            .background(Color.Black.copy(alpha = 0.28f)),
                     )
                 }
             }
         }
-        Spacer(Modifier.height(20.dp))
+        PlaylistCover(artwork = artwork, palette = palette, smartType = smartType, size = size)
     }
 }
 
@@ -804,16 +919,21 @@ private fun ActionButton(
 // ---------------------------------------------------------------------------
 
 /**
- * One song: cover, title, artist, duration, options.
+ * One song: its place in the playlist, cover, title, artist and album,
+ * length and sound quality, options.
  *
  * Tapping plays from here; ⋯ holds Play next and Remove; swiping right
  * queues it (the same Play next, for people who know the gesture). The row
  * is opaque — the swipe reveals the "Play next" plate from underneath, and a
  * translucent row would show it through at rest.
+ *
+ * The left gutter shows the row's number, or the playing bars on the song
+ * that's playing; in an editable playlist it is also the grip to drag by.
  */
 @Composable
 private fun SongRow(
     song: Song,
+    position: Int,
     palette: EditorialPalette,
     playing: Boolean,
     dragging: Boolean,
@@ -824,6 +944,11 @@ private fun SongRow(
     modifier: Modifier = Modifier,
 ) {
     val rowFill = glassFill(palette, 0.62f).compositeOver(palette.field)
+    val fill = when {
+        dragging -> glassFill(palette, 0.9f).compositeOver(palette.field)
+        playing -> palette.accent.copy(alpha = 0.13f).compositeOver(rowFill)
+        else -> rowFill
+    }
     val shape = RoundedCornerShape(18.dp)
     EditorialSwipeToQueue(
         palette = palette,
@@ -839,32 +964,46 @@ private fun SongRow(
                     else Modifier,
                 )
                 .clip(shape)
-                .background(if (dragging) glassFill(palette, 0.9f).compositeOver(palette.field) else rowFill)
+                .background(fill)
+                .then(if (playing) Modifier.border(1.dp, palette.accent.copy(alpha = 0.35f), shape) else Modifier)
                 .clickable(onClickLabel = "Play", onClick = onClick)
-                .heightIn(min = 68.dp)
-                .padding(start = if (dragHandleModifier != null) 0.dp else 10.dp, end = 0.dp, top = 8.dp, bottom = 8.dp),
+                .heightIn(min = 72.dp)
+                .padding(end = 0.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (dragHandleModifier != null) {
-                Box(
-                    dragHandleModifier
-                        .width(40.dp)
-                        .heightIn(min = 52.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
+            Column(
+                (dragHandleModifier ?: Modifier)
+                    .width(40.dp)
+                    .heightIn(min = 52.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                if (playing) {
+                    PlayingBars(palette.accent, Modifier.size(14.dp))
+                } else {
+                    Text(
+                        PlaylistDetailFormat.position(position),
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.muted,
+                        maxLines = 1,
+                    )
+                }
+                if (dragHandleModifier != null) {
                     Icon(
                         Icons.Rounded.DragHandle,
                         contentDescription = "Reorder ${song.title}",
-                        tint = if (dragging) palette.ink else palette.muted.copy(alpha = 0.7f),
-                        modifier = Modifier.size(20.dp),
+                        tint = if (dragging) palette.ink else palette.muted.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(top = 3.dp).size(16.dp),
                     )
                 }
             }
-            SongThumb(song.artworkUri, palette, size = 52.dp)
+            SongThumb(song.artworkUri, palette, size = 54.dp)
             Column(
                 Modifier
                     .weight(1f)
-                    .padding(horizontal = 12.dp),
+                    .padding(start = 12.dp, end = 8.dp),
             ) {
                 Text(
                     song.title,
@@ -875,36 +1014,40 @@ private fun SongRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // Duration rides on the artist line rather than in its own
-                // column: on a 360dp phone a separate column cost the title
-                // about a third of its width. The artist gives way first,
-                // the duration is never cut.
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    if (playing) {
-                        Icon(
-                            Icons.Rounded.GraphicEq,
-                            contentDescription = "Now playing",
-                            tint = palette.accent,
-                            modifier = Modifier.padding(end = 4.dp).size(14.dp),
-                        )
-                    }
+                Text(
+                    song.artist,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    color = palette.ink.copy(alpha = 0.72f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+                val album = song.album.trim().takeIf { it.isNotEmpty() && !it.equals("<unknown>", true) }
+                val detail = listOfNotNull(album, song.year?.takeIf { it > 0 }?.toString()).joinToString("  ·  ")
+                if (detail.isNotEmpty()) {
                     Text(
-                        song.artist,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
+                        detail,
+                        fontSize = 12.sp,
+                        lineHeight = 15.sp,
                         color = palette.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Text(
-                        "  ·  " + formatDuration(song.durationMs),
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
-                        color = palette.muted,
-                        maxLines = 1,
+                        modifier = Modifier.padding(top = 1.dp),
                     )
                 }
+            }
+            // Length on top, quality under it; never cut, the text gives way first.
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formatDuration(song.durationMs),
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = palette.muted,
+                    maxLines = 1,
+                )
+                QualityBadge(song, palette, Modifier.padding(top = 4.dp))
             }
             RowMenu(song = song, palette = palette, onPlayNext = onPlayNext, onRemove = onRemove)
         }
