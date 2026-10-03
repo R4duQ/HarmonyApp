@@ -80,14 +80,15 @@ class PlaylistDetailViewModel @Inject constructor(
         else -> playlistRepository.observePlaylistSongs(playlistId)
     }
 
-    /** (title, missing). */
-    private val header: Flow<Pair<String, Boolean>> = when {
-        smartType != null -> flowOf(smartType.displayTitle() to false)
-        smartTypeArg != null -> flowOf("Playlist" to true)
+    private data class Header(val title: String, val missing: Boolean, val createdAt: Long? = null)
+
+    private val header: Flow<Header> = when {
+        smartType != null -> flowOf(Header(smartType.displayTitle(), missing = false))
+        smartTypeArg != null -> flowOf(Header("Playlist", missing = true))
         else -> playlistRepository.observePlaylists()
             .map { all ->
                 val found = all.firstOrNull { it.id == playlistId }
-                (found?.name ?: "Playlist") to (found == null)
+                Header(found?.name ?: "Playlist", missing = found == null, createdAt = found?.createdAt)
             }
     }
 
@@ -103,7 +104,7 @@ class PlaylistDetailViewModel @Inject constructor(
         songs,
         header,
         playback.playerState.map { it.currentSong?.id }.distinctUntilChanged(),
-    ) { songs, (title, missing), nowPlaying ->
+    ) { songs, (title, missing, createdAt), nowPlaying ->
         PlaylistDetailUi(
             title = title,
             smartType = smartType,
@@ -111,6 +112,7 @@ class PlaylistDetailViewModel @Inject constructor(
             songs = if (missing) emptyList() else songs,
             missing = missing,
             nowPlayingId = nowPlaying,
+            createdAt = createdAt,
         )
     }.stateIn(
         viewModelScope,

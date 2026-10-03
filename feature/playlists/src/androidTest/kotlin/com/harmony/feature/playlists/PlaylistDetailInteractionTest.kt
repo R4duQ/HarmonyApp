@@ -236,6 +236,10 @@ class PlaylistDetailInteractionTest {
         setPage()
         rule.onNodeWithTag(PlaylistDetailTags.PLAY).performClick()
         rule.onNodeWithTag(PlaylistDetailTags.SHUFFLE).performClick()
+        // The header (stats, about card, artists) fills the first screen. Scroll
+        // so song 3 is the second row: the first sits under the top bar.
+        rule.onNodeWithTag(PlaylistDetailTags.LIST).performScrollToIndex(2)
+        rule.waitForIdle()
         rule.onNodeWithTag(PlaylistDetailTags.row(3)).performClick()
         rule.waitForIdle()
         assertEquals(listOf(0, 2), played.map { it.second })

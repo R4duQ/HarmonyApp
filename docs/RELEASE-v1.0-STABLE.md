@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **121**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 120), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **122**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 121), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -110,7 +110,15 @@ certificate.
   (HI-RES 24/96, LOSSLESS 16/44.1 or the bitrate) and the length, with a round Play button.
   Delete moved into a menu, away from Play. A counter shows where you are ("8 of 1,240"), and
   the card is now readable in dark mode.
-- Redesigned **Home** and **playlist detail** screens.
+- Redesigned **Home** screen.
+- **Playlist page, in much more detail.**
+  - The header sits on a wash of the playlist's own cover colours (Android 12+), with two more records peeking out behind the cover.
+  - A chip shows when the song playing comes from this playlist.
+  - Four tiles count its songs, length, artists and albums.
+  - An "About this playlist" card shows the sound quality (Hi-Res, lossless and lossy in one bar, and the best file in it), the main genres with their share, and a chart of the years its songs come from.
+  - "Most here" lists the artists with the most songs.
+  - Each song shows its place in the list, its album and year, its length and a quality badge (HI-RES, LOSSLESS or the bitrate). The song playing gets moving bars and a highlight.
+  - The list ends with a summary and the date the playlist was made.
 - Redesigned **album page**: the cover as a record that turns while the album
   plays, a link to the artist, a quality badge (lossless, bit depth and sample
   rate), tracks in album order split by disc, a line for each track missing from
