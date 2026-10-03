@@ -22,7 +22,7 @@ object DatabaseModule {
     fun provideDatabase(@ApplicationContext context: Context): HarmonyDatabase =
         Room.databaseBuilder(context, HarmonyDatabase::class.java, "harmony.db")
             // WAL (the default) lets the UI read while the scanner writes.
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
 
     /**
@@ -88,6 +88,33 @@ object DatabaseModule {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_download_records_source ON download_records(source)")
         }
     }
+
+    /**
+     * No schema change: marks songs whose tags were decoded with the wrong
+     * charset so the next scan reads them again.
+     *
+     * Romanian titles tagged by older Windows software, or written as UTF-8
+     * into a Latin-1 frame, were stored as "ºtefan", "Þara" or "È™tefan".
+     * The scanner now repairs them (TagTextRepair), but it only re-reads
+     * files whose size or date changed. Setting lastModified to -1 makes
+     * exactly these rows look changed. They are updated in place, so
+     * playlists, favourites and play counts stay. Only rows showing one of
+     * the telltale characters are touched; the repair itself decides, file
+     * by file, whether there is anything to fix.
+     */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val suspicious = listOf("title", "artist", "album", "albumArtist")
+                .joinToString(" OR ") { "$it GLOB '*[$MOJIBAKE_SIGNS]*'" }
+            db.execSQL("UPDATE songs SET lastModified = -1 WHERE $suspicious")
+        }
+    }
+
+    /**
+     * º ª þ Þ ã Ã: Windows-1250 Romanian read as Latin-1. È Ä Ã: the first
+     * byte of a UTF-8 ș ț ă î â read as Latin-1.
+     */
+    private const val MOJIBAKE_SIGNS = "ºªþÞãÃÈÄ"
 
     @Provides fun songDao(db: HarmonyDatabase) = db.songDao()
     @Provides fun collectionDao(db: HarmonyDatabase) = db.collectionDao()

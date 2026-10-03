@@ -54,6 +54,12 @@ certificate.
   through SpotiFLAC or Soulseek.
 - **FLAC compatibility fix.** FFmpeg runs from its own verified library set.
 - **Smart Shuffle** reshuffles the queue correctly.
+- **Romanian letters in tags.** Titles, artists and albums tagged by older Windows software
+  showed up as "ºtefan", "Þara" or "Fãrã", and UTF-8 tags in the wrong frame as "È™tefan".
+  Harmony now recognises both mistakes and restores ș ț ă î â (in the correct comma-below
+  form), leaving correct text in any language alone. Songs already in the library that show
+  the problem are read again on the next scan, keeping their playlists, favourites and
+  play counts.
 - **Crossfade** ends without a hitch. When the fade finishes, Harmony's main player has to
   take the next song over from the crossfade player. It used to do that before it was
   actually making sound, and up to ~200 ms out of step, which was heard as a short catch

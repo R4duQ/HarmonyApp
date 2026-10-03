@@ -17,6 +17,8 @@ class ScanLibraryUseCaseTest {
         override suspend fun currentScanKeys() = saved.map { ScanKey(it.song.uri, it.fileSizeBytes, it.lastModified) }
         override suspend fun upsert(tracks: List<ScannedTrack>) { saved.addAll(tracks) }
         override suspend fun removeByUris(uris: List<String>) { }
+        var pruned = 0
+        override suspend fun pruneOrphans() { pruned++ }
     }
     private fun scanner(events: () -> Flow<ScanEvent>) = object : MediaScanGateway {
         override fun scan(knownKeys: Collection<ScanKey>, force: Boolean) = events()
@@ -27,6 +29,13 @@ class ScanLibraryUseCaseTest {
         val scan = ScanLibraryUseCase(scanner { flowOf(ScanEvent.TrackScanned(track, 0, 1), ScanEvent.Completed(1, 0, 0, 0)) }, writer)
         scan().first { it is ScanEvent.Completed }
         assertEquals(listOf(track), writer.saved)
+    }
+    @Test fun emptyAlbumsAndArtistsArePrunedOnlyAfterFilesWereReadAgain() = runBlocking {
+        val writer = Writer()
+        ScanLibraryUseCase(scanner { flowOf(ScanEvent.TrackScanned(track, 0, 1), ScanEvent.Completed(0, 1, 0, 0)) }, writer)().collect()
+        assertEquals(1, writer.pruned)
+        ScanLibraryUseCase(scanner { flowOf(ScanEvent.TrackScanned(track, 0, 1), ScanEvent.Completed(1, 0, 0, 0)) }, writer)().collect()
+        assertEquals(1, writer.pruned)
     }
     @Test fun concurrentManualAndBackgroundScansDoNotOverlap() = runBlocking {
         var active = 0
