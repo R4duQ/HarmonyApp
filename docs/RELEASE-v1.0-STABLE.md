@@ -118,6 +118,13 @@ certificate.
     falling back in about 6 s. A gauge shows how loud it is around you, from a quiet room to a bus.
     A notification shows while this is on; nothing is recorded or sent. The equalizer also now switches on and off at once,
   instead of at the next seek or song.
+- **New mini player.** The bar above the navigation is now a card with the record half out of
+  it, turning while the music plays, coasting to a stop on pause and spinning on to the next
+  song. It shows where the music is playing (AirPods, phone speaker, car…), the song, a
+  rainbow wave that runs along as it plays (drag it to seek), shuffle, previous, play/pause,
+  next and repeat, and the next songs as chips you can tap to play. The open button sits in a
+  notch in the corner. On a light page the card is dark, on a dark page it is light. Tap it or
+  swipe up to open Now Playing, swipe sideways to skip.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
