@@ -78,12 +78,16 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -230,7 +234,34 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
     val dragX = remember { Animatable(0f) }
     var skipForward by remember { mutableStateOf(true) }
 
-    BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+    // Swipe up to open Now Playing: the card rises with the finger (px, 0 or less).
+    val lift = remember { Animatable(0f) }
+    // 0 -> 1 as the card arrives (and overshoots a little): the record spins in, the content settles.
+    val entrance = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { entrance.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = 210f)) }
+
+    val tapLiftPx = with(LocalDensity.current) { TAP_LIFT.toPx() }
+    val liftFullPx = with(LocalDensity.current) { LIFT_FULL.toPx() }
+
+    /** Opens Now Playing with the card already on its way up to [liftPx], whatever started it. */
+    fun expand(liftPx: Float) {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        onExpand()
+        scope.launch { lift.animateTo(liftPx, tween(240, easing = FastOutSlowInEasing)) }
+    }
+
+    BoxWithConstraints(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .graphicsLayer {
+                val rise = (-lift.value / LIFT_FULL.toPx()).coerceIn(0f, 1.4f)
+                translationY = lift.value
+                scaleX = 1f + 0.05f * rise
+                scaleY = 1f + 0.05f * rise
+                transformOrigin = TransformOrigin(0.5f, 1f)
+            },
+    ) {
         val disc = (maxWidth * 0.27f).coerceIn(84.dp, 120.dp)
         val buttonSize = 44.dp
         val shape = remember(buttonSize) { NotchedCardShape(cornerRadius = 28.dp, notchRadius = buttonSize / 2, gap = 6.dp, fillet = 10.dp) }
@@ -246,13 +277,35 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                     .border(1.5.dp, Brush.linearGradient(MiniAccent.Rim.map { it.copy(alpha = 0.7f) }), shape)
                     .testTag(MiniPlayerTags.CARD)
                     .semantics { contentDescription = "Now playing: ${ui.song.title} by ${ui.song.artist}. Open the player." }
-                    .clickable(onClick = { onExpand() })
+                    .clickable(onClick = { expand(-tapLiftPx) })
                     .pointerInput(Unit) {
+                        // Up follows the finger one to one (with some give past the full lift);
+                        // down barely moves, since there is nowhere to go.
+                        val full = LIFT_FULL.toPx()
+                        val tracker = VelocityTracker()
                         var total = 0f
+                        fun shown(t: Float) = when {
+                            t > 0f -> t * 0.2f
+                            -t <= full -> t
+                            else -> -(full + (-t - full) * 0.35f)
+                        }
                         detectVerticalDragGestures(
-                            onDragStart = { total = 0f },
-                            onVerticalDrag = { _, amount -> total += amount },
-                            onDragEnd = { if (total < -SWIPE_UP_PX) onExpand() },
+                            onDragStart = { total = 0f; tracker.resetTracking() },
+                            onVerticalDrag = { change, amount ->
+                                change.consume()
+                                tracker.addPointerInputChange(change)
+                                total += amount
+                                scope.launch { lift.snapTo(shown(total)) }
+                            },
+                            onDragEnd = {
+                                val velocity = tracker.calculateVelocity().y
+                                if (total < -SWIPE_UP_PX || velocity < -FLING_UP_PX_PER_S) {
+                                    expand(-full * 1.3f)
+                                } else {
+                                    scope.launch { lift.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = 380f)) }
+                                }
+                            },
+                            onDragCancel = { scope.launch { lift.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = 380f)) } },
                         )
                     }
                     .pointerInput(Unit) {
@@ -285,7 +338,13 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                 Column(
                     Modifier
                         .padding(start = disc / 2 + 12.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
-                        .graphicsLayer { translationX = dragX.value },
+                        .graphicsLayer {
+                            translationX = dragX.value
+                            // Settles in just behind the record as the card arrives.
+                            val e = entrance.value
+                            alpha = (e * 1.5f - 0.4f).coerceIn(0f, 1f)
+                            translationY = (1f - e) * 14.dp.toPx()
+                        },
                 ) {
                     Row(Modifier.fillMaxWidth().padding(end = buttonSize + 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         DeviceChip(ui.deviceLabel, ui.deviceIcon, colors)
@@ -346,20 +405,27 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                 }
             }
             // Outside the card's clip, in the bite taken out of its corner.
-            ExpandButton(onExpand, Modifier.align(Alignment.TopEnd).size(buttonSize))
+            ExpandButton({ expand(-tapLiftPx) }, Modifier.align(Alignment.TopEnd).size(buttonSize))
         }
         Disc(
             artworkUri = ui.song.artworkUri,
             songId = ui.song.id,
             playing = ui.isPlaying,
             nudge = dragX.value,
-            onClick = onExpand,
+            rise = { (-lift.value / liftFullPx).coerceIn(0f, 1.4f) },
+            entrance = { entrance.value },
+            onClick = { expand(-tapLiftPx) },
             modifier = Modifier.align(Alignment.CenterStart).size(disc),
         )
     }
 }
 
 private const val SWIPE_UP_PX = 90f
+private const val FLING_UP_PX_PER_S = 1_400f
+
+/** How far the card rises at full swipe before it gives; and the small hop a tap gives it. */
+private val LIFT_FULL = 150.dp
+private val TAP_LIFT = 36.dp
 
 // ---------------------------------------------------------------------------
 // The record
@@ -372,7 +438,18 @@ private const val SWIPE_UP_PX = 90f
  * the finger.
  */
 @Composable
-private fun Disc(artworkUri: String?, songId: Long, playing: Boolean, nudge: Float, onClick: () -> Unit, modifier: Modifier) {
+private fun Disc(
+    artworkUri: String?,
+    songId: Long,
+    playing: Boolean,
+    nudge: Float,
+    /** 0..1.4 as the card is swiped up: the record grows and rises ahead of it. */
+    rise: () -> Float,
+    /** 0 -> 1 (overshooting) as the card arrives: the record spins and grows into place. */
+    entrance: () -> Float,
+    onClick: () -> Unit,
+    modifier: Modifier,
+) {
     val turn = remember { Animatable(0f) }
     var firstSong by remember { mutableStateOf(true) }
     LaunchedEffect(playing) {
@@ -396,9 +473,14 @@ private fun Disc(artworkUri: String?, songId: Long, playing: Boolean, nudge: Flo
     Box(
         modifier
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                rotationZ = turn.value + nudge * 0.4f
+                val r = rise()
+                val e = entrance()
+                val grow = scale * (1f + 0.3f * r) * (0.55f + 0.45f * e)
+                scaleX = grow
+                scaleY = grow
+                translationY = -r * size.height * 0.35f
+                rotationZ = turn.value + nudge * 0.4f - (1f - e) * 160f
+                alpha = e.coerceIn(0f, 1f)
             }
             .shadow(14.dp, CircleShape, ambientColor = MiniAccent.Purple, spotColor = MiniAccent.Purple)
             .clip(CircleShape)

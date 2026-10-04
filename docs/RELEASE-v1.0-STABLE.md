@@ -125,6 +125,11 @@ certificate.
   next and repeat, and the next songs as chips you can tap to play. The open button sits in a
   notch in the corner. On a light page the card is dark, on a dark page it is light. Tap it or
   swipe up to open Now Playing, swipe sideways to skip.
+  - *Opening and closing the player is animated.* Swiping up lifts the card with your finger
+    while the record grows and rises ahead of it; let go high enough (or flick) and it carries
+    on into Now Playing, which grows up out of it; otherwise it springs back. Closing Now
+    Playing shrinks it back down, and the card drops into place from above with a little
+    bounce, its record spinning in and the controls settling in after it.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
