@@ -19,6 +19,7 @@ import androidx.lifecycle.viewModelScope
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.core.model.AutoEqDesign
 import com.harmony.core.model.AutoEqSettings
+import com.harmony.core.model.ClaritySettings
 import com.harmony.core.model.OutputForms
 import com.harmony.core.model.RoomCorrection
 import com.harmony.core.ui.component.EditorialPalette
@@ -71,12 +72,18 @@ class AutoEqViewModel @Inject constructor(
             calibration = cal,
             playing = player.isPlaying,
             nowPlaying = player.currentSong?.let { "${it.title} · ${it.artist}" },
+            clarity = s.clarity,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AutoEqUiState())
 
     fun setTone(on: Boolean) = setAuto { it.copy(tone = on) }
     fun setRoom(on: Boolean) = setAuto { it.copy(room = on) }
     fun setNoise(on: Boolean) = setAuto { it.copy(noise = on) }
+    fun setClarity(on: Boolean) = setAuto { it.copy(clarity = on) }
+
+    fun setClaritySettings(clarity: ClaritySettings) {
+        viewModelScope.launch { settings.setClarity(clarity) }
+    }
 
     /** Switching a part on also switches the equalizer on: Auto runs inside it. */
     private fun setAuto(change: (AutoEqSettings) -> AutoEqSettings) {
@@ -174,6 +181,8 @@ fun AutoTab(palette: EditorialPalette, viewModel: AutoEqViewModel = hiltViewMode
             onCalibrate = { withMicrophone(viewModel::calibrate) },
             onCancelCalibration = viewModel::cancelCalibration,
             onForgetCorrection = viewModel::forgetCorrection,
+            onClarity = viewModel::setClarity,
+            onClaritySettings = viewModel::setClaritySettings,
         )
     }
     AutoEqContent(state, actions, palette)

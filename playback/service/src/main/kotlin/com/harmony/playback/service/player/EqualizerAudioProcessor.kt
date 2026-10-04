@@ -50,7 +50,9 @@ import kotlin.math.tanh
  * pre-amp; smoothing and the soft limiter apply to both.
  *
  * The automatic equalizer ([AutoEqLayer]) runs after either, reading its
- * inputs from [AutoEqLive]; the pre-amp makes room for its boosts too. The
+ * inputs from [AutoEqLive]; the pre-amp makes room for its boosts too.
+ * Clarity ([ClarityLayer]) comes last, so it hears exactly what is about to
+ * be played, and keeps its own level by loudness matching. The
  * processor stays in the chain whenever the format suits it and passes
  * audio through untouched while there is nothing to do, so switching the
  * equalizer on mid-song takes effect at once instead of at the next seek.
@@ -110,6 +112,9 @@ class EqualizerAudioProcessor(
     /** Audio thread only. Rebuilt when the format changes or the automatic part is switched back on. */
     private var auto: AutoEqLayer? = null
 
+    /** Audio thread only, like [auto]. */
+    private var clarity: ClarityLayer? = null
+
     private class TrackRequest(val id: String?)
 
     @Volatile
@@ -117,6 +122,7 @@ class EqualizerAudioProcessor(
     private var trackHandled: TrackRequest? = null
     private var currentTrack: String? = null
     private var publishCountdown = 0
+    private var clarityCountdown = 0
 
     /** Auto pre-amp target (linear); audio thread eases toward it. */
     @Volatile
@@ -264,6 +270,7 @@ class EqualizerAudioProcessor(
             trackHandled = request
             currentTrack = request?.id
             auto?.startTrack(currentTrack)
+            clarity?.startTrack()
         }
         val autoOn = eqOn && AutoEqLive.active
         if (!autoOn) auto = null
@@ -279,6 +286,13 @@ class EqualizerAudioProcessor(
             roomDb = AutoEqLive.roomDb
             noiseDb = AutoEqLive.noiseDb
         }
+        val clarityOn = layer != null && AutoEqLive.clarityEnabled
+        if (!clarityOn) clarity = null
+        val cl = if (!clarityOn) null else {
+            clarity?.takeIf { it.sampleRate == sampleRate && it.channels == channels }
+                ?: ClarityLayer(sampleRate, channels).also { clarity = it }
+        }
+        cl?.settings = AutoEqLive.clarity
 
         // Pass through untouched rather than risk an out-of-bounds read on
         // the audio thread. If a rebuild raced a format change the filter
@@ -298,6 +312,7 @@ class EqualizerAudioProcessor(
         val autoHeadroom = layer?.headroomDb ?: 0f
         val target = if (autoHeadroom > 0f) targetPreamp * 10f.pow(-autoHeadroom / 20f) else targetPreamp
         var mono = 0f
+        var clarityMono = 0f
         val lastCh = channels - 1
         // ~10 ms exponential ease at 48 kHz (per FRAME, so channel-coherent).
         val ease = PREAMP_EASE
@@ -316,6 +331,11 @@ class EqualizerAudioProcessor(
                 if (bank != null) sample = bank.process(sample, frameCh)
                 for (stage in localStages) sample = stage.process(sample, frameCh)
                 if (layer != null) sample = layer.process(sample, frameCh)
+                if (cl != null) {
+                    clarityMono += sample
+                    sample = cl.process(sample, frameCh)
+                    if (frameCh == lastCh) { cl.analyze(clarityMono / channels); clarityMono = 0f }
+                }
                 output.putFloat(softLimit(sample * preamp))
                 frameCh = (frameCh + 1) % channels
             }
@@ -333,6 +353,11 @@ class EqualizerAudioProcessor(
                 if (bank != null) sample = bank.process(sample, frameCh)
                 for (stage in localStages) sample = stage.process(sample, frameCh)
                 if (layer != null) sample = layer.process(sample, frameCh)
+                if (cl != null) {
+                    clarityMono += sample
+                    sample = cl.process(sample, frameCh)
+                    if (frameCh == lastCh) { cl.analyze(clarityMono / channels); clarityMono = 0f }
+                }
                 output.putShort(
                     (softLimit(sample * preamp) * 32767f).roundToInt().toShort()
                 )
@@ -342,10 +367,18 @@ class EqualizerAudioProcessor(
         currentPreamp = preamp
         output.flip()
         if (publishesAutoEq && layer != null) {
-            publishCountdown -= remaining / (channels * if (encoding == C.ENCODING_PCM_FLOAT) 4 else 2)
+            val frames = remaining / (channels * if (encoding == C.ENCODING_PCM_FLOAT) 4 else 2)
+            publishCountdown -= frames
             if (publishCountdown <= 0) {
                 publishCountdown = sampleRate / 2
-                AutoEqLive.publishTone(layer.toneDb, layer.heardSeconds)
+                AutoEqLive.publishTone(layer.toneDb, layer.heardSeconds, cl?.octavesDb())
+            }
+            if (cl != null && AutoEqLive.clarityWanted) {
+                clarityCountdown -= frames
+                if (clarityCountdown <= 0) {
+                    clarityCountdown = sampleRate / CLARITY_READOUTS_PER_SECOND
+                    AutoEqLive.publishClarity(cl.readout())
+                }
             }
         }
     }
@@ -414,5 +447,6 @@ class EqualizerAudioProcessor(
         const val Q_BAND = 1.1f
         const val LIMIT_KNEE = 0.92f
         const val PREAMP_EASE = 0.002f // ~10 ms time constant at 48 kHz
+        const val CLARITY_READOUTS_PER_SECOND = 20
     }
 }

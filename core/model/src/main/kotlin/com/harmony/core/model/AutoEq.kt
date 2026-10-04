@@ -10,8 +10,8 @@ import kotlin.math.sinh
 import kotlin.random.Random
 
 /**
- * The automatic equalizer's three switches. Each adds a gentle correction on
- * top of whatever the listener set by hand, and each can be used alone.
+ * The automatic equalizer's four switches. Each adds a correction on top of
+ * whatever the listener set by hand, and each can be used alone.
  */
 data class AutoEqSettings(
     /** Even out each song's tonal balance towards a typical well-mastered record. */
@@ -20,8 +20,10 @@ data class AutoEqSettings(
     val room: Boolean = false,
     /** On headphones, lift what the noise around you is covering up. */
     val noise: Boolean = false,
+    /** Clarity: the hearing model that brings out what is covered up and tames what pushes forward. */
+    val clarity: Boolean = false,
 ) {
-    val any: Boolean get() = tone || room || noise
+    val any: Boolean get() = tone || room || noise || clarity
 }
 
 /** A speaker-and-room correction measured with the microphone, one gain per EQ band. */
@@ -56,8 +58,10 @@ data class AutoEqReadout(
     val songHeardSeconds: Float = 0f,
     /** Loudness of the surroundings in dB SPL while listening, null when the microphone is off. */
     val ambientDb: Float? = null,
+    /** Clarity's curve playing now, seen on the ten octaves. */
+    val clarityDb: List<Float> = ZERO,
 ) {
-    val totalDb: List<Float> get() = AutoEqDesign.combine(toneDb, roomDb, noiseDb)
+    val totalDb: List<Float> get() = AutoEqDesign.combine(toneDb, roomDb, noiseDb, clarityDb)
 
     private companion object {
         val ZERO = List(EqSettings.BAND_COUNT) { 0f }

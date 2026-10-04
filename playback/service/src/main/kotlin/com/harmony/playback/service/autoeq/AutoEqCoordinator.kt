@@ -2,6 +2,7 @@ package com.harmony.playback.service.autoeq
 
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.core.model.AutoEqDesign
+import com.harmony.core.model.ClaritySettings
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.ListeningKind
 import com.harmony.core.model.OutputForms
@@ -22,6 +23,7 @@ import javax.inject.Singleton
  * device playing, and hands it to the audio chain through [AutoEqLive]:
  *
  *  - whether it runs at all (equalizer on, at least one automatic part on);
+ *  - whether Clarity runs, and how it is set;
  *  - the room correction filed for this output, if room correction is on;
  *  - whether the microphone should be listening for noise: only while music
  *    plays on headphones, where it hears the room and not the music.
@@ -54,10 +56,15 @@ class AutoEqCoordinator @Inject constructor(
                     ?.takeIf { s.autoEq.room && kind != ListeningKind.HEADPHONES }
                     ?.gainsDb?.toFloatArray()
                     ?: FloatArray(EqSettings.BAND_COUNT)
-                Decision(on, s.autoEq.tone, room, on && s.autoEq.noise && kind == ListeningKind.HEADPHONES && isPlaying)
+                Decision(
+                    on, s.autoEq.tone, room, on && s.autoEq.noise && kind == ListeningKind.HEADPHONES && isPlaying,
+                    s.autoEq.clarity, s.clarity,
+                )
             }.collect { d ->
                 AutoEqLive.active = d.on
                 AutoEqLive.toneEnabled = d.tone
+                AutoEqLive.clarityEnabled = d.clarity
+                AutoEqLive.clarity = d.claritySettings
                 AutoEqLive.setRoom(d.room)
                 _listen.value = d.listen
                 AutoEqLive.refresh()
@@ -72,5 +79,12 @@ class AutoEqCoordinator @Inject constructor(
         _listen.value = false
     }
 
-    private class Decision(val on: Boolean, val tone: Boolean, val room: FloatArray, val listen: Boolean)
+    private class Decision(
+        val on: Boolean,
+        val tone: Boolean,
+        val room: FloatArray,
+        val listen: Boolean,
+        val clarity: Boolean,
+        val claritySettings: ClaritySettings,
+    )
 }

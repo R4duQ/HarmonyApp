@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.Lock
@@ -55,6 +56,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.model.AutoEqDesign
 import com.harmony.core.model.AutoEqReadout
 import com.harmony.core.model.AutoEqSettings
+import com.harmony.core.model.ClarityReadout
+import com.harmony.core.model.ClaritySettings
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.ListeningKind
 import com.harmony.core.model.RoomCorrection
@@ -65,6 +68,7 @@ import com.harmony.core.ui.component.EditorialSwitch
 import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.domain.playback.AudioLevels
+import com.harmony.domain.playback.AutoEqLive
 import kotlinx.coroutines.flow.StateFlow
 import java.time.Instant
 import java.time.ZoneId
@@ -103,6 +107,8 @@ data class AutoEqUiState(
     val playing: Boolean = false,
     /** "Title · Artist" of the song playing, if any. */
     val nowPlaying: String? = null,
+    /** How Clarity is set; whether it runs is [AutoEqSettings.clarity]. */
+    val clarity: ClaritySettings = ClaritySettings(),
 )
 
 class AutoEqActions(
@@ -112,6 +118,8 @@ class AutoEqActions(
     val onCalibrate: () -> Unit = {},
     val onCancelCalibration: () -> Unit = {},
     val onForgetCorrection: () -> Unit = {},
+    val onClarity: (Boolean) -> Unit = {},
+    val onClaritySettings: (ClaritySettings) -> Unit = {},
 )
 
 internal object AutoTags {
@@ -124,7 +132,7 @@ internal object AutoTags {
     const val GAUGE = "auto_noise_gauge"
 }
 
-/** The three parts' colours, the same in the hero, the rings and on their cards. */
+/** The parts' colours, the same in the hero, the rings and on their cards. */
 private object AutoColors {
     val Song = Color(0xFF5B8CFF)
     val SongLight = Color(0xFF9DB8FF)
@@ -141,6 +149,7 @@ private object AutoColors {
  * The Auto tab: a glowing hero that shows what the automatic equalizer is
  * doing right now (the total curve over the live spectrum, and a ring for
  * each part), then a card per part with its own switch, curve and readout.
+ * Clarity, the hearing model, comes first with its live view and controls.
  */
 @Composable
 fun AutoEqContent(
@@ -148,6 +157,7 @@ fun AutoEqContent(
     actions: AutoEqActions,
     palette: EditorialPalette,
     spectrum: StateFlow<FloatArray> = AudioLevels.spectrum,
+    clarityLive: StateFlow<ClarityReadout> = AutoEqLive.clarityLive,
 ) {
     Column(
         Modifier
@@ -158,6 +168,25 @@ fun AutoEqContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Hero(state, spectrum)
+        PartCard(
+            icon = Icons.Rounded.AutoAwesome,
+            colors = ClarityColors.Clarity to ClarityColors.ClarityLight,
+            title = "Clarity",
+            status = when {
+                !state.auto.clarity -> null
+                !state.eqOn -> "PAUSED"
+                state.playing -> "LISTENING"
+                else -> "READY"
+            },
+            subtitle = "A model of human hearing listens to the music about 90 times a second and moves 24 bands " +
+                "as it plays: it brings out what other sounds cover up and holds back what pushes forward.",
+            checked = state.auto.clarity,
+            onChecked = actions.onClarity,
+            palette = palette,
+            tag = ClarityTags.SWITCH,
+        ) {
+            if (state.auto.clarity) ClarityDetail(state, clarityLive, actions.onClaritySettings, palette)
+        }
         PartCard(
             icon = Icons.Rounded.GraphicEq,
             colors = AutoColors.Song to AutoColors.SongLight,
@@ -226,9 +255,9 @@ fun AutoEqContent(
         ) {
             Icon(Icons.Rounded.Lock, contentDescription = null, tint = palette.muted, modifier = Modifier.size(16.dp))
             Text(
-                "Auto adds small corrections on top of Winamp. The microphone is used only while measuring a " +
-                    "speaker and, with noise adaptation on, while music plays on headphones. Nothing is recorded " +
-                    "or sent anywhere.",
+                "Auto adds its corrections on top of Winamp. Clarity listens to the music itself, inside the app. " +
+                    "The microphone is used only while measuring a speaker and, with noise adaptation on, while " +
+                    "music plays on headphones. Nothing is recorded or sent anywhere.",
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
                 color = palette.muted,
@@ -259,6 +288,7 @@ private fun Hero(state: AutoEqUiState, spectrum: StateFlow<FloatArray>) {
                     radius = r, center = Offset(x, y),
                 )
                 glow(AutoColors.Song, size.width * 0.1f, size.height * 0.05f, size.width * 0.75f)
+                glow(ClarityColors.Clarity, size.width * 0.75f, size.height * 0.0f, size.width * 0.55f)
                 glow(AutoColors.Room, size.width * 0.95f, size.height * 0.35f, size.width * 0.6f)
                 glow(AutoColors.Noise, size.width * 0.35f, size.height * 1.0f, size.width * 0.7f)
             }
@@ -327,7 +357,8 @@ private fun Hero(state: AutoEqUiState, spectrum: StateFlow<FloatArray>) {
         Spacer(Modifier.height(14.dp))
         HeroCurve(r, running, spectrum, Modifier.fillMaxWidth().height(150.dp).testTag(AutoTags.CURVE))
         Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Ring("Clarity", r.clarityDb, ClarityColors.Clarity, state.auto.clarity && running)
             Ring("Song", r.toneDb, AutoColors.Song, state.auto.tone && running)
             Ring("Room", r.roomDb, AutoColors.Room, state.auto.room && running)
             Ring("Noise", r.noiseDb, AutoColors.Noise, state.auto.noise && running)
@@ -388,6 +419,7 @@ private fun HeroCurve(r: AutoEqReadout, running: Boolean, spectrum: StateFlow<Fl
             }
             drawPath(fill, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.20f * alpha), Color.White.copy(alpha = 0.02f))))
             val thin = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round)
+            drawPath(curve(r.clarityDb), ClarityColors.ClarityLight.copy(alpha = alpha), style = thin)
             drawPath(curve(r.toneDb), AutoColors.SongLight.copy(alpha = alpha), style = thin)
             drawPath(curve(r.roomDb), AutoColors.RoomLight.copy(alpha = alpha), style = thin)
             drawPath(curve(r.noiseDb), AutoColors.NoiseLight.copy(alpha = alpha), style = thin)
@@ -414,7 +446,7 @@ private fun Ring(label: String, db: List<Float>, color: Color, active: Boolean) 
     val biggest = db.maxByOrNull { abs(it) } ?: 0f
     val fill = (abs(biggest) / 6f).coerceIn(0f, 1f)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
             Canvas(Modifier.fillMaxSize()) {
                 val stroke = 5.dp.toPx()
                 val inset = stroke / 2
@@ -449,7 +481,7 @@ private fun Ring(label: String, db: List<Float>, color: Color, active: Boolean) 
 }
 
 /** Smooth (Catmull-Rom) value of the band gains [db] at fractional band [t]. */
-private fun interpolate(db: List<Float>, t: Float): Float {
+internal fun interpolate(db: List<Float>, t: Float): Float {
     if (db.isEmpty()) return 0f
     val i = t.toInt().coerceIn(0, db.size - 1)
     val f = t - i

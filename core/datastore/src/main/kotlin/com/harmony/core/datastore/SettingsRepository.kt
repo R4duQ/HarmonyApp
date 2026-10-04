@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.harmony.core.model.AutoEqSettings
+import com.harmony.core.model.ClaritySettings
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.EqStyle
 import com.harmony.core.model.OutputForm
@@ -53,6 +54,8 @@ data class UserSettings(
     val autoEq: AutoEqSettings = AutoEqSettings(),
     /** Speaker/room corrections measured with the microphone, keyed by AutoEqDesign.outputKey. */
     val roomCorrections: Map<String, RoomCorrection> = emptyMap(),
+    /** How Clarity is set; whether it runs is [AutoEqSettings.clarity]. */
+    val clarity: ClaritySettings = ClaritySettings(),
 )
 
 /**
@@ -91,6 +94,12 @@ class SettingsRepository @Inject constructor(
         val AUTO_EQ_TONE = booleanPreferencesKey("auto_eq_tone")
         val AUTO_EQ_ROOM = booleanPreferencesKey("auto_eq_room")
         val AUTO_EQ_NOISE = booleanPreferencesKey("auto_eq_noise")
+        val AUTO_EQ_CLARITY = booleanPreferencesKey("auto_eq_clarity")
+        val CLARITY_RECOVER = floatPreferencesKey("clarity_recover")
+        val CLARITY_TAME = floatPreferencesKey("clarity_tame")
+        val CLARITY_BIAS = floatPreferencesKey("clarity_bias")
+        val CLARITY_BRIGHTEN = floatPreferencesKey("clarity_brighten")
+        val CLARITY_BOOST = floatPreferencesKey("clarity_boost_db")
         val ROOM_CORRECTIONS = stringPreferencesKey("room_corrections_v1") // one "key<tab>label<tab>millis<tab>csv" per line
         val LAST_QUEUE_IDS = stringPreferencesKey("last_queue_song_ids") // csv of Longs
         val LAST_QUEUE_INDEX = intPreferencesKey("last_queue_index")
@@ -120,8 +129,18 @@ class SettingsRepository @Inject constructor(
                 tone = p[Keys.AUTO_EQ_TONE] ?: false,
                 room = p[Keys.AUTO_EQ_ROOM] ?: false,
                 noise = p[Keys.AUTO_EQ_NOISE] ?: false,
+                clarity = p[Keys.AUTO_EQ_CLARITY] ?: false,
             ),
             roomCorrections = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]),
+            clarity = ClaritySettings().let { d ->
+                ClaritySettings(
+                    recover = p[Keys.CLARITY_RECOVER] ?: d.recover,
+                    tame = p[Keys.CLARITY_TAME] ?: d.tame,
+                    bias = p[Keys.CLARITY_BIAS] ?: d.bias,
+                    brighten = p[Keys.CLARITY_BRIGHTEN] ?: d.brighten,
+                    boostDb = p[Keys.CLARITY_BOOST] ?: d.boostDb,
+                ).clamped()
+            },
         )
     }
 
@@ -154,6 +173,16 @@ class SettingsRepository @Inject constructor(
         it[Keys.AUTO_EQ_TONE] = auto.tone
         it[Keys.AUTO_EQ_ROOM] = auto.room
         it[Keys.AUTO_EQ_NOISE] = auto.noise
+        it[Keys.AUTO_EQ_CLARITY] = auto.clarity
+    }
+
+    suspend fun setClarity(clarity: ClaritySettings) = edit {
+        val c = clarity.clamped()
+        it[Keys.CLARITY_RECOVER] = c.recover
+        it[Keys.CLARITY_TAME] = c.tame
+        it[Keys.CLARITY_BIAS] = c.bias
+        it[Keys.CLARITY_BRIGHTEN] = c.brighten
+        it[Keys.CLARITY_BOOST] = c.boostDb
     }
 
     /** Files [correction] under [key] (AutoEqDesign.outputKey), replacing an older measurement. */
