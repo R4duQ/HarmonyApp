@@ -83,9 +83,20 @@ certificate.
     centre.
   - *Presets*: all 18 Winamp presets as cards, each with its own curve. The one in use glows gold.
   - *Signal*: the preamp, the biggest boost and cut, and the output.
-- **Automatic equalizer.** The Auto tab adjusts the sound on its own, on top of Winamp, in three
+- **Automatic equalizer.** The Auto tab adjusts the sound on its own, on top of Winamp, in four
   parts that can each be switched on alone. A glowing header shows what it's doing: the total curve
   over the live spectrum, and a ring for each part. Each part has its own card, colour and curve:
+  - *Clarity*: a model of human hearing listens to the music about 90 times a second, in 24 bands
+    spaced the way the ear resolves pitch. It works out which sounds are covered up by louder ones
+    nearby (the masking threshold) and which push forward, and moves 24 filters to match as the music
+    plays: it brings out what is covered up but still there, and holds back resonances, sudden
+    harshness and boom. Deep-buried sounds and what you couldn't hear anyway, like the empty top of a
+    lossy file, are left alone, so hiss isn't brought up. The level is matched by loudness, so Clarity
+    doesn't win by being louder. Five controls: *Recover*, *Tame*, *Bias* (leans towards one or the
+    other), *Brighten* (darker or brighter around 1 kHz) and *Boost* (output level), plus six starting
+    points (Gentle, Balanced, Detail, Smooth, Warm, Airy). A live view shows what the model hears, the
+    masking line, and what it brings out in cyan and holds back in pink. Clarity listens to the music
+    inside the app and doesn't use the microphone.
   - *Song by song*: Harmony listens to each song as it plays and evens out its tone towards a
     typical well-mastered record, at most a few dB (a little body for thin recordings, a little less
     edge for harsh ones). It fades in over the first seconds, and a song played again starts with its
