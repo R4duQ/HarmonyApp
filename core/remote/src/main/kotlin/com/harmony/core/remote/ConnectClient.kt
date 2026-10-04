@@ -1,9 +1,11 @@
 package com.harmony.core.remote
 
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.InputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /** Refused by the computer: not paired any more, or a wrong code. */
 class ConnectRefused(message: String) : IOException(message)
@@ -42,27 +44,67 @@ class ConnectClient(
         runCatching { call("POST", Connect.PATH_DISCONNECT, "{}") }
     }
 
+    /**
+     * One request over a plain socket. Not HttpURLConnection: on Android that
+     * refuses unencrypted HTTP unless the whole app allows it, and this only
+     * ever talks to a computer on the home network.
+     */
     private fun call(method: String, path: String, body: String?, auth: Boolean = true): String {
-        val connection = URL("http://$host:$port$path").openConnection() as HttpURLConnection
-        try {
-            connection.requestMethod = method
-            connection.connectTimeout = timeoutMs
-            connection.readTimeout = timeoutMs
-            connection.useCaches = false
-            if (auth) token?.let { connection.setRequestProperty(Connect.TOKEN_HEADER, it) }
-            if (body != null) {
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        val bytes = body?.toByteArray(Charsets.UTF_8)
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(host, port), timeoutMs)
+            socket.soTimeout = timeoutMs
+            val head = StringBuilder()
+                .append(method).append(' ').append(path).append(" HTTP/1.1\r\n")
+                .append("Host: ").append(host).append(':').append(port).append("\r\n")
+                .append("Connection: close\r\n")
+            if (auth) token?.let { head.append(Connect.TOKEN_HEADER).append(": ").append(it).append("\r\n") }
+            if (bytes != null) {
+                head.append("Content-Type: application/json; charset=utf-8\r\n")
+                head.append("Content-Length: ").append(bytes.size).append("\r\n")
             }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.use { String(it.readBytes(), Charsets.UTF_8) }.orEmpty()
+            head.append("\r\n")
+            val out = socket.getOutputStream()
+            out.write(head.toString().toByteArray(Charsets.ISO_8859_1))
+            if (bytes != null) out.write(bytes)
+            out.flush()
+            val input = BufferedInputStream(socket.getInputStream())
+            val status = readLine(input) ?: throw IOException("no answer")
+            val code = status.split(' ').getOrNull(1)?.toIntOrNull() ?: throw IOException("bad answer: $status")
+            var length = -1
+            while (true) {
+                val line = readLine(input) ?: break
+                if (line.isEmpty()) break
+                val colon = line.indexOf(':')
+                if (colon > 0 && line.substring(0, colon).trim().equals("content-length", ignoreCase = true)) {
+                    length = line.substring(colon + 1).trim().toIntOrNull() ?: -1
+                }
+            }
+            val text = String(if (length >= 0) readExactly(input, length) else input.readBytes(), Charsets.UTF_8)
             if (code == 403) throw ConnectRefused(text.ifEmpty { "refused" })
             if (code !in 200..299) throw IOException("HTTP $code: $text")
             return text
-        } finally {
-            connection.disconnect()
         }
+    }
+
+    private fun readLine(input: InputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = input.read()
+            if (b < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\n'.code) return sb.toString()
+            if (b != '\r'.code) sb.append(b.toChar())
+        }
+    }
+
+    private fun readExactly(input: InputStream, n: Int): ByteArray {
+        val buf = ByteArray(n)
+        var read = 0
+        while (read < n) {
+            val r = input.read(buf, read, n - read)
+            if (r < 0) break
+            read += r
+        }
+        return if (read == n) buf else buf.copyOf(read)
     }
 }

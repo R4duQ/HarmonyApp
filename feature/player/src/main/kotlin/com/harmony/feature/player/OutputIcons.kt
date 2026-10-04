@@ -1,6 +1,7 @@
 package com.harmony.feature.player
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.PhoneAndroid
@@ -178,6 +179,7 @@ internal object OutputIcons {
     /** The icon for the current output: its kind when known, otherwise its connection. */
     fun forOutput(type: AudioOutputType, form: OutputForm?): ImageVector = when {
         type == AudioOutputType.CAR -> Car
+        type == AudioOutputType.COMPUTER -> Icons.Rounded.Computer
         form != null && canPickForm(type) -> forForm(form, bluetooth = type == AudioOutputType.BLUETOOTH)
         else -> forType(type)
     }
@@ -188,6 +190,7 @@ internal object OutputIcons {
         AudioOutputType.WIRED -> Icons.Rounded.Headphones
         AudioOutputType.USB -> Icons.Rounded.Usb
         AudioOutputType.HDMI -> Icons.Rounded.Tv
+        AudioOutputType.COMPUTER -> Icons.Rounded.Computer
         // The phone's own speaker: a phone, so it can't be mistaken for a Bluetooth speaker.
         AudioOutputType.SPEAKER, AudioOutputType.OTHER -> Icons.Rounded.PhoneAndroid
     }

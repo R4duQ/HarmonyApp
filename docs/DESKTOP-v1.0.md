@@ -22,11 +22,15 @@ say "Windows protected your PC": choose **More info**, then **Run anyway**.
 - **Equalizer.** Winamp's equalizer, with its 18 presets, and Clarity, the same as on the phone.
 - **Harmony Connect.** Play your phone's music on the computer:
   1. Phone and computer on the same Wi-Fi.
-  2. On the phone, open the song that's playing, tap the device under the title and choose
-     the computer.
+  2. On the phone, open the song that's playing and tap where it plays, under the title
+     ("Phone speaker", your headphones): **Play on** lists the computers on the Wi-Fi.
+     Choose yours. (Not listed? Add it by the address shown on its Connect page.)
   3. Type the four-digit code shown on the computer's **Connect** page (only the first time).
 
-  The phone stays the remote and keeps the queue: play, pause, skip and seek from either side.
+  The phone stays the remote and keeps the queue: play, pause, skip and seek from either side,
+  from the app, the notification, the lock screen or your headphones' buttons. The phone's
+  volume buttons turn the computer up and down. Choose **This phone** in Play on to bring
+  the music back, paused where it was.
   The song is streamed from the phone as it plays; nothing is copied onto the computer.
   If Windows asks whether Harmony may use the network, allow it on private networks.
 
