@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **123**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 122), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **124**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 123), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -118,7 +118,14 @@ certificate.
   (HI-RES 24/96, LOSSLESS 16/44.1 or the bitrate) and the length, with a round Play button.
   Delete moved into a menu, away from Play. A counter shows where you are ("8 of 1,240"), and
   the card is now readable in dark mode.
-- Redesigned **Home** screen.
+- **Home, redesigned.**
+  - The header shows the date, the greeting and a line about right now ("2,418 songs ready when you are"), with a warm glow behind it.
+  - The song in the player gets an immersive card: a dark stage lit by its own cover's colours (Android 12+), a large cover, album and year, a pill with the sound quality (LOSSLESS · FLAC 24/96), its place in the queue, and the time played next to the progress bar.
+  - Smart Shuffle is a bright card that says how many songs it picks from.
+  - "Your library" shows songs, albums, artists and playlists as four coloured tiles.
+  - The cover rows carry more detail: each song's length and a HI-RES tag, the number of songs on each playlist, and NEW on recently added albums.
+  - Discover is a colourful banner with an Explore button.
+  - The tools each have their own colour, and the page ends with Harmony's sign-off.
 - **Playlist page, in much more detail.**
   - The header sits on a wash of the playlist's own cover colours (Android 12+), with two more records peeking out behind the cover.
   - A chip shows when the song playing comes from this playlist.
