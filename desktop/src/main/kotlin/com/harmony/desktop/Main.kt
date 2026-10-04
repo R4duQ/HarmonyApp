@@ -13,6 +13,7 @@ fun main() {
         Window(
             onCloseRequest = { app.close(); exitApplication() },
             title = "Harmony",
+            icon = androidx.compose.ui.res.painterResource("harmony-icon.png"),
             state = rememberWindowState(size = DpSize(1280.dp, 820.dp)),
         ) {
             HarmonyDesktopApp(app)

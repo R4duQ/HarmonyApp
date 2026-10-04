@@ -1,0 +1,97 @@
+name: Harmony for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'core/model/**'
+      - 'core/remote/**'
+      - 'playback/service/src/main/kotlin/com/harmony/playback/service/player/WinampFilterBank.kt'
+      - 'playback/service/src/main/kotlin/com/harmony/playback/service/player/ClarityLayer.kt'
+      - '.github/workflows/desktop.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harmony-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: desktop-v1.0
+  # LGPL build: ffmpeg runs as its own program; its licence ships alongside.
+  FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Fetch ffmpeg
+        run: |
+          set -euo pipefail
+          curl -sSL --retry 3 -o ffmpeg.zip "$FFMPEG_URL"
+          mkdir -p ffmpeg-x desktop/resources/windows
+          unzip -q ffmpeg.zip -d ffmpeg-x
+          root=$(ls -d ffmpeg-x/*/ | head -1)
+          cp "$root/bin/ffmpeg.exe" "$root/bin/ffprobe.exe" desktop/resources/windows/
+          cp "$root/LICENSE.txt" desktop/resources/windows/FFMPEG-LICENSE.txt
+          ls -la desktop/resources/windows
+
+      - name: Test
+        # The engine and Connect tests (the screenshot renders are for development).
+        run: ./gradlew -p desktop test --tests 'com.harmony.desktop.EngineAndConnectTest' "-PffmpegDir=$(cygpath -w "$(pwd)/desktop/resources/windows")" --no-daemon --stacktrace
+
+      - name: Build installers
+        run: ./gradlew -p desktop packageMsi packageExe "-PdesktopVersion=1.0.${{ github.run_number }}" --no-daemon --stacktrace
+
+      - name: Collect
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          v="1.0.${{ github.run_number }}"
+          cp desktop/build/compose/binaries/main/msi/*.msi "dist/Harmony-Windows-$v.msi"
+          cp desktop/build/compose/binaries/main/exe/*.exe "dist/Harmony-Windows-$v-setup.exe"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Harmony-Windows-${{ steps.collect.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.collect.outputs.version }}
+        run: |
+          set -euo pipefail
+          title="Harmony for Windows 1.0 (build ${{ github.run_number }})"
+          notes="docs/DESKTOP-v1.0.md"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            # Only this build's files are kept on the release.
+            for a in $(gh release view "$RELEASE_TAG" --json assets -q '.assets[].name'); do gh release delete-asset "$RELEASE_TAG" "$a" -y; done
+            gh release edit "$RELEASE_TAG" --title "$title" --notes-file "$notes"
+            gh release upload "$RELEASE_TAG" dist/*
+          else
+            gh release create "$RELEASE_TAG" --title "$title" --notes-file "$notes" --target "$GITHUB_SHA" dist/*
+          fi
