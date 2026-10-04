@@ -496,16 +496,33 @@ fun HarmonyApp(
                 // from the mini player), so it slides up over the app and
                 // slides back down on exit — the one screen with a stronger,
                 // directional transition.
+                //
+                // It grows out of the mini player: rising from the bottom
+                // edge while scaling up from a card's size, and on the way
+                // back it shrinks down into it again as the mini player
+                // drops into place.
                 enterTransition = {
                     androidx.compose.animation.slideInVertically(
-                        androidx.compose.animation.core.tween(320)
-                    ) { it } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(320))
+                        androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+                    ) { it / 2 } +
+                        androidx.compose.animation.scaleIn(
+                            androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                            initialScale = 0.82f,
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f),
+                        ) +
+                        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220))
                 },
                 exitTransition = { androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(150)) },
                 popExitTransition = {
                     androidx.compose.animation.slideOutVertically(
-                        androidx.compose.animation.core.tween(280)
-                    ) { it } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(280))
+                        androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+                    ) { it / 2 } +
+                        androidx.compose.animation.scaleOut(
+                            androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                            targetScale = 0.82f,
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f),
+                        ) +
+                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(260, delayMillis = 40))
                 },
             ) {
                 NowPlayingScreen(
@@ -565,11 +582,18 @@ fun HarmonyApp(
                     currentRoute == Routes.SPOTIFY_TRANSFER ||
                     currentRoute == Routes.NOW_PLAYING,
             )
+            // Always composed, so it can lift into Now Playing as that opens
+            // and drop back into place when it closes.
+            MiniPlayer(
+                onExpand = {
+                    if (navController.currentDestination?.route != Routes.NOW_PLAYING) {
+                        navController.navigate(Routes.NOW_PLAYING)
+                    }
+                },
+                palette = palette,
+                shown = currentRoute != Routes.NOW_PLAYING,
+            )
             if (currentRoute != Routes.NOW_PLAYING) {
-                MiniPlayer(
-                    onExpand = { navController.navigate(Routes.NOW_PLAYING) },
-                    palette = palette,
-                )
                 // A deliberate gap, not just the two components' own edge
                 // insets touching: at 6dp+6dp those two floating pills read
                 // as one stacked block. This makes them two independent
