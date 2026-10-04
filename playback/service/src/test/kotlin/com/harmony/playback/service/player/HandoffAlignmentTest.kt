@@ -34,10 +34,11 @@ class HandoffAlignmentTest {
         assertEquals(3L, HandoffAlignment.median(3, 1, 5))
     }
 
-    @Test fun `the swap keeps the total power constant`() {
+    @Test fun `the swap never adds up to more than the song itself`() {
+        // Both players carry the same song, so their gains add as amplitudes.
         for (i in 0..10) {
             val (incoming, outgoing) = HandoffAlignment.swapGains(i / 10f)
-            assertEquals(1f, incoming * incoming + outgoing * outgoing, 0.0001f)
+            assertEquals(1f, incoming + outgoing, 0.0001f)
         }
         assertEquals(0f, HandoffAlignment.swapGains(0f).first, 0.0001f)
         assertEquals(1f, HandoffAlignment.swapGains(1f).first, 0.0001f)

@@ -52,9 +52,19 @@ internal object HandoffAlignment {
     /** The middle of three readings, so one late position update doesn't count. */
     fun median(a: Long, b: Long, c: Long): Long = maxOf(minOf(a, b), minOf(maxOf(a, b), c))
 
-    /** Equal-power gains at [fraction] of the swap: (incoming, outgoing). */
+    /**
+     * Gains at [fraction] of the swap: (incoming, outgoing), always adding up
+     * to one.
+     *
+     * The two players carry the same song, a few milliseconds apart, so their
+     * signals add like one signal, not like two unrelated ones. Equal-power
+     * gains (sine and cosine) are right for unrelated songs, but on two copies
+     * of one they sum to 1.41 times the level halfway through: 3 dB louder,
+     * and over full scale on a loud master, which is heard as distortion at
+     * the end of every crossfade. Equal gains never exceed the song itself.
+     */
     fun swapGains(fraction: Float): Pair<Float, Float> {
-        val angle = fraction.coerceIn(0f, 1f) * (Math.PI.toFloat() / 2f)
-        return kotlin.math.sin(angle) to kotlin.math.cos(angle)
+        val f = fraction.coerceIn(0f, 1f)
+        return f to 1f - f
     }
 }

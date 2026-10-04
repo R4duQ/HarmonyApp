@@ -67,6 +67,14 @@ certificate.
   few milliseconds while it is still muted, and only then swaps them. The crossfade
   player also uses the same ReplayGain and EQ, so loudness and tone no longer jump at
   that moment.
+- **Crossfade starts on time and without distortion.** The next song used to start loading
+  only when the fade was due, so on large files the fade began late and short, and the
+  loading happened during the part you hear. Now it is loaded 6 seconds ahead, paused and
+  muted, and starts the moment the fade is due. The swap between the two players at the
+  end of the fade also used gains meant for two different songs; on two copies of the same
+  song they added up to 3 dB too loud, past full scale on loud recordings, which was heard
+  as a short distortion. The gains now always add up to the song's own level, and the swap
+  takes 80 ms instead of 200.
 - **Equalizer: Winamp and Auto.** The Equalizer now has two tabs, Winamp and Auto, under a
   segmented switch. The old Simple and Advanced tabs are gone. If you had set them and never
   touched Winamp, your bands are carried over to Winamp's, so the sound stays the same.
