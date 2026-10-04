@@ -19,7 +19,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-/** Overlaps a temporary player with the session player, which still owns the queue. */
+/**
+ * Overlaps a temporary player with the session player, which still owns the queue.
+ *
+ * The next song is loaded early: a few seconds before the fade, the second
+ * player is built and prepared, paused and muted, so its file is open, its
+ * decoder running and its first audio waiting. When the fade is due it only
+ * has to start, and the work of loading never lands on the part you hear.
+ */
 @UnstableApi
 class CrossfadeController(
     context: Context,
@@ -50,6 +57,9 @@ class CrossfadeController(
     private var previewPlayer: ExoPlayer? = null
     private var nextItem: MediaItem? = null
     private var triggered = false
+
+    /** The second player has been told to play: the fade is on. Before that it is only loaded. */
+    private var fading = false
     private var started = false
 
     // The handoff: the second player keeps sounding until the session player,
@@ -78,7 +88,8 @@ class CrossfadeController(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            // Includes buffering, audio-focus loss and becoming noisy.
+            // Includes buffering, audio-focus loss and becoming noisy. A song
+            // that is only loaded is let go too, and loaded again on resume.
             if (!isPlaying && previewPlayer != null) cancelOverlap()
         }
 
@@ -102,6 +113,7 @@ class CrossfadeController(
         override fun onRepeatModeChanged(repeatMode: Int) { cancelOverlap() }
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { cancelOverlap() }
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            // The queue changed under a loaded song: cancelOverlap lets the new next one load.
             if (previewPlayer != null && !targetStillNext()) cancelOverlap()
         }
         override fun onPlayerError(error: PlaybackException) { cancelOverlap() }
@@ -114,22 +126,26 @@ class CrossfadeController(
         player.setPauseAtEndOfMediaItems(false)
         monitorJob = scope.launch {
             while (isActive) {
+                val window = crossfadeSeconds * 1000L
                 val remaining = player.duration - player.currentPosition
-                if (crossfadeSeconds > 0 && player.repeatMode != Player.REPEAT_MODE_ONE &&
-                    previewPlayer == null && !triggered && player.isPlaying &&
-                    !player.isCurrentMediaItemLive && player.duration > 0 &&
-                    remaining in 1..(crossfadeSeconds * 1000L)
-                ) {
+                val eligible = crossfadeSeconds > 0 && player.repeatMode != Player.REPEAT_MODE_ONE &&
+                    player.isPlaying && !player.isCurrentMediaItemLive && player.duration > 0
+                // 1. A few seconds ahead: load the next song, paused and muted.
+                if (eligible && previewPlayer == null && !triggered && remaining in 1..(window + PRELOAD_MS)) {
                     val index = player.nextMediaItemIndex
                     if (index in 0 until player.mediaItemCount && index != player.currentMediaItemIndex) {
                         val item = player.getMediaItemAt(index)
                         if (item.localConfiguration != null) {
                             triggered = true
-                            startOverlap(item)
+                            loadNext(item)
                         }
                     }
                 }
-                delay(250)
+                // 2. On time: start it and fade.
+                val loaded = previewPlayer
+                if (eligible && loaded != null && !fading && remaining in 1..window) startFade(loaded)
+                // Look often near the fade, so it starts within a frame or two of when it should.
+                delay(if (remaining <= window + PRELOAD_MS + LOOK_AHEAD_MS) NEAR_POLL_MS else FAR_POLL_MS)
             }
         }
     }
@@ -139,22 +155,39 @@ class CrossfadeController(
         return index in 0 until player.mediaItemCount && player.getMediaItemAt(index) == nextItem
     }
 
-    private fun startOverlap(item: MediaItem) {
+    /** Builds the second player for [item] and prepares it, paused and muted, ready to start at once. */
+    private fun loadNext(item: MediaItem) {
         try {
             val preview = previewFactory(item)
             previewPlayer = preview
             nextItem = item
+            fading = false
             preview.addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) { cancelOverlap() }
             })
             preview.volume = 0f
             preview.playbackParameters = player.playbackParameters
             preview.setMediaItem(item)
+            preview.playWhenReady = false
             preview.prepare()
+        } catch (_: Exception) {
+            cancelOverlap()
+        }
+    }
+
+    private fun startFade(preview: ExoPlayer) {
+        if (!targetStillNext()) {
+            cancelOverlap()
+            return
+        }
+        fading = true
+        try {
+            preview.playbackParameters = player.playbackParameters
             preview.playWhenReady = true
             fadeJob = scope.launch {
-                // Do not silence or hold the main track while the second decoder loads.
-                while (previewPlayer === preview && !preview.isPlaying) delay(25)
+                // Loaded ahead, it starts in a moment; if it is still loading, the
+                // song playing goes on at full volume until it does.
+                while (previewPlayer === preview && !preview.isPlaying) delay(10)
                 if (previewPlayer !== preview) return@launch
                 val initialRemaining = (player.duration - player.currentPosition).coerceAtLeast(1)
                 player.setPauseAtEndOfMediaItems(true)
@@ -190,7 +223,8 @@ class CrossfadeController(
      *    exactly, and swapping while they are 50-200 ms apart is the hitch
      *    you hear, so the muted player runs a little faster or slower until
      *    the two are within a few milliseconds.
-     * 4. Only then does a short equal-power swap hand over.
+     * 4. Only then does a short swap hand over, with gains that add up to one
+ *    (see [HandoffAlignment.swapGains]).
      *
      * The second player keeps sounding at full volume the whole time, so none
      * of this is audible. Whatever happens, after [ALIGN_BUDGET_MS] the swap
@@ -198,7 +232,7 @@ class CrossfadeController(
      */
     private fun handoff() {
         val preview = previewPlayer ?: return
-        if (!targetStillNext() || !preview.isPlaying) {
+        if (!fading || !targetStillNext() || !preview.isPlaying) {
             cancelOverlap()
             return
         }
@@ -209,6 +243,7 @@ class CrossfadeController(
         swapItem = nextItem
         previewPlayer = null
         nextItem = null
+        fading = false
         swapPreview = preview
         preview.volume = 1f
         player.setPauseAtEndOfMediaItems(false)
@@ -219,7 +254,14 @@ class CrossfadeController(
         swapJob = scope.launch {
             alignWith(index, preview)
             if (swapPreview !== preview) return@launch
-            restoreSpeed()
+            if (nudgedFrom != null) {
+                // Out of time while nudged: the faster or slower audio is still
+                // queued, and swapping onto it would be heard. Normal speed
+                // first, and give it time to come through.
+                restoreSpeed()
+                delay(SETTLE_MS)
+                if (swapPreview !== preview) return@launch
+            }
             for (step in 1..SWAP_STEPS) {
                 val (incoming, outgoing) = HandoffAlignment.swapGains(step.toFloat() / SWAP_STEPS)
                 player.volume = incoming
@@ -345,8 +387,12 @@ class CrossfadeController(
         fadeJob?.cancel()
         fadeJob = null
         val preview = previewPlayer
+        // A song that was only loaded can be loaded again when it is due; one
+        // whose fade was cut short isn't, and that song ends without a fade.
+        if (preview != null && !fading) triggered = false
         previewPlayer = null
         nextItem = null
+        fading = false
         runCatching { preview?.release() }
     }
 
@@ -358,6 +404,12 @@ class CrossfadeController(
     }
 
     private companion object {
+        /** How long before the fade the next song is loaded. */
+        const val PRELOAD_MS = 6_000L
+        const val FAR_POLL_MS = 250L
+        const val NEAR_POLL_MS = 20L
+        /** Start polling often a little before loading is due. */
+        const val LOOK_AHEAD_MS = 500L
         const val INITIAL_SEEK_LEAD_MS = 250L
         /** After this long the swap goes ahead whether or not the players are in step. */
         const val ALIGN_BUDGET_MS = 4_500L
@@ -365,9 +417,12 @@ class CrossfadeController(
         const val SOUNDING_MS = 40L
         const val NUDGE_STEP_MS = 40L
         const val MAX_RESEEKS = 1
-        /** The swap itself: 200 ms, short enough that a few ms of offset can't be heard. */
-        const val SWAP_STEPS = 10
-        const val SWAP_STEP_MS = 20L
+        /**
+         * The swap itself: 80 ms. Two copies a few ms apart blur together while
+         * they overlap, so the shorter the overlap, the less of that is heard.
+         */
+        const val SWAP_STEPS = 8
+        const val SWAP_STEP_MS = 10L
     }
 
     fun stop() {

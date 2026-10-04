@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **125**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 124), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **126**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 125), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -67,6 +67,14 @@ certificate.
   few milliseconds while it is still muted, and only then swaps them. The crossfade
   player also uses the same ReplayGain and EQ, so loudness and tone no longer jump at
   that moment.
+- **Crossfade starts on time and without distortion.** The next song used to start loading
+  only when the fade was due, so on large files the fade began late and short, and the
+  loading happened during the part you hear. Now it is loaded 6 seconds ahead, paused and
+  muted, and starts the moment the fade is due. The swap between the two players at the
+  end of the fade also used gains meant for two different songs; on two copies of the same
+  song they added up to 3 dB too loud, past full scale on loud recordings, which was heard
+  as a short distortion. The gains now always add up to the song's own level, and the swap
+  takes 80 ms instead of 200.
 - **Equalizer: Winamp and Auto.** The Equalizer now has two tabs, Winamp and Auto, under a
   segmented switch. The old Simple and Advanced tabs are gone. If you had set them and never
   touched Winamp, your bands are carried over to Winamp's, so the sound stays the same.
@@ -110,6 +118,13 @@ certificate.
     falling back in about 6 s. A gauge shows how loud it is around you, from a quiet room to a bus.
     A notification shows while this is on; nothing is recorded or sent. The equalizer also now switches on and off at once,
   instead of at the next seek or song.
+- **New mini player.** The bar above the navigation is now a card with the record half out of
+  it, turning while the music plays, coasting to a stop on pause and spinning on to the next
+  song. It shows where the music is playing (AirPods, phone speaker, car…), the song, a
+  rainbow wave that runs along as it plays (drag it to seek), shuffle, previous, play/pause,
+  next and repeat, and the next songs as chips you can tap to play. The open button sits in a
+  notch in the corner. On a light page the card is dark, on a dark page it is light. Tap it or
+  swipe up to open Now Playing, swipe sideways to skip.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
