@@ -1,6 +1,7 @@
 package com.harmony.core.datastore
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -15,6 +16,7 @@ import com.harmony.core.model.OutputForm
 import com.harmony.core.model.OutputForms
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.RoomCorrection
+import com.harmony.core.model.WinampEqDesign
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -106,21 +108,7 @@ class SettingsRepository @Inject constructor(
             replayGainMode = p[Keys.REPLAYGAIN]
                 ?.let { runCatching { ReplayGainMode.valueOf(it) }.getOrNull() }
                 ?: ReplayGainMode.OFF,
-            eq = EqSettings(
-                enabled = p[Keys.EQ_ENABLED] ?: false,
-                bandGainsDb = p[Keys.EQ_BANDS]?.split(',')
-                    ?.mapNotNull { it.toFloatOrNull() }
-                    ?.takeIf { it.size == EqSettings.BAND_COUNT }
-                    ?: List(EqSettings.BAND_COUNT) { 0f },
-                bassBoostDb = p[Keys.EQ_BASS] ?: 0f,
-                trebleBoostDb = p[Keys.EQ_TREBLE] ?: 0f,
-                style = p[Keys.EQ_STYLE]?.let { name -> EqStyle.entries.firstOrNull { it.name == name } } ?: EqStyle.HARMONY,
-                winampGainsDb = p[Keys.EQ_WINAMP_BANDS]?.split(',')
-                    ?.mapNotNull { it.toFloatOrNull() }
-                    ?.takeIf { it.size == EqSettings.BAND_COUNT }
-                    ?: List(EqSettings.BAND_COUNT) { 0f },
-                winampPreampDb = p[Keys.EQ_WINAMP_PREAMP] ?: 0f,
-            ),
+            eq = readEq(p),
             energySliderValue = p[Keys.ENERGY]?.takeIf { it >= 0f },
             soulseekFormatPreference = p[Keys.SOULSEEK_FORMAT] ?: "FLAC_ONLY",
             smartShuffleStyle = p[Keys.SMART_SHUFFLE_STYLE] ?: "BALANCED",
@@ -134,6 +122,31 @@ class SettingsRepository @Inject constructor(
                 noise = p[Keys.AUTO_EQ_NOISE] ?: false,
             ),
             roomCorrections = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]),
+        )
+    }
+
+    /**
+     * The Winamp equalizer is the only manual one now. A listener who had set
+     * the old Simple/Advanced bands and never touched Winamp gets those bands
+     * carried over (WinampEqDesign.fromOctaveBands), so the sound they chose
+     * stays; the first Winamp change saves Winamp's own values from then on.
+     */
+    private fun readEq(p: Preferences): EqSettings {
+        val octave = p[Keys.EQ_BANDS]?.split(',')
+            ?.mapNotNull { it.toFloatOrNull() }
+            ?.takeIf { it.size == EqSettings.BAND_COUNT }
+            ?: List(EqSettings.BAND_COUNT) { 0f }
+        val winamp = p[Keys.EQ_WINAMP_BANDS]?.split(',')
+            ?.mapNotNull { it.toFloatOrNull() }
+            ?.takeIf { it.size == EqSettings.BAND_COUNT }
+        val oldStyle = p[Keys.EQ_STYLE]?.let { name -> EqStyle.entries.firstOrNull { it.name == name } } ?: EqStyle.HARMONY
+        val carried = winamp == null && oldStyle == EqStyle.HARMONY && octave.any { it != 0f }
+        return EqSettings(
+            enabled = p[Keys.EQ_ENABLED] ?: false,
+            bandGainsDb = octave,
+            style = EqStyle.WINAMP,
+            winampGainsDb = winamp ?: if (carried) WinampEqDesign.fromOctaveBands(octave) else List(EqSettings.BAND_COUNT) { 0f },
+            winampPreampDb = p[Keys.EQ_WINAMP_PREAMP] ?: 0f,
         )
     }
 

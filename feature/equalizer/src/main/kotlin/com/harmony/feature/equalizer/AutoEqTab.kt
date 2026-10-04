@@ -70,6 +70,7 @@ class AutoEqViewModel @Inject constructor(
             correction = s.roomCorrections[AutoEqDesign.outputKey(output)],
             calibration = cal,
             playing = player.isPlaying,
+            nowPlaying = player.currentSong?.let { "${it.title} · ${it.artist}" },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AutoEqUiState())
 

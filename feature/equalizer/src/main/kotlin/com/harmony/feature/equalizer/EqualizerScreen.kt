@@ -2,16 +2,14 @@ package com.harmony.feature.equalizer
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,161 +17,108 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.ProgressBarRangeInfo
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import com.harmony.core.datastore.SettingsRepository
+import com.harmony.core.model.AutoEqSettings
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.EqStyle
 import com.harmony.core.model.WinampEqDesign
-import com.harmony.core.ui.component.EditorialCard
-import com.harmony.core.ui.component.EditorialChoiceChips
 import com.harmony.core.ui.component.EditorialCircleButton
 import com.harmony.core.ui.component.EditorialPalette
-import com.harmony.core.ui.component.EditorialPill
-import com.harmony.core.ui.component.EditorialSectionGap
 import com.harmony.core.ui.component.EditorialSwitch
-import com.harmony.core.ui.component.EditorialTab
-import com.harmony.core.ui.component.EditorialTabs
-import com.harmony.core.ui.component.EditorialTextAction
-import com.harmony.core.ui.component.bluePalette
 import com.harmony.core.ui.component.LocalFloatingChromeHeight
+import com.harmony.core.ui.component.bluePalette
+import com.harmony.domain.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.math.cos
-import kotlin.math.hypot
-import kotlin.math.roundToInt
-import kotlin.math.sin
+import kotlin.math.abs
 
 /**
  * All writes go to the DataStore only; SettingsApplier pushes the change into
  * the live audio chain. The screen therefore reflects reality even if the
  * change was made elsewhere, and EQ state survives process death for free.
+ *
+ * Winamp is the manual equalizer; Auto (its own ViewModel) adds its
+ * corrections on top.
  */
 @HiltViewModel
 class EqualizerViewModel @Inject constructor(
     private val settings: SettingsRepository,
+    private val playback: PlaybackController,
 ) : ViewModel() {
 
     val eq: StateFlow<EqSettings> = settings.settings.map { it.eq }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EqSettings())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EqSettings(style = EqStyle.WINAMP))
 
-    val userPresets: StateFlow<Map<String, List<Float>>> =
-        settings.settings.map { it.userEqPresets }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    val autoEq: StateFlow<AutoEqSettings> = settings.settings.map { it.autoEq }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AutoEqSettings())
 
-    fun saveCurrentAsPreset(name: String) {
-        viewModelScope.launch { settings.saveUserEqPreset(name, eq.value.bandGainsDb) }
-    }
+    /** What Winamp's main window shows: the song, its format, whether it's playing, and where. */
+    val nowPlaying: StateFlow<NowPlayingInfo?> = playback.playerState
+        .map { s ->
+            s.currentSong?.let { song ->
+                NowPlayingInfo(
+                    title = song.title,
+                    artist = song.artist,
+                    durationMs = song.durationMs,
+                    kbps = song.bitrateKbps,
+                    sampleRateHz = song.sampleRateHz,
+                    channels = song.channels,
+                    playing = s.isPlaying,
+                    output = s.audioOutput.label,
+                )
+            }
+        }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun deleteUserPreset(name: String) {
-        viewModelScope.launch { settings.deleteUserEqPreset(name) }
-    }
-
-    fun applyGains(gains: List<Float>) = update { it.copy(bandGainsDb = gains, enabled = true, style = EqStyle.HARMONY) }
-
-    fun setEnabled(on: Boolean) = update { it.copy(enabled = on) }
-
-    fun setBand(index: Int, gainDb: Float) = update { current ->
-        current.copy(
-            style = EqStyle.HARMONY,
-            bandGainsDb = current.bandGainsDb.toMutableList()
-                .also { it[index] = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB) },
-        )
-    }
-
-    /**
-     * Simple-tab macro: set a contiguous GROUP of bands to one gain. The
-     * tri-dial's Bass/Mid/Treble map to the 10 real bands as 0-2 (31-125Hz),
-     * 3-6 (250Hz-2kHz), 7-9 (4-16kHz) — so the Simple and Advanced tabs are
-     * two views of the same underlying state, never two competing states.
-     */
-    fun setBandGroup(range: IntRange, gainDb: Float) = update { current ->
-        val clamped = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB)
-        current.copy(
-            enabled = true,
-            style = EqStyle.HARMONY,
-            bandGainsDb = current.bandGainsDb.mapIndexed { i, g ->
-                if (i in range) clamped else g
-            },
-        )
-    }
-
-    fun reset() = update { it.copy(bandGainsDb = List(EqSettings.BAND_COUNT) { 0f }, style = EqStyle.HARMONY) }
-
-    /**
-     * Simple-tab preset applied as ONE atomic write. The first version
-     * called setBandGroup three times back-to-back; each launched its own
-     * coroutine that read the CURRENT settings and wrote a modified copy —
-     * three concurrent read-modify-writes racing on the same state, so
-     * whichever landed last clobbered the other two's changes (visible as
-     * the "glitch" when pressing a preset right after moving a dial).
-     */
-    fun applySimplePreset(bass: Float, mid: Float, treble: Float) = update { current ->
-        current.copy(
-            enabled = true,
-            style = EqStyle.HARMONY,
-            bandGainsDb = current.bandGainsDb.mapIndexed { i, _ ->
-                when (i) {
-                    in BASS_BANDS -> bass
-                    in MID_BANDS -> mid
-                    else -> treble
-                }.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB)
-            },
-        )
-    }
-
-    // ---- Winamp tab --------------------------------------------------
-    //
-    // The Winamp curve is kept apart from the Simple/Advanced one, so
-    // switching engines never loses either. Touching a Winamp control makes
-    // Winamp the engine that plays, the way touching the dials makes it
-    // Harmony's again.
+    fun setEnabled(on: Boolean) = update { it.copy(enabled = on, style = EqStyle.WINAMP) }
 
     fun setWinampBand(index: Int, gainDb: Float) = update { current ->
         current.copy(
@@ -197,48 +142,37 @@ class EqualizerViewModel @Inject constructor(
         it.copy(style = EqStyle.WINAMP, winampPreampDb = 0f, winampGainsDb = List(EqSettings.BAND_COUNT) { 0f })
     }
 
-    /** Winamp's ON button: lights Winamp if anything else is playing, turns the EQ off if Winamp is. */
-    fun toggleWinamp() = update { current ->
-        if (current.enabled && current.style == EqStyle.WINAMP) current.copy(enabled = false)
-        else current.copy(enabled = true, style = EqStyle.WINAMP)
+    /** Winamp's ON button. */
+    fun toggleWinamp() = update { it.copy(enabled = !it.enabled, style = EqStyle.WINAMP) }
+
+    /**
+     * Winamp's AUTO button, which once loaded a preset per song. Here it does
+     * the modern version of that: Auto's song-by-song tone correction.
+     */
+    fun toggleAuto() {
+        viewModelScope.launch {
+            val s = settings.settings.first()
+            val on = !s.autoEq.tone
+            settings.setAutoEq(s.autoEq.copy(tone = on))
+            if (on && !s.eq.enabled) settings.setEq(s.eq.copy(enabled = true, style = EqStyle.WINAMP))
+        }
     }
 
     private fun update(transform: (EqSettings) -> EqSettings) {
         viewModelScope.launch { settings.setEq(transform(eq.value)) }
     }
-
-    companion object {
-        val BASS_BANDS = 0..2
-        val MID_BANDS = 3..6
-        val TREBLE_BANDS = 7..9
-
-        /** Simple-tab presets as (bass, mid, treble) macro gains in dB. */
-        val SIMPLE_PRESETS: List<Pair<String, Triple<Float, Float, Float>>> = listOf(
-            "Balanced" to Triple(0f, 0f, 0f),
-            "More bass" to Triple(5f, 0f, 1f),
-            "More treble" to Triple(0f, 0f, 5f),
-            "Voice" to Triple(-2f, 4f, 2f),
-        )
-    }
 }
-
-private fun List<Float>.groupAvg(range: IntRange): Float =
-    range.map { this[it] }.average().toFloat()
 
 // =====================================================================
 //  Screen
 // =====================================================================
 
 /**
- * The equalizer in the editorial treatment, on the blue field — an
- * instrument panel next to the library's amber and the playlists' green.
+ * The equalizer: Winamp's, and Auto on top of it.
  *
- * The two custom canvas controls (the tri-dial and the vertical band
- * sliders) were already hand-drawn, so restyling them was a matter of
- * feeding them palette colors instead of Material scheme roles; their
- * geometry and gesture handling are untouched. Everything Material —
- * TabRow, segmented preset buttons, the profile dropdown trigger, Reset —
- * became the editorial equivalents so the screen reads as one piece.
+ * A soft glow of the section colour sits behind the header, and the two
+ * tabs are a segmented switch rather than big text tabs: there are only two,
+ * and each is a whole instrument.
  */
 @Composable
 fun EqualizerScreen(
@@ -254,18 +188,35 @@ fun EqualizerScreen(
     autoTab: @Composable (EditorialPalette) -> Unit = { AutoTab(it) },
 ) {
     val eq by viewModel.eq.collectAsStateWithLifecycle()
-    var selectedTab by rememberSaveable { mutableIntStateOf(-1) }
-    // Open on the tab of the engine that is playing, once the stored settings are in.
-    LaunchedEffect(eq.style) {
-        if (selectedTab < 0 && eq.style == EqStyle.WINAMP) selectedTab = WINAMP_TAB
-    }
-    val tab = selectedTab.coerceAtLeast(0)
+    val auto by viewModel.autoEq.collectAsStateWithLifecycle()
+    var tab by rememberSaveable { mutableIntStateOf(WINAMP_TAB) }
     val palette = bluePalette()
 
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.field),
+            .background(palette.field)
+            .drawBehind {
+                // The header's glow: the section accent and a warm Winamp gold, fading into the page.
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(palette.accent.copy(alpha = 0.22f), Color.Transparent),
+                        center = Offset(size.width * 0.15f, 0f),
+                        radius = size.width * 0.9f,
+                    ),
+                    radius = size.width * 0.9f,
+                    center = Offset(size.width * 0.15f, 0f),
+                )
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(WinampGold.copy(alpha = 0.14f), Color.Transparent),
+                        center = Offset(size.width * 0.95f, size.width * 0.15f),
+                        radius = size.width * 0.7f,
+                    ),
+                    radius = size.width * 0.7f,
+                    center = Offset(size.width * 0.95f, size.width * 0.15f),
+                )
+            },
     ) {
         Row(
             Modifier
@@ -300,8 +251,8 @@ fun EqualizerScreen(
                 Text(
                     when {
                         !eq.enabled -> "Off — audio passes through untouched"
-                        eq.style == EqStyle.WINAMP -> "On — playing through Winamp's EQ"
-                        else -> "On — applied to everything playing"
+                        auto.any -> "On — Winamp with Auto on top"
+                        else -> "On — playing through Winamp's EQ"
                     },
                     fontSize = 12.sp,
                     color = palette.muted,
@@ -310,485 +261,101 @@ fun EqualizerScreen(
             EditorialSwitch(eq.enabled, viewModel::setEnabled, palette)
         }
 
-        EditorialTabs(
-            tabs = listOf(EditorialTab("Simple"), EditorialTab("Advanced"), EditorialTab("Winamp"), EditorialTab("Auto")),
+        SegmentedTabs(
             selected = tab,
-            onSelect = { selectedTab = it },
+            onSelect = { tab = it },
+            autoOn = eq.enabled && auto.any,
+            winampOn = eq.enabled,
             palette = palette,
-            // Four tabs don't fit a narrow phone at this size: let them scroll rather than squeeze.
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
         )
 
         when (tab) {
-            0 -> SimpleTab(viewModel, palette, onCustom = { selectedTab = 1 })
-            1 -> AdvancedTab(viewModel, palette)
             WINAMP_TAB -> WinampTab(eq, viewModel, palette)
             AUTO_TAB -> autoTab(palette)
         }
     }
 }
 
-// =====================================================================
-//  SIMPLE tab: tri-dial + presets
-// =====================================================================
+private const val WINAMP_TAB = 0
+private const val AUTO_TAB = 1
+private val WinampGold = Color(0xFFE2B451)
 
+/** Winamp | Auto, each with an icon and a small light when it's working. */
 @Composable
-private fun SimpleTab(
-    viewModel: EqualizerViewModel,
-    palette: EditorialPalette,
-    onCustom: () -> Unit,
-) {
-    val eq by viewModel.eq.collectAsStateWithLifecycle()
-    val bass = eq.bandGainsDb.groupAvg(EqualizerViewModel.BASS_BANDS)
-    val mid = eq.bandGainsDb.groupAvg(EqualizerViewModel.MID_BANDS)
-    val treble = eq.bandGainsDb.groupAvg(EqualizerViewModel.TREBLE_BANDS)
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = LocalFloatingChromeHeight.current)
-            .padding(horizontal = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        EditorialCard(palette = palette, modifier = Modifier.fillMaxWidth()) {
-            TriDial(
-                bass = bass,
-                mid = mid,
-                treble = treble,
-                enabled = eq.enabled,
-                palette = palette,
-                onChange = { which, value ->
-                    val range = when (which) {
-                        0 -> EqualizerViewModel.BASS_BANDS
-                        1 -> EqualizerViewModel.MID_BANDS
-                        else -> EqualizerViewModel.TREBLE_BANDS
-                    }
-                    viewModel.setBandGroup(range, value)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                    .aspectRatio(1f),
-            )
-        }
-
-        // The four macro presets. A chip row rather than four outlined
-        // buttons: these are alternatives to each other, and chips say that
-        // where a grid of buttons doesn't. The selected chip fills when the
-        // current curve actually matches that preset, so the row doubles as
-        // a readout of where you are.
-        val activePreset = EqualizerViewModel.SIMPLE_PRESETS.indexOfFirst { (_, t) ->
-            val (b, m, tr) = t
-            nearly(bass, b) && nearly(mid, m) && nearly(treble, tr)
-        }
-        EditorialChoiceChips(
-            options = EqualizerViewModel.SIMPLE_PRESETS.map { it.first },
-            selectedIndex = activePreset,
-            onSelect = { index ->
-                val (b, m, t) = EqualizerViewModel.SIMPLE_PRESETS[index].second
-                viewModel.applySimplePreset(b, m, t)
-            },
-            palette = palette,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp),
-        )
-
-        EditorialPill(
-            text = "Custom",
-            icon = Icons.Rounded.Tune,
-            onClick = onCustom,
-            palette = palette,
-            modifier = Modifier.padding(top = 18.dp),
-        )
-        EditorialSectionGap(28)
-    }
-}
-
-/** Within a snapped half-decibel — the resolution the dial itself works at. */
-private fun nearly(a: Float, b: Float) = kotlin.math.abs(a - b) < 0.26f
-
-/**
- * The circular three-handle control: Mid at the top, Bass lower-left,
- * Treble lower-right. Each handle slides along its own radial axis; distance
- * from center maps linearly to -12..+12 dB. Dragging grabs whichever handle
- * is nearest to the touch, then projects finger movement onto that handle's
- * axis — so a rough diagonal swipe still feels precise.
- */
-@Composable
-private fun TriDial(
-    bass: Float,
-    mid: Float,
-    treble: Float,
-    enabled: Boolean,
-    palette: EditorialPalette,
-    onChange: (which: Int, value: Float) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Screen coords, y down: top = -90deg, lower-left = 150deg, lower-right = 30deg.
-    val anglesDeg = listOf(150f, -90f, 30f) // bass, mid, treble
-    val values = listOf(bass, mid, treble)
-    val max = EqSettings.MAX_GAIN_DB
-    val plateColor = palette.ink.copy(alpha = 0.07f)
-    val hubColor = palette.ink.copy(alpha = 0.12f)
-    val dotColor = palette.muted.copy(alpha = 0.5f)
-    val handleColor = if (enabled) palette.accent else palette.muted
-    val axisColor = palette.line.copy(alpha = 0.35f)
-
-    Box(modifier) {
-        Canvas(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
-                    var active = -1
-                    detectDragGestures(
-                        onDragStart = { pos ->
-                            val c = Offset(size.width / 2f, size.height / 2f)
-                            val rMin = size.width * 0.14f
-                            val rMax = size.width * 0.42f
-                            var best = -1
-                            var bestDist = Float.MAX_VALUE
-                            anglesDeg.forEachIndexed { i, deg ->
-                                val rad = Math.toRadians(deg.toDouble())
-                                val frac = (values[i] + max) / (2 * max)
-                                val r = rMin + (rMax - rMin) * frac
-                                val hx = c.x + r * cos(rad).toFloat()
-                                val hy = c.y + r * sin(rad).toFloat()
-                                val d = hypot(pos.x - hx, pos.y - hy)
-                                if (d < bestDist) { bestDist = d; best = i }
-                            }
-                            active = if (bestDist < size.width * 0.2f) best else -1
-                        },
-                        onDrag = { change, _ ->
-                            if (active < 0) return@detectDragGestures
-                            change.consume()
-                            val c = Offset(size.width / 2f, size.height / 2f)
-                            val rMin = size.width * 0.14f
-                            val rMax = size.width * 0.42f
-                            val rad = Math.toRadians(anglesDeg[active].toDouble())
-                            val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
-                            val v = change.position - c
-                            val proj = (v.x * dir.x + v.y * dir.y).coerceIn(rMin, rMax)
-                            val frac = (proj - rMin) / (rMax - rMin)
-                            val gain = (frac * 2 * max - max)
-                            onChange(active, (gain * 2).roundToInt() / 2f) // snap 0.5 dB
-                        },
-                        onDragEnd = { active = -1 },
-                        onDragCancel = { active = -1 },
-                    )
-                },
-        ) {
-            val c = Offset(size.width / 2f, size.height / 2f)
-            val rMin = size.width * 0.14f
-            val rMax = size.width * 0.42f
-
-            drawCircle(plateColor, radius = size.width * 0.46f, center = c)
-            drawCircle(
-                color = axisColor,
-                radius = size.width * 0.46f,
-                center = c,
-                style = Stroke(width = 2f),
-            )
-            drawCircle(hubColor, radius = size.width * 0.20f, center = c)
-
-            anglesDeg.forEachIndexed { i, deg ->
-                val rad = Math.toRadians(deg.toDouble())
-                val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
-                // The axis each handle travels along, so the control explains
-                // its own degrees of freedom before you touch it.
-                drawLine(
-                    color = axisColor,
-                    start = c + dir * rMin,
-                    end = c + dir * rMax,
-                    strokeWidth = 2f,
-                )
-                listOf(0.0f, 0.5f, 1.0f).forEach { t ->
-                    val r = rMin + (rMax - rMin) * t
-                    drawCircle(dotColor, radius = 4f, center = c + dir * r)
-                }
-                val frac = (values[i] + max) / (2 * max)
-                val r = rMin + (rMax - rMin) * frac
-                val center = c + dir * r
-                drawCircle(handleColor, radius = size.width * 0.045f, center = center)
-                drawCircle(
-                    color = palette.line,
-                    radius = size.width * 0.045f,
-                    center = center,
-                    style = Stroke(width = 2f),
-                )
-            }
-        }
-        DialLabel("Mid", mid, palette, Modifier.align(Alignment.TopCenter))
-        DialLabel("Bass", bass, palette, Modifier.align(Alignment.BottomStart))
-        DialLabel("Treble", treble, palette, Modifier.align(Alignment.BottomEnd))
-    }
-}
-
-@Composable
-private fun DialLabel(
-    name: String,
-    value: Float,
+private fun SegmentedTabs(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    autoOn: Boolean,
+    winampOn: Boolean,
     palette: EditorialPalette,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier.padding(4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    val shape = RoundedCornerShape(50)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(palette.ink.copy(alpha = 0.06f))
+            .border(1.dp, palette.line, shape)
+            .padding(4.dp),
     ) {
-        Text(
-            name.uppercase(),
-            fontSize = 10.sp,
-            letterSpacing = 1.4.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = palette.muted,
-        )
-        Text(
-            fmtDb(value),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = palette.ink,
-        )
+        TabPill("Winamp", Icons.Rounded.Tune, selected == WINAMP_TAB, winampOn, palette, Modifier.weight(1f)) { onSelect(WINAMP_TAB) }
+        TabPill("Auto", Icons.Rounded.AutoAwesome, selected == AUTO_TAB, autoOn, palette, Modifier.weight(1f)) { onSelect(AUTO_TAB) }
     }
 }
-
-private fun fmtDb(v: Float): String {
-    val r = (v * 2).roundToInt() / 2f
-    val s = if (r == r.toInt().toFloat()) r.toInt().toString() else "%.1f".format(r)
-    return if (r > 0) "+$s" else s
-}
-
-// =====================================================================
-//  ADVANCED tab: profiles + response curve + vertical band sliders
-// =====================================================================
 
 @Composable
-private fun AdvancedTab(viewModel: EqualizerViewModel, palette: EditorialPalette) {
-    val eq by viewModel.eq.collectAsStateWithLifecycle()
-    val userPresets by viewModel.userPresets.collectAsStateWithLifecycle()
-    var showSaveDialog by remember { mutableStateOf(false) }
-    var profileMenuOpen by remember { mutableStateOf(false) }
-
-    val allProfiles: List<Pair<String, List<Float>>> =
-        EqSettings.PRESETS.map { it.key to it.value } + userPresets.map { it.key to it.value }
-    val currentProfileName = allProfiles.firstOrNull { it.second == eq.bandGainsDb }?.first ?: "Custom"
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = LocalFloatingChromeHeight.current)
-            .padding(horizontal = 20.dp),
+private fun TabPill(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    lit: Boolean,
+    palette: EditorialPalette,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(50)
+    Row(
+        modifier
+            .clip(shape)
+            .background(
+                if (selected) Brush.horizontalGradient(listOf(palette.accent, palette.accent.copy(alpha = 0.78f)))
+                else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)),
+            )
+            .clickable(role = Role.Tab, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(vertical = 11.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // ---- Profile picker ----
-        EditorialCard(palette = palette, modifier = Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "PROFILE",
-                        fontSize = 10.sp,
-                        letterSpacing = 1.6.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.muted,
-                    )
-                    Box {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { profileMenuOpen = true },
-                        ) {
-                            Text(
-                                currentProfileName,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = (-0.3).sp,
-                                color = palette.ink,
-                            )
-                            Icon(
-                                Icons.Rounded.ArrowDropDown,
-                                contentDescription = "Choose a profile",
-                                tint = palette.ink,
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = profileMenuOpen,
-                            onDismissRequest = { profileMenuOpen = false },
-                        ) {
-                            allProfiles.forEach { (name, gains) ->
-                                DropdownMenuItem(
-                                    text = { Text(name) },
-                                    onClick = {
-                                        viewModel.applyGains(gains)
-                                        profileMenuOpen = false
-                                    },
-                                    trailingIcon = if (name in userPresets) ({
-                                        TextButton(onClick = {
-                                            viewModel.deleteUserPreset(name)
-                                            profileMenuOpen = false
-                                        }) { Text("Delete") }
-                                    }) else null,
-                                )
-                            }
-                        }
-                    }
-                }
-                EditorialCircleButton(
-                    onClick = { showSaveDialog = true },
-                    contentDescription = "Save current settings as a profile",
-                    palette = palette,
-                    size = 40.dp,
-                ) {
-                    Icon(
-                        Icons.Rounded.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-        }
-
-        // ---- Response curve ----
-        EditorialCard(
-            palette = palette,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp),
-        ) {
-            Column(Modifier.padding(14.dp)) {
-                ResponseCurve(
-                    gains = eq.bandGainsDb,
-                    enabled = eq.enabled,
-                    palette = palette,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(110.dp),
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    BAND_LABELS.forEach {
-                        Text(it, fontSize = 9.sp, color = palette.muted)
-                    }
-                }
-            }
-        }
-
-        // ---- Band sliders ----
-        EditorialCard(
-            palette = palette,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp),
-        ) {
-            Column(Modifier.padding(vertical = 14.dp, horizontal = 8.dp)) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(220.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    eq.bandGainsDb.forEachIndexed { index, gain ->
-                        VerticalBandSlider(
-                            value = gain,
-                            enabled = eq.enabled,
-                            palette = palette,
-                            label = BAND_LABELS[index],
-                            onChange = { viewModel.setBand(index, it) },
-                            modifier = Modifier.width(26.dp),
-                        )
-                    }
-                }
-            }
-        }
-
-        Row(Modifier.padding(top = 16.dp)) {
-            EditorialTextAction(
-                text = "Reset all bands to 0 dB",
-                onClick = viewModel::reset,
-                palette = palette,
+        val ink = if (selected) palette.onAccent else palette.ink.copy(alpha = 0.75f)
+        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+        Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink, modifier = Modifier.padding(start = 8.dp))
+        if (lit) {
+            Box(
+                Modifier
+                    .padding(start = 8.dp)
+                    .size(7.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (selected) palette.onAccent else Color(0xFF3CDB5A)),
             )
         }
-        EditorialSectionGap(28)
-    }
-
-    if (showSaveDialog) {
-        var name by remember { mutableStateOf("") }
-        // Styled from the section palette rather than Material defaults: a
-        // stock filled Button lands as a wallpaper-coloured slab on a screen
-        // that is otherwise flat blue.
-        AlertDialog(
-            onDismissRequest = { showSaveDialog = false },
-            title = {
-                Text(
-                    "Save profile",
-                    fontSize = 20.sp,
-                    lineHeight = 25.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.ink,
-                )
-            },
-            text = {
-                Column {
-                    Text(
-                        "Stores the current ten-band curve so you can come back to it.",
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        singleLine = true,
-                        label = { Text("Profile name") },
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { viewModel.saveCurrentAsPreset(name); showSaveDialog = false },
-                    enabled = name.isNotBlank(),
-                ) {
-                    Text(
-                        "Save",
-                        fontWeight = FontWeight.Bold,
-                        color = if (name.isNotBlank()) palette.ink else palette.muted,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSaveDialog = false }) {
-                    Text("Cancel", color = palette.muted)
-                }
-            },
-            shape = RoundedCornerShape(20.dp),
-            containerColor = palette.field,
-            titleContentColor = palette.ink,
-            textContentColor = palette.ink,
-        )
     }
 }
 
 // =====================================================================
-//  WINAMP tab: Winamp 2's equalizer, sound and look
+//  WINAMP tab
 // =====================================================================
-
-private const val WINAMP_TAB = 2
-private const val AUTO_TAB = 3
 
 @Composable
 private fun WinampTab(eq: EqSettings, viewModel: EqualizerViewModel, palette: EditorialPalette) {
+    val auto by viewModel.autoEq.collectAsStateWithLifecycle()
+    val nowPlaying by viewModel.nowPlaying.collectAsStateWithLifecycle()
     val actions = remember(viewModel) {
         WinampEqActions(
             onToggle = viewModel::toggleWinamp,
+            onAuto = viewModel::toggleAuto,
             onBand = viewModel::setWinampBand,
             onPreamp = viewModel::setWinampPreamp,
             onPreset = viewModel::applyWinampPreset,
@@ -800,158 +367,179 @@ private fun WinampTab(eq: EqSettings, viewModel: EqualizerViewModel, palette: Ed
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(bottom = LocalFloatingChromeHeight.current)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 16.dp),
     ) {
-        WinampEqPanel(eq, actions, Modifier.fillMaxWidth())
+        WinampEqPanel(eq, auto.tone, nowPlaying, actions, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(18.dp))
+        SectionTitle("Presets", "${WinampEqDesign.PRESETS.size} from Winamp", palette)
+        Spacer(Modifier.height(10.dp))
+        PresetGallery(eq, actions.onPreset)
+        Spacer(Modifier.height(18.dp))
+        SectionTitle("Signal", if (eq.enabled) "What the EQ does now" else "Equalizer off", palette)
+        Spacer(Modifier.height(10.dp))
+        SignalTiles(eq, nowPlaying, palette)
         Text(
-            if (eq.enabled && eq.style == EqStyle.WINAMP) {
-                "Playing through Winamp's filters: ten one-octave bands from 60 Hz to 16 kHz, ±20 dB, " +
-                    "with its preamp and presets. Double-tap a slider to centre it."
-            } else {
-                "Winamp's equalizer, with its own ten bands and presets. Press ON, pick a preset or move a " +
-                    "slider to play through it; your Simple and Advanced settings stay as they are."
-            },
+            "Winamp's own equalizer: ten one-octave bands from 60 Hz to 16 kHz, ±20 dB each, mixed in parallel " +
+                "the way Winamp did it, with its preamp and presets. Tap a slider to jump, drag it, double-tap to " +
+                "centre. AUTO switches on Auto's song-by-song tone on top.",
             fontSize = 12.sp,
             lineHeight = 17.sp,
             color = palette.muted,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 14.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
         )
     }
 }
 
-private val BAND_LABELS =
-    listOf("31", "62", "125", "250", "500", "1K", "2K", "4K", "8K", "16K")
-
-/** Smoothed frequency-response preview drawn from the 10 band gains. */
 @Composable
-private fun ResponseCurve(
-    gains: List<Float>,
-    enabled: Boolean,
-    palette: EditorialPalette,
-    modifier: Modifier = Modifier,
-) {
-    val lineColor = if (enabled) palette.accent else palette.muted
-    val fillTop = lineColor.copy(alpha = 0.3f)
-    val dotColor = palette.ink
-
-    Canvas(modifier) {
-        val n = gains.size
-        val maxDb = EqSettings.MAX_GAIN_DB
-        val midY = size.height / 2f
-        val amp = size.height * 0.42f
-        val pts = List(n) { i ->
-            Offset(
-                x = size.width * i / (n - 1f),
-                y = midY - (gains[i] / maxDb) * amp,
-            )
-        }
-        drawLine(
-            palette.line.copy(alpha = 0.35f),
-            Offset(0f, midY),
-            Offset(size.width, midY),
-            strokeWidth = 2f,
-        )
-
-        // Smooth path through points via midpoint quadratics
-        val path = Path().apply {
-            moveTo(pts.first().x, pts.first().y)
-            for (i in 0 until n - 1) {
-                val p0 = pts[i]
-                val p1 = pts[i + 1]
-                val midX = (p0.x + p1.x) / 2f
-                quadraticTo(p0.x, p0.y, midX, (p0.y + p1.y) / 2f)
-            }
-            lineTo(pts.last().x, pts.last().y)
-        }
-        val fill = Path().apply {
-            addPath(path)
-            lineTo(size.width, midY)
-            lineTo(0f, midY)
-            close()
-        }
-        drawPath(fill, Brush.verticalGradient(listOf(fillTop, Color.Transparent), endY = size.height))
-        drawPath(path, lineColor, style = Stroke(width = 5f))
-        pts.forEach { drawCircle(dotColor, radius = 4f, center = it) }
+private fun SectionTitle(title: String, detail: String, palette: EditorialPalette) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.Bottom) {
+        Text(title, fontSize = 19.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = palette.ink, modifier = Modifier.weight(1f))
+        Text(detail, fontSize = 12.sp, lineHeight = 16.sp, color = palette.muted)
     }
 }
 
 /**
- * Pill-track vertical slider: rounded outline, guide dots, single round
- * thumb, -12..+12 dB with 0 centered. Direct vertical drag anywhere on the
- * track; no rotated-horizontal-Slider tricks (the old approach — which also
- * never laid out reliably across screen sizes).
+ * Every Winamp preset as a little card with its own curve, so they can be
+ * compared at a glance. The one in use glows gold.
  */
 @Composable
-private fun VerticalBandSlider(
-    value: Float,
-    enabled: Boolean,
-    palette: EditorialPalette,
-    label: String,
-    onChange: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val max = EqSettings.MAX_GAIN_DB
-    val outline = palette.line
-    val dotColor = palette.muted.copy(alpha = 0.45f)
-    val thumbColor = if (enabled) palette.accent else palette.muted
+private fun PresetGallery(eq: EqSettings, onPreset: (String) -> Unit) {
+    val current = currentPreset(eq)
+    val scroll = rememberScrollState()
     val density = LocalDensity.current
-
-    Column(
-        modifier = modifier.fillMaxHeight(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    // Bring the preset in use into view, as the gallery opens and when it changes.
+    LaunchedEffect(current) {
+        val index = WinampEqDesign.PRESETS.indexOfFirst { it.first == current }
+        if (index > 0) scroll.animateScrollTo(with(density) { ((118 + 10) * index - 40).dp.roundToPx() }.coerceAtLeast(0))
+    }
+    Row(
+        Modifier.horizontalScroll(scroll).padding(horizontal = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            fmtDb(value),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (value == 0f) palette.muted else palette.ink,
-        )
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(top = 4.dp)
-                .semantics {
-                    contentDescription = "$label hertz band, ${fmtDb(value)} decibels"
-                    progressBarRangeInfo = ProgressBarRangeInfo(value, -max..max)
-                    setProgress { target ->
-                        onChange(target.coerceIn(-max, max))
-                        true
-                    }
-                }
-                .pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
-                    detectVerticalDragGestures { change, _ ->
-                        change.consume()
-                        val pad = with(density) { 14.dp.toPx() }
-                        val usable = size.height - 2 * pad
-                        val frac = 1f - ((change.position.y - pad) / usable).coerceIn(0f, 1f)
-                        val gain = frac * 2 * max - max
-                        onChange((gain * 2).roundToInt() / 2f)
-                    }
-                },
-        ) {
-            val pad = with(density) { 14.dp.toPx() }
-            val usable = size.height - 2 * pad
-            val cx = size.width / 2f
-
-            drawRoundRect(
-                color = outline,
-                style = Stroke(width = 3f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width / 2f),
-            )
-            listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { t ->
-                drawCircle(dotColor, radius = 3f, center = Offset(cx, pad + usable * t))
+        WinampEqDesign.PRESETS.forEach { (name, preset) ->
+            val (preamp, gains) = preset
+            val selected = name == current
+            val shape = RoundedCornerShape(16.dp)
+            Column(
+                Modifier
+                    .width(118.dp)
+                    .clip(shape)
+                    .background(Brush.verticalGradient(listOf(Color(0xFF2B2B40), Color(0xFF14141C))))
+                    .border(if (selected) 2.dp else 1.dp, if (selected) WinampGold else Color(0xFF3A3A52), shape)
+                    .clickable(role = Role.Button) { onPreset(name) }
+                    .testTag(WinampTags.preset(name))
+                    .padding(10.dp),
+            ) {
+                MiniCurve(gains, preamp, Modifier.fillMaxWidth().height(40.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    name,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selected) WinampGold else Color(0xFFE6E4D8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "Preamp ${fmtDb(preamp)}",
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF8E8EA6),
+                    maxLines = 1,
+                )
             }
-            val frac = (value + max) / (2 * max)
-            val thumbY = pad + usable * (1f - frac)
-            drawCircle(thumbColor, radius = size.width * 0.34f, center = Offset(cx, thumbY))
-            drawCircle(
-                color = outline,
-                radius = size.width * 0.34f,
-                center = Offset(cx, thumbY),
-                style = Stroke(width = 2.5f),
-            )
         }
     }
+}
+
+/** A preset's curve on a tiny black display, in Winamp's red-yellow-green. */
+@Composable
+private fun MiniCurve(gains: List<Float>, preamp: Float, modifier: Modifier) {
+    val points = remember(gains, preamp) {
+        val freqs = FloatArray(40) { i -> 30f * 600f.let { r -> Math.pow(r.toDouble(), i / 39.0).toFloat() } }
+        WinampEqDesign.responseDb(gains, 0f, freqs)
+    }
+    Canvas(modifier.clip(RoundedCornerShape(8.dp)).background(Color.Black)) {
+        val mid = size.height / 2f
+        drawLine(Color(0xFF173D22), Offset(0f, mid), Offset(size.width, mid), strokeWidth = 1f)
+        val path = Path()
+        points.forEachIndexed { i, db ->
+            val x = size.width * i / (points.size - 1f)
+            val y = mid - (db / 20f).coerceIn(-1f, 1f) * size.height * 0.42f
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(
+            path,
+            Brush.verticalGradient(listOf(Color(0xFFFF3B1F), Color(0xFFF2D21B), Color(0xFF2FD12F)), startY = 0f, endY = size.height),
+            style = Stroke(2.dp.toPx(), cap = StrokeCap.Round),
+        )
+    }
+}
+
+/** Four readouts: preamp, the strongest boost and cut, and the device it's playing on. */
+@Composable
+private fun SignalTiles(eq: EqSettings, nowPlaying: NowPlayingInfo?, palette: EditorialPalette) {
+    val gains = eq.winampGainsDb
+    val up = gains.indices.maxByOrNull { gains[it] }
+    val down = gains.indices.minByOrNull { gains[it] }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SignalTile("Preamp", fmtDb(eq.winampPreampDb), "applied after the bands", palette, Modifier.weight(1f))
+            SignalTile(
+                "Biggest boost",
+                if (up != null && gains[up] > 0.05f) fmtDb(gains[up]) else "—",
+                if (up != null && gains[up] > 0.05f) "at ${bandName(up)}" else "no band raised",
+                palette,
+                Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SignalTile(
+                "Biggest cut",
+                if (down != null && gains[down] < -0.05f) fmtDb(gains[down]) else "—",
+                if (down != null && gains[down] < -0.05f) "at ${bandName(down)}" else "no band lowered",
+                palette,
+                Modifier.weight(1f),
+            )
+            SignalTile("Output", nowPlaying?.output ?: "—", if (nowPlaying?.playing == true) "playing now" else "idle", palette, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun SignalTile(label: String, value: String, detail: String, palette: EditorialPalette, modifier: Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(palette.accent.copy(alpha = 0.07f))
+            .border(1.dp, palette.line, RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(label.uppercase(), fontSize = 10.sp, lineHeight = 13.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, color = palette.muted)
+        Text(
+            value,
+            fontSize = 20.sp,
+            lineHeight = 25.sp,
+            fontWeight = FontWeight.Bold,
+            color = palette.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Text(detail, fontSize = 11.sp, lineHeight = 14.sp, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** "60 Hz", "12 kHz". */
+private fun bandName(i: Int): String {
+    val f = WinampEqDesign.FREQUENCIES_HZ[i]
+    return if (f >= 1000f) "${(f / 1000f).let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }} kHz" else "${f.toInt()} Hz"
+}
+
+private fun fmtDb(v: Float): String = when {
+    abs(v) < 0.05f -> "0 dB"
+    v > 0 -> "+${(v * 10).toInt() / 10f} dB"
+    else -> "−${(-v * 10).toInt() / 10f} dB"
 }

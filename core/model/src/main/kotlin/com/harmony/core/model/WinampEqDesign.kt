@@ -3,6 +3,7 @@ package com.harmony.core.model
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.log10
+import kotlin.math.log2
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -116,6 +117,24 @@ object WinampEqDesign {
             }
             val magnitude = sqrt(re * re + im * im).coerceAtLeast(1e-9)
             (20 * log10(magnitude) + preamp).toFloat()
+        }
+    }
+
+    /**
+     * Winamp slider values that sound like the old Harmony equalizer's ten
+     * octave bands ([octaveGainsDb] at 31 Hz … 16 kHz): each Winamp band takes
+     * the octave curve's value at its own frequency, read off a straight line
+     * between octaves on a log scale. Used once, to carry an old setting over.
+     */
+    fun fromOctaveBands(octaveGainsDb: List<Float>): List<Float> {
+        val centers = EqSettings.BAND_CENTERS_HZ
+        if (octaveGainsDb.size != centers.size) return List(FREQUENCIES_HZ.size) { 0f }
+        return FREQUENCIES_HZ.map { f ->
+            val x = log2(f / centers.first())
+            val i = x.toInt().coerceIn(0, centers.size - 2)
+            val t = (x - i).coerceIn(0f, 1f)
+            val v = octaveGainsDb[i] + (octaveGainsDb[i + 1] - octaveGainsDb[i]) * t
+            (kotlin.math.round(v * 10f) / 10f).coerceIn(-MAX_DB, MAX_DB)
         }
     }
 }

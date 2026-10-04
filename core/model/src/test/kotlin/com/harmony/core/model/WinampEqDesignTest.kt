@@ -62,4 +62,16 @@ class WinampEqDesignTest {
         assertEquals(WinampEqDesign.weight(20f), WinampEqDesign.weight(35f), 0f)
         assertEquals(0f, WinampEqDesign.weight(0f), 0f)
     }
+
+    @Test
+    fun `old octave settings carry over to the Winamp bands`() {
+        assertEquals(List(10) { 0f }, WinampEqDesign.fromOctaveBands(List(10) { 0f }))
+        // A bass boost: +6 at 31 and 62 Hz falling to 0 by 250 Hz.
+        val bass = listOf(6f, 6f, 3f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+        val w = WinampEqDesign.fromOctaveBands(bass)
+        assertEquals(6f, w[0], 0.2f)            // 60 Hz
+        assertTrue(w[1] in 1f..3f)              // 170 Hz, between 125 (3) and 250 (0)
+        assertEquals(0f, w[4], 0.01f)           // 1 kHz
+        assertEquals(List(10) { 0f }, WinampEqDesign.fromOctaveBands(listOf(1f)))
+    }
 }
