@@ -41,7 +41,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -68,15 +67,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -98,9 +94,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.model.RepeatMode
@@ -109,9 +102,7 @@ import com.harmony.core.ui.component.Artwork
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.atan2
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /** Everything the mini player shows. */
 data class MiniPlayerUi(
@@ -142,7 +133,6 @@ class MiniPlayerActions(
 internal object MiniPlayerTags {
     const val CARD = "mini_card"
     const val DISC = "mini_disc"
-    const val EXPAND = "mini_expand"
     const val PROGRESS = "mini_progress"
     const val SHUFFLE = "mini_shuffle"
     const val PREVIOUS = "mini_previous"
@@ -217,7 +207,7 @@ private object MiniAccent {
  * plays; where it is playing; the song; a wave that runs along as it plays;
  * the five transport controls; and what comes next.
  *
- * Tap the card (or the button in its corner) to open Now Playing, swipe up
+ * Tap the card or the record to open Now Playing, swipe up
  * for the same, swipe sideways to skip. Drag along the wave to seek.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -263,8 +253,7 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
             },
     ) {
         val disc = (maxWidth * 0.27f).coerceIn(84.dp, 120.dp)
-        val buttonSize = 44.dp
-        val shape = remember(buttonSize) { NotchedCardShape(cornerRadius = 28.dp, notchRadius = buttonSize / 2, gap = 6.dp, fillet = 10.dp) }
+        val shape = RoundedCornerShape(28.dp)
         val skipAt = 72.dp
 
         Box(Modifier.fillMaxWidth().padding(start = disc / 2)) {
@@ -346,7 +335,7 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                             translationY = (1f - e) * 14.dp.toPx()
                         },
                 ) {
-                    Row(Modifier.fillMaxWidth().padding(end = buttonSize + 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         DeviceChip(ui.deviceLabel, ui.deviceIcon, colors)
                     }
                     AnimatedContent(
@@ -404,8 +393,6 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                     if (ui.upNext.isNotEmpty()) UpNextRow(ui.upNext, colors, actions.onUpNext)
                 }
             }
-            // Outside the card's clip, in the bite taken out of its corner.
-            ExpandButton({ expand(-tapLiftPx) }, Modifier.align(Alignment.TopEnd).size(buttonSize))
         }
         Disc(
             artworkUri = ui.song.artworkUri,
@@ -626,21 +613,6 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ExpandButton(onClick: () -> Unit, modifier: Modifier) {
-    Box(
-        modifier
-            .clip(CircleShape)
-            .background(Brush.linearGradient(listOf(MiniAccent.Purple, MiniAccent.PurpleDeep)))
-            .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
-            .testTag(MiniPlayerTags.EXPAND)
-            .clickable(role = Role.Button, onClickLabel = "Open the player", onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open the player", tint = Color.White, modifier = Modifier.size(20.dp))
-    }
-}
-
-@Composable
 private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNext: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Up Next", fontSize = 13.sp, lineHeight = 16.sp, color = colors.muted, modifier = Modifier.padding(end = 10.dp))
@@ -809,70 +781,3 @@ private fun WaveProgress(
         )
     }
 }
-
-// ---------------------------------------------------------------------------
-// The card's shape
-// ---------------------------------------------------------------------------
-
-/**
- * A rounded card with a round bite out of its top-right corner, where the
- * open button sits: the bite is [gap] wider than the button and meets the
- * card's edges in small rounded fillets rather than sharp points.
- */
-internal class NotchedCardShape(
-    private val cornerRadius: Dp,
-    private val notchRadius: Dp,
-    private val gap: Dp,
-    private val fillet: Dp,
-) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val path = with(density) {
-            notchedPath(size, cornerRadius.toPx(), notchRadius.toPx(), gap.toPx(), fillet.toPx())
-        }
-        return Outline.Generic(path)
-    }
-}
-
-internal fun notchedPath(size: Size, corner: Float, button: Float, gap: Float, fillet: Float): Path {
-    val w = size.width
-    val h = size.height
-    val r = corner.coerceAtMost(minOf(w, h) / 2)
-    val b = button
-    val rn = b + gap
-    val f = fillet
-    val cx = w - b
-    val cy = b
-    // Fillet against the top edge, outside the notch.
-    val fx = cx - sqrt((rn + f) * (rn + f) - (b - f) * (b - f))
-    val fy = f
-    // Fillet against the right edge.
-    val gx = w - f
-    val gy = cy + sqrt((rn + f) * (rn + f) - (b - f) * (b - f))
-    fun deg(rad: Float) = rad * 180f / PI.toFloat()
-    val toCenterFromF = deg(atan2(cy - fy, cx - fx))
-    val toCenterFromG = deg(atan2(cy - gy, cx - gx))
-    val startNotch = deg(atan2(fy - cy, fx - cx))
-    val endNotch = deg(atan2(gy - cy, gx - cx))
-    var notchSweep = endNotch - startNotch
-    if (notchSweep > 0) notchSweep -= 360f
-
-    return Path().apply {
-        moveTo(r, 0f)
-        lineTo(fx, 0f)
-        arcTo(Rect(fx - f, fy - f, fx + f, fy + f), -90f, toCenterFromF + 90f, false)
-        arcTo(Rect(cx - rn, cy - rn, cx + rn, cy + rn), startNotch, notchSweep, false)
-        var gStart = toCenterFromG
-        var gSweep = 0f - gStart
-        if (gSweep < 0) gSweep += 360f
-        if (gSweep > 180f) { gStart -= 360f; gSweep = 0f - gStart }
-        arcTo(Rect(gx - f, gy - f, gx + f, gy + f), gStart, gSweep, false)
-        lineTo(w, h - r)
-        arcTo(Rect(w - 2 * r, h - 2 * r, w, h), 0f, 90f, false)
-        lineTo(r, h)
-        arcTo(Rect(0f, h - 2 * r, 2 * r, h), 90f, 90f, false)
-        lineTo(0f, r)
-        arcTo(Rect(0f, 0f, 2 * r, 2 * r), 180f, 90f, false)
-        close()
-    }
-}
-

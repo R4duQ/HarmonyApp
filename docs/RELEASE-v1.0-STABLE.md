@@ -122,9 +122,9 @@ certificate.
   it, turning while the music plays, coasting to a stop on pause and spinning on to the next
   song. It shows where the music is playing (AirPods, phone speaker, car…), the song, a
   rainbow wave that runs along as it plays (drag it to seek), shuffle, previous, play/pause,
-  next and repeat, and the next songs as chips you can tap to play. The open button sits in a
-  notch in the corner. On a light page the card is dark, on a dark page it is light. Tap it or
-  swipe up to open Now Playing, swipe sideways to skip.
+  next and repeat, and the next songs as chips you can tap to play. On a light page the card is
+  dark, on a dark page it is light. Tap it or swipe up to open Now Playing, swipe sideways to
+  skip.
   - *Opening and closing the player is animated.* Swiping up lifts the card with your finger
     while the record grows and rises ahead of it; let go high enough (or flick) and it carries
     on into Now Playing, which grows up out of it; otherwise it springs back. Closing Now
