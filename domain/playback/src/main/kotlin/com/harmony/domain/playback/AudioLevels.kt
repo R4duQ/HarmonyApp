@@ -50,8 +50,28 @@ object AudioLevels {
         )
     }
 
+    private val _spectrum = MutableStateFlow(FloatArray(SPECTRUM_BANDS))
+
+    /**
+     * Loudness in the equalizer's ten octave bands (31 Hz … 16 kHz), each
+     * 0..1, for the equalizer's analyser. Unlike [current] this costs real
+     * work on the audio thread (ten band filters), so the producer only
+     * measures while someone is collecting it: see [spectrumWanted].
+     */
+    val spectrum: StateFlow<FloatArray> = _spectrum.asStateFlow()
+
+    /** True while a screen is showing the analyser. */
+    val spectrumWanted: Boolean get() = _spectrum.subscriptionCount.value > 0
+
+    fun publishSpectrum(bands: FloatArray) {
+        _spectrum.value = bands
+    }
+
     /** Called when playback stops so the bars settle instead of freezing mid-peak. */
     fun reset() {
         _current.value = AudioLevel()
+        _spectrum.value = FloatArray(SPECTRUM_BANDS)
     }
+
+    const val SPECTRUM_BANDS = 10
 }

@@ -4,6 +4,7 @@ import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.harmony.core.model.OctaveBandMeter
 import com.harmony.domain.playback.AudioLevels
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -31,6 +32,12 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
 
     private var encoding: Int = C.ENCODING_INVALID
     private var sampleRate: Int = 0
+    private var channels: Int = 1
+
+    /** The analyser's band filters; built on first use, only while a screen shows it. */
+    private var bands: OctaveBandMeter? = null
+    private var mono = 0f
+    private var channel = 0
 
     private var scratch: ByteBuffer =
         ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
@@ -59,6 +66,8 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
         }
         encoding = inputAudioFormat.encoding
         sampleRate = inputAudioFormat.sampleRate
+        channels = inputAudioFormat.channelCount.coerceAtLeast(1)
+        bands = null
         return inputAudioFormat
     }
 
@@ -87,10 +96,15 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
 
     private fun measure(buffer: ByteBuffer) {
         val mark = buffer.position()
-        if (encoding == C.ENCODING_PCM_FLOAT) {
-            while (buffer.remaining() >= 4) accumulate(buffer.float)
+        val meter = if (AudioLevels.spectrumWanted && sampleRate > 0) {
+            bands ?: OctaveBandMeter(sampleRate).also { bands = it }
         } else {
-            while (buffer.remaining() >= 2) accumulate(buffer.short / 32768f)
+            null
+        }
+        if (encoding == C.ENCODING_PCM_FLOAT) {
+            while (buffer.remaining() >= 4) accumulate(buffer.float, meter)
+        } else {
+            while (buffer.remaining() >= 2) accumulate(buffer.short / 32768f, meter)
         }
         buffer.position(mark)
 
@@ -101,7 +115,15 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
         if (counted >= windowSamples) publish()
     }
 
-    private fun accumulate(sample: Float) {
+    private fun accumulate(sample: Float, meter: OctaveBandMeter?) {
+        if (meter != null) {
+            mono += sample
+            if (++channel >= channels) {
+                meter.add(mono / channels)
+                mono = 0f
+                channel = 0
+            }
+        }
         sumSquares += (sample * sample).toDouble()
         val sign = if (sample >= 0f) 1 else -1
         if (lastSign != 0 && sign != lastSign) crossings++
@@ -127,6 +149,18 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
         smoothedLevel = smooth(smoothedLevel, target, attack = 0.55f, release = 0.12f)
         smoothedBrightness = smooth(smoothedBrightness, targetBrightness, 0.30f, 0.14f)
         AudioLevels.publish(smoothedLevel, smoothedBrightness)
+        bands?.let { meter ->
+            if (meter.count > 0) {
+                val db = meter.levelsDb()
+                // −66 dBFS and below is the floor, −6 dBFS fills a bar.
+                AudioLevels.publishSpectrum(FloatArray(db.size) { i ->
+                    val v = db[i]
+                    if (v.isNaN() || v.isInfinite()) 0f else ((v + 66f) / 60f).coerceIn(0f, 1f)
+                })
+                meter.reset()
+            }
+            if (!AudioLevels.spectrumWanted) bands = null
+        }
 
         sumSquares = 0.0
         crossings = 0
@@ -150,6 +184,9 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun resetWindow() {
+        bands = null
+        mono = 0f
+        channel = 0
         sumSquares = 0.0
         crossings = 0
         counted = 0

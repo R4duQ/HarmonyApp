@@ -67,17 +67,25 @@ certificate.
   few milliseconds while it is still muted, and only then swaps them. The crossfade
   player also uses the same ReplayGain and EQ, so loudness and tone no longer jump at
   that moment.
-- **Winamp equalizer.** A third Equalizer tab, Winamp, plays music through Winamp's own
-  equalizer: ten one-octave bands at 60, 170, 310 and 600 Hz and 1, 3, 6, 12, 14 and 16 kHz,
-  ±20 dB each, plus a preamp. It uses the same filters as the eq-xmms reconstruction of
-  Winamp's equalizer, which XMMS and VLC also use, so bands overlap and add up the way they
-  did in Winamp. Its 18 presets are included (Rock, Dance, Full Bass, Large Hall, Techno and
-  the rest). The panel looks like Winamp 2: an ON light, PRESETS, a black display with the
-  real response curve, and sliders that glow from green to red. Tap a slider to jump, drag it,
-  double-tap it to centre. The Winamp settings are kept apart from the Simple/Advanced ones,
-  and touching either side picks which equalizer plays.
-- **Automatic equalizer.** A fourth Equalizer tab, Auto, adjusts the sound on its own, in three
-  parts that can each be switched on alone, on top of your own Simple, Advanced or Winamp settings:
+- **Equalizer: Winamp and Auto.** The Equalizer now has two tabs, Winamp and Auto, under a
+  segmented switch. The old Simple and Advanced tabs are gone. If you had set them and never
+  touched Winamp, your bands are carried over to Winamp's, so the sound stays the same.
+- **Winamp equalizer.** Plays music through Winamp's own equalizer: ten one-octave bands at 60,
+  170, 310 and 600 Hz and 1, 3, 6, 12, 14 and 16 kHz, ±20 dB each, plus a preamp. It uses the same
+  filters as the eq-xmms reconstruction of Winamp's equalizer, which XMMS and VLC also use, so bands
+  overlap and add up the way they did in Winamp. The tab is drawn as two Winamp 2 windows:
+  - *Main window*: the song scrolls across a green LCD, with its length, bitrate, sample rate,
+    stereo light and the device it's playing on, next to a live spectrum analyser with falling
+    peaks. The analyser measures what actually reaches the speaker, and only while you look at it.
+  - *Equalizer window*: ON, AUTO (switches on Auto's song-by-song tone), PRESETS and RESET; a black
+    display with the real response curve, its glow and a dot on each band; the preamp and ten
+    sliders whose LED ladders light green to red. Tap a slider to jump, drag it, double-tap it to
+    centre.
+  - *Presets*: all 18 Winamp presets as cards, each with its own curve. The one in use glows gold.
+  - *Signal*: the preamp, the biggest boost and cut, and the output.
+- **Automatic equalizer.** The Auto tab adjusts the sound on its own, on top of Winamp, in three
+  parts that can each be switched on alone. A glowing header shows what it's doing: the total curve
+  over the live spectrum, and a ring for each part. Each part has its own card, colour and curve:
   - *Song by song*: Harmony listens to each song as it plays and evens out its tone towards a
     typical well-mastered record, at most a few dB (a little body for thin recordings, a little less
     edge for harsh ones). It fades in over the first seconds, and a song played again starts with its
@@ -88,8 +96,8 @@ certificate.
     speaker isn't pushed into distortion.
   - *Noise around you*: on headphones, the microphone listens to your surroundings while music plays
     and lifts what the noise covers up (bass on a bus, the middle in a crowd), rising in about 2 s and
-    falling back in about 6 s. A notification shows while this is on; nothing is recorded or sent.
-  A live curve shows what each part is doing. The equalizer also now switches on and off at once,
+    falling back in about 6 s. A gauge shows how loud it is around you, from a quiet room to a bus.
+    A notification shows while this is on; nothing is recorded or sent. The equalizer also now switches on and off at once,
   instead of at the next seek or song.
 - **Where the music is playing.** Now Playing shows an icon for the kind of device:
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
