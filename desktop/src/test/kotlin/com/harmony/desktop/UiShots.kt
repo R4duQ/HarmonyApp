@@ -31,6 +31,10 @@ import javax.imageio.ImageIO
 class UiShots {
     private val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
 
+    // 1920x1080 (-Dshots.width/-Dshots.height) for the Microsoft Store listing.
+    private val width = System.getProperty("shots.width")?.toIntOrNull() ?: 1280
+    private val height = System.getProperty("shots.height")?.toIntOrNull() ?: 820
+
     private val artists = listOf("Daft Punk", "The Weeknd", "Joji", "Mira Sol", "Harbor & Pine")
     private val albums = listOf("Random Access Memories", "After Hours", "Smithereens", "Harbour Lights", "Open Water", "Field Notes", "Evergreen")
     private val titles = listOf("Instant Crush", "Blinding Lights", "Glimpse of Us", "Night Ferry", "Slow Weather", "Paper Moons", "Afterglow Street", "Glass Harbour", "Blue Hour Radio", "Tidewater", "Satellite Hearts", "Winter Garden")
@@ -57,7 +61,7 @@ class UiShots {
         return DesktopApp(store, engine, player, connect, LibraryCache(File(tmp, "library.json")), LibraryScanner { null }, CoverCache(File(tmp, "covers")))
     }
 
-    private fun shot(name: String, app: DesktopApp, nav: String? = null, before: () -> Unit = {}) = runDesktopComposeUiTest(1280, 820) {
+    private fun shot(name: String, app: DesktopApp, nav: String? = null, before: () -> Unit = {}) = runDesktopComposeUiTest(width, height) {
         mainClock.autoAdvance = false
         before()
         setContent { HarmonyDesktopApp(app) }
