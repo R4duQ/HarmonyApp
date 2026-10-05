@@ -12,7 +12,13 @@ The phone app is a separate download, on its own release: **Harmony 1.0** (tag `
 Harmony Connect needs the phone at build 128 or newer (129 or newer for songs running
 straight into each other and next acting at once on the computer).
 
-Each new build installs over the last one. The installer isn't signed yet, so Windows may
+Each new build installs over the last one, into your own app folder (no administrator
+needed).
+
+**Can't uninstall?** An earlier build let you pick the folder; installed on another drive
+than C:, removing it from Settings fails with "Could not set file security ... Config.Msi
+... Error: 5". Download `Dezinstaleaza-Harmony.cmd` from this release and double-click it:
+it asks for administrator rights and removes Harmony. Then install the new build. The installer isn't signed yet, so Windows may
 say "Windows protected your PC": choose **More info**, then **Run anyway**.
 
 ## What's in it
