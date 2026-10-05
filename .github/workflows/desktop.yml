@@ -11,6 +11,8 @@ on:
       - 'playback/service/src/main/kotlin/com/harmony/playback/service/player/WinampFilterBank.kt'
       - 'playback/service/src/main/kotlin/com/harmony/playback/service/player/ClarityLayer.kt'
       - '.github/workflows/desktop.yml'
+      - 'docs/DESKTOP-v1.0.md'
+      - 'desktop/msix/**'
 
 permissions:
   contents: write
@@ -58,7 +60,43 @@ jobs:
         run: ./gradlew -p desktop test --tests 'com.harmony.desktop.EngineAndConnectTest' "-PffmpegDir=$(cygpath -w "$(pwd)/desktop/resources/windows")" --no-daemon --stacktrace
 
       - name: Build installers
-        run: ./gradlew -p desktop packageMsi packageExe "-PdesktopVersion=1.0.${{ github.run_number }}" --no-daemon --stacktrace
+        run: ./gradlew -p desktop createDistributable packageMsi packageExe "-PdesktopVersion=1.0.${{ github.run_number }}" --no-daemon --stacktrace
+
+      - name: Build the Microsoft Store package (MSIX)
+        # The same app, packaged for the Store. The Store signs it on publishing,
+        # so it installs without SmartScreen warnings; this file isn't signed and
+        # is uploaded to Partner Center, not to the release.
+        run: |
+          set -euo pipefail
+          prop() { grep "^$1=" desktop/msix/store-identity.properties | head -1 | cut -d= -f2- | tr -d '\r'; }
+          IDENTITY_NAME=$(prop IDENTITY_NAME)
+          PUBLISHER=$(prop PUBLISHER)
+          PUBLISHER_DISPLAY_NAME=$(prop PUBLISHER_DISPLAY_NAME)
+          v="1.0.${{ github.run_number }}.0"
+          root=msix-root
+          rm -rf "$root" && mkdir -p "$root"
+          cp -r desktop/build/compose/binaries/main/app/Harmony/. "$root/"
+          cp -r desktop/msix/Assets "$root/Assets"
+          sed -e "s|@IDENTITY_NAME@|$IDENTITY_NAME|" -e "s|@PUBLISHER@|$PUBLISHER|" \
+              -e "s|@PUBLISHER_DISPLAY_NAME@|$PUBLISHER_DISPLAY_NAME|" -e "s|@VERSION@|$v|" \
+              desktop/msix/AppxManifest.xml > "$root/AppxManifest.xml"
+          makeappx=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"10.*/x64/makeappx.exe | sort -V | tail -1)
+          echo "Using $makeappx"
+          mkdir -p store
+          out="store/Harmony-Windows-$v.msix"
+          # MSYS_NO_PATHCONV: Git Bash would otherwise turn makeappx's /d and /p switches into drive paths.
+          MSYS_NO_PATHCONV=1 "$makeappx" pack /d "$(cygpath -w "$root")" /p "$(cygpath -w "$out")" /o
+          ls -la store
+          if [[ "$IDENTITY_NAME" == *Unreserved* ]]; then
+            echo "::notice::The MSIX uses stand-in identity values. Fill in desktop/msix/store-identity.properties from Partner Center before submitting it."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Harmony-Windows-Store-1.0.${{ github.run_number }}.0
+          path: store/*.msix
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Collect
         id: collect
@@ -80,6 +118,8 @@ jobs:
           retention-days: 90
 
       - name: Publish release
+        # Only builds of main reach the release; other branches just build and check.
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.collect.outputs.version }}
