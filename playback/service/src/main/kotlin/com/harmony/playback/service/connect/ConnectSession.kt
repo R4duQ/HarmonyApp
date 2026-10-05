@@ -87,6 +87,11 @@ class ConnectSession @Inject constructor(
     /** The song the computer was last told to play. */
     private var sentId: String? = null
     private var endHandledFor: String? = null
+    /** The song the computer may go on to by itself (the first of "up next" it was given). */
+    private var advanceId: String? = null
+    /** The computer went on by itself; the next send only catches up with it. */
+    private var following = false
+    private var refreshJob: Job? = null
 
     /** What the listener wants: playing or paused. */
     private var wantPlay = false
@@ -112,8 +117,9 @@ class ConnectSession @Inject constructor(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (!isActive || mediaItem == null) return
             // Another song on the phone's queue (skip, a tap in the queue, a new
-            // album): the computer plays that one now.
-            anchor(exo?.currentPosition ?: 0)
+            // album): the computer plays that one now. Or the phone following
+            // the computer, which already plays it.
+            if (!following) anchor(exo?.currentPosition ?: 0)
             sendCurrent()
         }
 
@@ -123,6 +129,20 @@ class ConnectSession @Inject constructor(
             // new queue, Android Auto): the computer plays instead.
             exo?.playWhenReady = false
             remotePlay()
+        }
+
+        // What comes next changed: tell the computer, which may go on to it by itself.
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) = refreshUpNext()
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = refreshUpNext()
+        override fun onRepeatModeChanged(repeatMode: Int) = refreshUpNext()
+    }
+
+    private fun refreshUpNext() {
+        if (!isActive) return
+        refreshJob?.cancel()
+        refreshJob = scope.launch {
+            delay(REFRESH_DELAY_MS)
+            if (isActive && exo?.currentMediaItem?.mediaId == sentId) sendCurrent(followUp = true)
         }
     }
 
@@ -260,6 +280,7 @@ class ConnectSession @Inject constructor(
         val position = if (previous != null) remotePosition() else exo.currentPosition.coerceAtLeast(0)
         val playing = if (previous != null) wantPlay else exo.playWhenReady
         val upNext = upNextItems(exo)
+        val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
         val duration = exo.duration.takeIf { it != C.TIME_UNSET } ?: 0L
         _state.update { it.copy(busyWith = target.id, error = null, needsCode = null) }
         scope.launch {
@@ -268,7 +289,7 @@ class ConnectSession @Inject constructor(
                 runCatching {
                     previous?.disconnect()
                     files.start()
-                    if (item != null) fresh.play(playRequest(fresh, item, position, playing, duration, upNext)) else fresh.status()
+                    if (item != null) fresh.play(playRequest(fresh, item, position, playing, duration, upNext, canAdvance, followUp = false)) else fresh.status()
                 }
             }
             result.onFailure { e ->
@@ -292,6 +313,8 @@ class ConnectSession @Inject constructor(
             client = fresh
             computer = target
             sentId = item?.mediaId
+            advanceId = upNext.firstOrNull()?.mediaId?.takeIf { canAdvance }
+            following = false
             endHandledFor = null
             remoteState = result.getOrNull()?.state ?: RemoteState.LOADING
             wantPlay = playing && item != null
@@ -318,6 +341,9 @@ class ConnectSession @Inject constructor(
         client = null
         computer = null
         sentId = null
+        advanceId = null
+        following = false
+        refreshJob?.cancel()
         wantPlay = false
         remoteState = null
         releaseLocks()
@@ -336,26 +362,67 @@ class ConnectSession @Inject constructor(
 
     // ---- What the computer is told -------------------------------------------------
 
-    private fun sendCurrent(playing: Boolean = wantPlay) {
+    /**
+     * Tells the computer to play the current song. With [followUp] (or right
+     * after the computer went on by itself) it only brings the computer up to
+     * date: the song carries on there as it is, with the new "up next".
+     */
+    private fun sendCurrent(playing: Boolean = wantPlay, followUp: Boolean = false) {
         val exo = exo ?: return
         val c = client ?: return
         val item = exo.currentMediaItem ?: return
+        val catchUp = followUp || following
+        following = false
         val position = exo.currentPosition.coerceAtLeast(0)
         val duration = exo.duration.takeIf { it != C.TIME_UNSET } ?: 0L
         val upNext = upNextItems(exo)
+        val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
         sentId = item.mediaId
+        advanceId = upNext.firstOrNull()?.mediaId?.takeIf { canAdvance }
+        if (!catchUp) {
+            endHandledFor = null
+            remoteState = RemoteState.LOADING
+            wantPlay = playing
+            anchor(position)
+            trustLocalUntil = SystemClock.elapsedRealtime() + TRUST_LOCAL_MS
+            player?.notifyPlayState()
+            updateLocks()
+        }
+        send { c.play(playRequest(c, item, position, playing, duration, upNext, canAdvance, catchUp)) }
+    }
+
+    /** The computer went on to [id] by itself: move the phone's queue there too, without restarting it. */
+    private fun followComputer(id: String, status: RemoteStatus) {
+        val exo = exo ?: return
+        val next = exo.nextMediaItemIndex
+        val target = if (next != C.INDEX_UNSET && exo.getMediaItemAt(next).mediaId == id) next
+        else (0 until exo.mediaItemCount).firstOrNull { exo.getMediaItemAt(it).mediaId == id } ?: return
+        sentId = id
+        advanceId = null
         endHandledFor = null
-        remoteState = RemoteState.LOADING
-        wantPlay = playing
-        anchor(position)
-        trustLocalUntil = SystemClock.elapsedRealtime() + TRUST_LOCAL_MS
+        remoteState = status.state
+        anchor(status.positionMs)
+        following = true
+        // The transition sends the catch-up (see the listener).
+        exo.seekTo(target, 0)
+        if (following) {
+            // No transition came (the same item): catch up now.
+            sendCurrent(followUp = true)
+        }
         player?.notifyPlayState()
-        updateLocks()
-        send { c.play(playRequest(c, item, position, playing, duration, upNext)) }
     }
 
     /** Runs on the network thread. */
-    private fun playRequest(c: ConnectClient, item: MediaItem, positionMs: Long, playing: Boolean, durationMs: Long, upNext: List<MediaItem>): PlayRequest {
+    private fun playRequest(
+        c: ConnectClient,
+        item: MediaItem,
+        positionMs: Long,
+        playing: Boolean,
+        durationMs: Long,
+        upNext: List<MediaItem>,
+        autoAdvance: Boolean,
+        followUp: Boolean,
+    ): PlayRequest {
         val uri = item.localConfiguration?.uri ?: throw IOException("nothing to play")
         val host = localAddressToward(c.host)
         val (url, art) = files.share(item.mediaId, uri, coverFor(item), host)
@@ -369,11 +436,14 @@ class ConnectSession @Inject constructor(
             url = url,
             artUrl = art,
         )
-        val next = upNext.map {
+        val next = upNext.mapIndexed { i, it ->
             val m = it.mediaMetadata
-            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", 0, "")
+            // The first one can be played straight on: the computer fetches it ahead of time.
+            val nextUri = it.localConfiguration?.uri
+            val (nextUrl, nextArt) = if (i == 0 && autoAdvance && nextUri != null) files.share(it.mediaId, nextUri, coverFor(it), host) else ("" to null)
+            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", 0, nextUrl, nextArt)
         }
-        return PlayRequest(track, positionMs, playing, phoneName(), next)
+        return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp)
     }
 
     private fun coverFor(item: MediaItem): ByteArray? {
@@ -394,8 +464,10 @@ class ConnectSession @Inject constructor(
         val out = ArrayList<MediaItem>()
         var index = exo.currentMediaItemIndex
         val seen = HashSet<Int>().apply { add(index) }
+        // Repeat all wraps round to the start, as the phone itself would.
+        val repeat = if (exo.repeatMode == Player.REPEAT_MODE_ALL) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
         while (out.size < UP_NEXT) {
-            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, exo.shuffleModeEnabled)
+            index = timeline.getNextWindowIndex(index, repeat, exo.shuffleModeEnabled)
             if (index == C.INDEX_UNSET || !seen.add(index)) break
             out += exo.getMediaItemAt(index)
         }
@@ -521,6 +593,11 @@ class ConnectSession @Inject constructor(
         val exo = exo ?: return
         val player = player ?: return
         val now = SystemClock.elapsedRealtime()
+
+        // Gone on by itself to the song it was told comes next: the phone follows first,
+        // so a next pressed after that on the computer moves on from there.
+        val id = status.trackId
+        if (id != null && id != sentId && id == advanceId) followComputer(id, status)
 
         // Next or previous pressed on the computer: the phone's queue decides what that is.
         for (request in status.requests) when (request) {
@@ -688,6 +765,7 @@ class ConnectSession @Inject constructor(
         const val DRIFT_MS = 1_500L
         const val MAX_FAILURES = 8
         const val UP_NEXT = 3
+        const val REFRESH_DELAY_MS = 400L
         const val VOLUME_STEPS = 25
         const val MAX_COVER_BYTES = 2_000_000
         const val LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L

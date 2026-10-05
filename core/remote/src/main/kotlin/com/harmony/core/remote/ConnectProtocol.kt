@@ -115,13 +115,24 @@ data class RemoteTrack(
     }
 }
 
-/** Play [track] from [positionMs]; [upNext] is shown on the computer, the phone still decides what comes next. */
+/**
+ * Play [track] from [positionMs]; [upNext] is what the phone's queue plays next.
+ *
+ * With [autoAdvance] the computer may go straight on to `upNext[0]` (when it
+ * has a [RemoteTrack.url]) at the end of the song, or when next is pressed on
+ * the computer, without waiting for the phone; its status then names the new
+ * song and the phone follows. [followUp] marks the phone catching up with
+ * that (or only updating what's next): if the computer already plays [track]
+ * it keeps playing it as it is.
+ */
 data class PlayRequest(
     val track: RemoteTrack,
     val positionMs: Long,
     val playing: Boolean,
     val phoneName: String,
     val upNext: List<RemoteTrack> = emptyList(),
+    val autoAdvance: Boolean = false,
+    val followUp: Boolean = false,
 ) {
     fun toJson(): String = JSONObject()
         .put("track", track.toJsonObject())
@@ -129,6 +140,8 @@ data class PlayRequest(
         .put("playing", playing)
         .put("phone", phoneName)
         .put("upNext", JSONArray().apply { upNext.forEach { put(it.toJsonObject()) } })
+        .put("autoAdvance", autoAdvance)
+        .put("followUp", followUp)
         .toString()
 
     companion object {
@@ -141,6 +154,8 @@ data class PlayRequest(
                 playing = o.optBoolean("playing", true),
                 phoneName = o.optString("phone", "Phone"),
                 upNext = if (next == null) emptyList() else List(next.length()) { RemoteTrack.fromJson(next.getJSONObject(it)) },
+                autoAdvance = o.optBoolean("autoAdvance", false),
+                followUp = o.optBoolean("followUp", false),
             )
         }.getOrNull()
     }

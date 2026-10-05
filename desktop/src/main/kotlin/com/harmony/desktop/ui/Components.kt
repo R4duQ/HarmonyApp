@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -64,25 +65,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.desktop.player.Art
 import kotlin.math.PI
+import kotlin.math.exp
 import kotlin.math.sin
 
 /**
  * The song's position, read on the frame clock: about 30 times a second while
- * it plays, four times a second while paused (to catch seeks).
+ * it plays, four times a second while paused (to catch seeks). Read it where
+ * it's drawn ([PositionText], [WaveProgress]) so only those redraw.
  */
 @Composable
-fun rememberPosition(playing: Boolean, read: () -> Long): Long {
-    var position by remember { mutableLongStateOf(read()) }
+fun rememberPosition(playing: Boolean, read: () -> Long): State<Long> {
+    val position = remember { mutableLongStateOf(read()) }
     val reader by rememberUpdatedState(read)
     LaunchedEffect(playing) {
-        position = reader()
+        position.longValue = reader()
         val every = if (playing) 33L else 250L
         var last = 0L
         while (true) {
             withFrameMillis { now ->
                 if (now - last >= every) {
                     last = now
-                    position = reader()
+                    position.longValue = reader()
                 }
             }
         }
@@ -90,28 +93,54 @@ fun rememberPosition(playing: Boolean, read: () -> Long): Long {
     return position
 }
 
-/** The cover as a record that turns while the music plays, coasting to a stop on pause. */
+/** "2:41", following [position]. */
+@Composable
+fun PositionText(position: State<Long>, fontSize: androidx.compose.ui.unit.TextUnit, color: Color, modifier: Modifier = Modifier) {
+    Text(formatTime(position.value), fontSize = fontSize, color = color, modifier = modifier)
+}
+
+/**
+ * The cover as a record that turns while the music plays, coasting to a stop
+ * on pause and giving a quick extra spin when the song changes.
+ *
+ * One frame loop turns it, at a speed that eases between playing and
+ * stopped; nothing else animates the angle, so a new song can never stop it.
+ */
 @Composable
 fun Disc(art: Art?, loader: ImageLoader, playing: Boolean, size: Dp, modifier: Modifier = Modifier, key: Any? = null) {
-    val turn = remember { Animatable(0f) }
-    LaunchedEffect(playing) {
-        if (playing) {
-            while (true) {
-                turn.snapTo(turn.value % 360f)
-                turn.animateTo(turn.value + 360f, tween(9_000, easing = LinearEasing))
-            }
-        } else {
-            turn.animateTo(turn.value + 24f, tween(700, easing = FastOutSlowInEasing))
+    val angle = remember { mutableFloatStateOf(0f) }
+    val speed = animateFloatAsState(
+        if (playing) DISC_DEG_PER_S else 0f,
+        tween(if (playing) 700 else 1_100, easing = FastOutSlowInEasing),
+        label = "disc-speed",
+    )
+    val kick = remember { mutableFloatStateOf(0f) }
+    val seenKey = remember { mutableStateOf(key) }
+    LaunchedEffect(key) {
+        if (seenKey.value != key) {
+            seenKey.value = key
+            kick.floatValue = DISC_KICK_DEG_PER_S
         }
     }
-    LaunchedEffect(key) {
-        turn.animateTo(turn.value + 160f, tween(650, easing = FastOutSlowInEasing))
+    LaunchedEffect(playing, key) {
+        var last = -1L
+        while (playing || speed.value > 0.5f || kick.floatValue > 1f) {
+            withFrameMillis { now ->
+                if (last >= 0) {
+                    val dt = ((now - last).coerceIn(0, 100)) / 1000f
+                    angle.floatValue = (angle.floatValue + (speed.value + kick.floatValue) * dt) % 360f
+                    kick.floatValue *= exp(-dt * 3.5f)
+                }
+                last = now
+            }
+        }
+        kick.floatValue = 0f
     }
-    val scale by animateFloatAsState(if (playing) 1f else 0.94f, spring(dampingRatio = 0.55f, stiffness = 300f))
+    val scale by animateFloatAsState(if (playing) 1f else 0.94f, spring(dampingRatio = 0.55f, stiffness = 300f), label = "disc-scale")
     Box(
         modifier
             .size(size)
-            .graphicsLayer { scaleX = scale; scaleY = scale; rotationZ = turn.value }
+            .graphicsLayer { scaleX = scale; scaleY = scale; rotationZ = angle.floatValue }
             .shadow(18.dp, CircleShape, ambientColor = Accent.Purple, spotColor = Accent.Purple)
             .clip(CircleShape)
             .background(Color(0xFF0D0D10))
@@ -131,13 +160,18 @@ fun Disc(art: Art?, loader: ImageLoader, playing: Boolean, size: Dp, modifier: M
     }
 }
 
+/** One turn every 9 s while playing. */
+private const val DISC_DEG_PER_S = 40f
+/** The extra spin when the song changes, dying away in about a second. */
+private const val DISC_KICK_DEG_PER_S = 420f
+
 /**
  * Progress as a rainbow wave up to where the song is, flat after it. The
  * wave runs along while playing and lies down on pause. Click or drag to seek.
  */
 @Composable
 fun WaveProgress(
-    positionMs: Long,
+    position: State<Long>,
     durationMs: Long,
     playing: Boolean,
     track: Color,
@@ -156,10 +190,9 @@ fun WaveProgress(
         }
     }
     val amplitude by animateFloatAsState(if (playing) 1f else 0f, tween(500))
-    val shown = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     Canvas(
         modifier
-            .semantics { contentDescription = "Position ${formatTime(positionMs)} of ${formatTime(durationMs)}" }
+            .semantics { contentDescription = "Song position, ${formatTime(durationMs)} long" }
             .pointerHoverIcon(PointerIcon.Hand)
             .pointerInput(durationMs) {
                 detectTapGestures { o -> if (durationMs > 0) seek(((o.x / size.width).coerceIn(0f, 1f) * durationMs).toLong()) }
@@ -173,6 +206,7 @@ fun WaveProgress(
                 )
             },
     ) {
+        val shown = if (durationMs > 0) (position.value.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
         val fraction = dragging ?: shown
         val thumbR = 8.dp.toPx()
         val left = thumbR

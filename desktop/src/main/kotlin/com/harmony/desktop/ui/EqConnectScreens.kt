@@ -60,6 +60,7 @@ import com.harmony.core.model.ClarityPreset
 import com.harmony.core.model.ClaritySettings
 import com.harmony.core.model.WinampEqDesign
 import com.harmony.desktop.DesktopApp
+import com.harmony.desktop.engine.EngineStatus
 import kotlin.math.roundToInt
 
 @Composable
@@ -89,11 +90,17 @@ private val BAND_LABELS = listOf("60", "170", "310", "600", "1K", "3K", "6K", "1
 fun EqualizerPage(app: DesktopApp) {
     val c = LocalHarmonyColors.current
     val settings by app.settingsFlow.collectAsState()
+    val engine by app.player.engineState.collectAsState()
     val eq = settings.eq
+    val playing = engine.status == EngineStatus.PLAYING
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        PageHeader("Equalizer", "Winamp's equalizer and Clarity, the same as on your phone") {
+        PageHeader("Equalizer", "Winamp's equalizer, tone, Clarity and even volume: watch it work on the music below") {
+            CompareButton(app, eq.enabled)
             Text(if (eq.enabled) "On" else "Off", fontSize = 14.sp, color = c.muted)
             HarmonySwitch(eq.enabled, { app.setEq(eq.copy(enabled = it)) }, "eq_on")
+        }
+        Card(Modifier.padding(horizontal = 32.dp).padding(bottom = 18.dp).fillMaxWidth()) {
+            EqVisualizer(app, eq, playing)
         }
         Card(Modifier.padding(horizontal = 32.dp).fillMaxWidth()) {
             Column {
@@ -129,6 +136,9 @@ fun EqualizerPage(app: DesktopApp) {
                     }
                 }
             }
+        }
+        Card(Modifier.padding(horizontal = 32.dp).padding(top = 18.dp).fillMaxWidth()) {
+            ToneCard(app, eq)
         }
         Card(Modifier.padding(horizontal = 32.dp, vertical = 18.dp).fillMaxWidth()) {
             Column {

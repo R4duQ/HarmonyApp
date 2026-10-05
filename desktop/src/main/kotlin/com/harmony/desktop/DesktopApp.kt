@@ -94,7 +94,8 @@ class DesktopApp(
 
     override fun close() {
         connect.close()
-        engine.stop()
+        engine.shutdown()
+        settings.flush()
         scope.cancel()
     }
 
@@ -102,7 +103,7 @@ class DesktopApp(
         fun create(): DesktopApp {
             val settings = SettingsStore()
             val engine = AudioEngine()
-            val player = PlayerController(engine)
+            val player = PlayerController(engine, com.harmony.desktop.connect.RemoteCache())
             val connect = ConnectHost(
                 pcId = settings.current.pcId,
                 pcName = { settings.current.pcName },
