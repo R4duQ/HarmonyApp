@@ -126,14 +126,15 @@ class EngineAndConnectTest {
     }
 
     @Test fun `the scanner finds songs in subfolders and reuses what it knows`() {
-        var reads = 0
-        val scanner = LibraryScanner { f -> reads++; Ffprobe.read(f) }
+        // The scanner reads files on several threads at once.
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val scanner = LibraryScanner { f -> reads.incrementAndGet(); Ffprobe.read(f) }
         val first = scanner.scan(listOf(dir), emptyMap())
         assertEquals(setOf("Tone Song", "Short Tone"), first.map { it.title }.toSet())
-        assertEquals(2, reads)
+        assertEquals(2, reads.get())
         val again = scanner.scan(listOf(dir), first.associateBy { it.path })
         assertEquals(2, again.size)
-        assertEquals("nothing changed, nothing re-read", 2, reads)
+        assertEquals("nothing changed, nothing re-read", 2, reads.get())
     }
 
     @Test fun `the engine plays a song to its end and seeks`() {
