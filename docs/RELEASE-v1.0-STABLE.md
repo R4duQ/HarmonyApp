@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **127**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 126), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **128**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 127), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -11,6 +11,9 @@ update over any of them. Library, playlists and settings are kept.
 
 `SHA256SUMS.txt` and `APK-SIGNATURE.txt` let you check the file and its signing
 certificate.
+
+Harmony for Windows is a separate download, on its own release: **Harmony for Windows 1.0**
+(tag `desktop-v1.0`).
 
 ## What's in it
 
@@ -134,6 +137,14 @@ certificate.
   earbuds, headphones, neckband, wired earphones, speaker, car stereo, hearing aid,
   Android Auto or the phone itself. Harmony guesses the kind from the device; tap the
   line to set it for that device.
+- **Harmony Connect: play on your PC.** Tap where the music plays, under the title in Now
+  Playing: **Play on** lists the computers running Harmony for Windows on the same Wi-Fi.
+  Choose one (the first time, type the four-digit code it shows) and the song carries on
+  through the computer's speakers from the same place. The phone stays the remote and keeps
+  the queue: play, pause, skip and seek from the app, the notification, the lock screen,
+  your headphones or the computer, and the phone's volume buttons turn the computer up and
+  down. The song is streamed from the phone as it plays; nothing is copied. Choose **This
+  phone** to bring the music back, paused where it was.
 - **Closing the app closes the notification.** Swiping Harmony away stops playback and
   removes its notification unless Android Auto is connected. Before, the system's media
   controls, Bluetooth or a watch could be mistaken for the car, leaving music and a

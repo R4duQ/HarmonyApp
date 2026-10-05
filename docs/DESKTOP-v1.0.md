@@ -8,6 +8,9 @@ through the computer's speakers with **Harmony Connect**.
 - `Harmony-Windows-1.0.x.msi`: the installer (Windows 10 or 11, 64-bit).
 - `Harmony-Windows-1.0.x-setup.exe`: the same, as a setup program.
 
+The phone app is a separate download, on its own release: **Harmony 1.0** (tag `v1.0`).
+Harmony Connect needs the phone at build 128 or newer.
+
 Each new build installs over the last one. The installer isn't signed yet, so Windows may
 say "Windows protected your PC": choose **More info**, then **Run anyway**.
 
