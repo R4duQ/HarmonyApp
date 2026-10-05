@@ -270,6 +270,71 @@ class EngineAndConnectTest {
         engine.stop()
     }
 
+    /** Silence of [ms] as PCM, ending normally (exit code 0), whatever was asked for. */
+    private class ShortDecoder(private val ms: Long) : com.harmony.desktop.engine.Decoder {
+        val opens = Collections.synchronizedList(mutableListOf<Pair<String, Long>>())
+        override fun open(source: String, startMs: Long, sampleRate: Int, channels: Int): com.harmony.desktop.engine.DecodeStream {
+            opens += source to startMs
+            val bytes = ByteArray((ms * sampleRate / 1000).toInt() * channels * 2)
+            return object : com.harmony.desktop.engine.DecodeStream {
+                override val input = java.io.ByteArrayInputStream(bytes)
+                override fun finish(): String? = null
+                override fun close() {}
+            }
+        }
+    }
+
+    @Test fun `a phone song that stops coming is noticed and started again where it stopped`() {
+        // Every open gives only a second: over the network that's a broken stream, not the end.
+        val decoder = ShortDecoder(1_000)
+        val engine = AudioEngine({ CountingSink() }, decoder)
+        val player = PlayerController(engine)
+        val t = RemoteTrack("7", "Song", "A", "B", 10_000, "http://192.0.2.1/track/7")
+        player.play(PlayRequest(t, 0, playing = true, phoneName = "Pixel 8"))
+        waitFor(what = "a second try") { decoder.opens.size >= 2 }
+        val (source, from) = decoder.opens[1]
+        assertEquals(t.url, source)
+        assertTrue("started again where it stopped: $from", from in 900..1_100)
+        // It gives up after a few tries rather than looping for ever.
+        Thread.sleep(8_000)
+        assertTrue("tries: ${decoder.opens.size}", decoder.opens.size <= 4)
+        assertEquals(EngineStatus.ERROR, engine.state.value.status)
+        engine.stop()
+    }
+
+    @Test fun `the phone's song comes back after the computer's own music`() {
+        val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
+            if (req.path == "/track/7") HttpResponse.ranged(FileRangeSource(flac), req.header("Range"), "audio/flac") else HttpResponse.text(404, "no")
+        }.start()
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val player = PlayerController(engine)
+        try {
+            val a = RemoteTrack("7", "Tone Song", "Test Artist", "Test Album", 3_000, "http://127.0.0.1:${phoneFiles.boundPort}/track/7")
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8"))
+            waitFor(what = "playing") { player.status().state == RemoteState.PLAYING }
+            Thread.sleep(400)
+            // Music from the computer's own library takes over.
+            player.playLocal(listOf(LocalTrack(mp3.absolutePath, "B", "X", "Y", durationMs = 2_000)), 0)
+            assertEquals(null, player.phone.value)
+            val aside = player.status()
+            assertEquals("the phone sees its song paused", RemoteState.PAUSED, aside.state)
+            assertEquals("7", aside.trackId)
+            assertTrue("where it was: ${aside.positionMs}", aside.positionMs in 200..1_200)
+            // Play on the phone brings it back.
+            player.control(ControlRequest(ControlAction.PLAY))
+            assertEquals("Pixel 8", player.phone.value)
+            waitFor(what = "the phone's song again") { player.status().state == RemoteState.PLAYING }
+            assertEquals("7", player.status().trackId)
+            assertEquals("Tone Song", player.nowPlaying.value?.title)
+            // Disconnecting forgets it.
+            player.disconnect("Pixel 8")
+            assertEquals(RemoteState.IDLE, player.status().state)
+        } finally {
+            engine.stop()
+            phoneFiles.close()
+        }
+    }
+
     @Test fun `buttons never wait on the decoder`() {
         val slow = object : com.harmony.desktop.engine.Decoder {
             val real = com.harmony.desktop.engine.FfmpegDecoder()

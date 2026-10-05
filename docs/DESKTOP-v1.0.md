@@ -55,6 +55,10 @@ say "Windows protected your PC": choose **More info**, then **Run anyway**.
   deleted when the phone lets go and when Harmony starts. With a phone at build 129 or newer
   the computer also goes straight on to the next song by itself, without a gap, and next
   pressed on the computer acts at once; the phone follows.
+  If the phone's Wi-Fi drops mid-song, the computer starts the song again where it stopped
+  (from its copy when it has one). Play music from the computer's own library while the
+  phone is connected and the phone's song is set aside, paused; play on the phone brings it
+  back.
   If Windows asks whether Harmony may use the network, allow it on private networks.
 
 Harmony for Windows uses FFmpeg (LGPL build, from BtbN/FFmpeg-Builds) to read and decode
