@@ -96,44 +96,51 @@ class FfmpegDecoder(private val ffmpeg: () -> String = { FfmpegTools.ffmpeg }) :
     }
 }
 
-/** Where the PCM goes. */
+/**
+ * Where the PCM goes. Opened once and kept for every song: the engine only
+ * writes what fits ([available]), so a write never blocks and a seek or a
+ * new song can [flush] whatever is waiting at once.
+ */
 interface PcmSink {
     fun open(sampleRate: Int, channels: Int)
-    /** Blocks while full, and while stopped. */
+    /** Bytes that can be written now without waiting. */
+    fun available(): Int
+    /** Writes [len] bytes, at most [available]. */
     fun write(buf: ByteArray, off: Int, len: Int)
     fun start()
     fun stop()
-    /** Waits until everything written has been heard. */
-    fun drain()
+    /** Throws away what was written but not played yet. */
+    fun flush()
+    /** Frames written but not played yet. */
+    fun queuedFrames(): Long
     /** Frames actually played since [open]. */
     fun framesPlayed(): Long
     fun close()
 }
 
 /** The sound card, through Java Sound (DirectSound / WASAPI on Windows). */
-class JavaSoundSink(private val bufferMs: Int = 250) : PcmSink {
+class JavaSoundSink(private val bufferMs: Int = 200) : PcmSink {
     private var line: SourceDataLine? = null
+    private var frameBytes = 4
 
     override fun open(sampleRate: Int, channels: Int) {
         val format = AudioFormat(sampleRate.toFloat(), 16, channels, true, false)
         val l = AudioSystem.getSourceDataLine(format)
-        l.open(format, sampleRate * channels * 2 * bufferMs / 1000)
+        frameBytes = 2 * channels
+        l.open(format, sampleRate * frameBytes * bufferMs / 1000)
         line = l
     }
 
+    override fun available(): Int = line?.available() ?: 0
+
     override fun write(buf: ByteArray, off: Int, len: Int) {
-        val l = line ?: return
-        var done = 0
-        while (done < len && l.isOpen) {
-            val n = l.write(buf, off + done, len - done)
-            if (n <= 0) break
-            done += n
-        }
+        line?.write(buf, off, len)
     }
 
     override fun start() { line?.start() }
     override fun stop() { line?.stop() }
-    override fun drain() { line?.drain() }
+    override fun flush() { line?.flush() }
+    override fun queuedFrames(): Long = line?.let { ((it.bufferSize - it.available()) / frameBytes).toLong().coerceAtLeast(0) } ?: 0
     override fun framesPlayed(): Long = line?.longFramePosition ?: 0
     override fun close() {
         line?.let { runCatching { it.stop(); it.flush(); it.close() } }
@@ -142,44 +149,71 @@ class JavaSoundSink(private val bufferMs: Int = 250) : PcmSink {
 }
 
 /**
- * A sound card that only counts, for tests: "plays" in real time when
- * [realTime], or as fast as it is fed.
+ * A sound card that only counts, for tests: with a buffer of [bufferMs] that
+ * plays out in real time when [realTime], or at once when not.
  */
-class CountingSink(private val realTime: Boolean = false) : PcmSink {
+class CountingSink(private val realTime: Boolean = false, private val bufferMs: Int = 200) : PcmSink {
     private val lock = Object()
     private var rate = 48_000
     private var frameBytes = 4
+    private var capacityFrames = 9_600L
     @Volatile private var running = false
     @Volatile private var closed = false
-    @Volatile var frames = 0L
-        private set
+    /** Frames written and not yet played. */
+    private var queued = 0L
+    private var playedFrames = 0L
+    private var lastTick = System.nanoTime()
     val written = ByteArrayOutputStream()
+
+    /** Frames played so far. */
+    val frames: Long get() = framesPlayed()
 
     override fun open(sampleRate: Int, channels: Int) {
         rate = sampleRate
         frameBytes = 2 * channels
+        capacityFrames = rate.toLong() * bufferMs / 1000
+    }
+
+    /** Plays out what the clock says has been heard since the last look. */
+    private fun tick() {
+        val now = System.nanoTime()
+        if (!running || closed || queued == 0L) {
+            lastTick = now
+            return
+        }
+        if (!realTime) {
+            playedFrames += queued
+            queued = 0
+            return
+        }
+        val n = minOf((now - lastTick) * rate / 1_000_000_000L, queued)
+        if (n > 0) {
+            queued -= n
+            playedFrames += n
+            lastTick += n * 1_000_000_000L / rate
+        }
+        // Run dry: the clock starts again with the next write.
+        if (queued == 0L) lastTick = now
+    }
+
+    override fun available(): Int = synchronized(lock) {
+        tick()
+        if (closed) 0 else ((capacityFrames - queued).coerceAtLeast(0) * frameBytes).toInt()
     }
 
     override fun write(buf: ByteArray, off: Int, len: Int) {
         synchronized(written) { if (written.size() < 64 * 1024 * 1024) written.write(buf, off, len) }
-        var left = len / frameBytes
-        // In 10 ms steps, so a stop holds the count where it is, as a sound card would.
-        val step = if (realTime) rate / 100 else left
-        while (left > 0) {
-            synchronized(lock) {
-                while (!running && !closed) lock.wait(50)
-                if (closed) return
-            }
-            val n = minOf(step, left)
-            if (realTime) Thread.sleep(n * 1000L / rate)
-            frames += n
-            left -= n
+        synchronized(lock) {
+            tick()
+            queued += len / frameBytes
+            tick()
         }
     }
 
-    override fun start() = synchronized(lock) { running = true; lock.notifyAll() }
-    override fun stop() = synchronized(lock) { running = false }
-    override fun drain() {}
-    override fun framesPlayed(): Long = frames
-    override fun close() = synchronized(lock) { closed = true; lock.notifyAll() }
+    override fun start() = synchronized(lock) { tick(); running = true; lastTick = System.nanoTime(); tick() }
+    override fun stop() = synchronized(lock) { tick(); running = false }
+    override fun flush() = synchronized(lock) { queued = 0 }
+    override fun queuedFrames(): Long = synchronized(lock) { tick(); queued }
+    override fun framesPlayed(): Long = synchronized(lock) { tick(); playedFrames }
+    override fun close() = synchronized(lock) { closed = true; running = false }
 }

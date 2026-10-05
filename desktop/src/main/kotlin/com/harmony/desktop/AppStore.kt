@@ -43,7 +43,11 @@ data class DesktopSettings(
             .put("tame", eq.claritySettings.tame.toDouble())
             .put("bias", eq.claritySettings.bias.toDouble())
             .put("brighten", eq.claritySettings.brighten.toDouble())
-            .put("boost", eq.claritySettings.boostDb.toDouble()))
+            .put("boost", eq.claritySettings.boostDb.toDouble())
+            .put("bass", eq.bassDb.toDouble())
+            .put("treble", eq.trebleDb.toDouble())
+            .put("width", eq.width.toDouble())
+            .put("leveling", eq.leveling))
         .put("pcId", pcId)
         .put("pcName", pcName)
         .put("phones", JSONObject(phones))
@@ -78,6 +82,10 @@ data class DesktopSettings(
                         brighten = eq.optDouble("brighten", 0.0).toFloat(),
                         boostDb = eq.optDouble("boost", 0.0).toFloat(),
                     ).clamped(),
+                    bassDb = eq.optDouble("bass", 0.0).toFloat(),
+                    trebleDb = eq.optDouble("treble", 0.0).toFloat(),
+                    width = eq.optDouble("width", 1.0).toFloat().coerceIn(0f, 2f),
+                    leveling = eq.optBoolean("leveling"),
                 ),
                 pcId = o.optString("pcId").ifEmpty { d.pcId },
                 pcName = o.optString("pcName").ifEmpty { d.pcName },
@@ -88,9 +96,19 @@ data class DesktopSettings(
     }
 }
 
+/**
+ * The settings file. Changes take effect at once in [current]; the file is
+ * written in the background, a moment after the last change, so dragging a
+ * slider never waits on the disk.
+ */
 class SettingsStore(private val file: File = AppDirs.settings) {
     @Volatile var current: DesktopSettings = load()
         private set
+
+    private val writer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "harmony-settings").apply { isDaemon = true }
+    }
+    private var pendingWrite: java.util.concurrent.ScheduledFuture<*>? = null
 
     private fun load(): DesktopSettings {
         val s = if (file.isFile) DesktopSettings.fromJson(file.readText()) else DesktopSettings()
@@ -102,14 +120,31 @@ class SettingsStore(private val file: File = AppDirs.settings) {
     fun update(change: (DesktopSettings) -> DesktopSettings): DesktopSettings {
         val next = change(current)
         current = next
-        save(next)
+        pendingWrite?.cancel(false)
+        pendingWrite = writer.schedule({ save(current) }, SAVE_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         return next
+    }
+
+    /** Writes what's pending now (the app is closing). */
+    @Synchronized
+    fun flush() {
+        if (pendingWrite?.cancel(false) == true) save(current)
     }
 
     private fun save(s: DesktopSettings) {
         runCatching {
             file.parentFile?.mkdirs()
-            file.writeText(s.toJson())
+            // Written beside it, then swapped in, so a crash mid-write never loses the settings.
+            val tmp = File(file.path + ".tmp")
+            tmp.writeText(s.toJson())
+            if (!tmp.renameTo(file)) {
+                file.delete()
+                tmp.renameTo(file)
+            }
         }
+    }
+
+    private companion object {
+        const val SAVE_DELAY_MS = 400L
     }
 }

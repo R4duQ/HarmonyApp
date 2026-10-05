@@ -8,8 +8,10 @@ import com.harmony.core.remote.RemoteRequest
 import com.harmony.core.remote.RemoteState
 import com.harmony.core.remote.RemoteStatus
 import com.harmony.core.remote.RemoteTrack
+import com.harmony.desktop.connect.RemoteCache
 import com.harmony.desktop.engine.AudioEngine
 import com.harmony.desktop.engine.EngineStatus
+import com.harmony.desktop.engine.Upcoming
 import com.harmony.desktop.library.LocalTrack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,11 +45,19 @@ enum class Repeat { OFF, ALL, ONE }
  * The computer's player: its own music from the library, or the phone's
  * through Harmony Connect ([RemoteRenderer]). One [AudioEngine] serves both.
  *
- * With the phone in charge the queue lives on the phone: next and previous
- * pressed here are passed to it as requests, and the end of a song is only
- * reported; the phone sends the next one.
+ * With the phone in charge the queue lives on the phone. A phone that allows
+ * it ([PlayRequest.autoAdvance]) lets the computer go straight on to the
+ * song it said comes next, at the end of a song or when next is pressed
+ * here, and then follows; otherwise next and previous are passed to the
+ * phone as requests and the end of a song is only reported.
+ *
+ * The phone's songs are fetched whole in the background ([RemoteCache]), so
+ * seeking and the next song don't wait on the Wi-Fi.
  */
-class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
+class PlayerController(
+    private val engine: AudioEngine,
+    private val cache: RemoteCache? = null,
+) : RemoteRenderer {
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
 
@@ -68,18 +78,27 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
     val engineState get() = engine.state
 
     private var remoteTrack: RemoteTrack? = null
+    private var remoteUpNext: List<RemoteTrack> = emptyList()
+    private var autoAdvance = false
     private val pending = mutableListOf<RemoteRequest>()
     /** The order songs play in when shuffling: positions in the queue. */
     private var order: List<Int> = emptyList()
 
+    /** Where the engine goes on to by itself: a place in the local queue, or the phone's next song. */
+    private data class LocalNext(val index: Int)
+    private data class RemoteNext(val track: RemoteTrack)
+
     init {
         engine.onEnded = { onEnded() }
+        engine.upcoming = { upcoming() }
+        engine.onAdvanced = { onAdvanced(it) }
     }
 
     fun positionMs(): Long = engine.positionMs()
 
     // ---- The computer's own music -------------------------------------------
 
+    @Synchronized
     fun playLocal(tracks: List<LocalTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
         leaveRemote()
@@ -88,11 +107,13 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
         startLocal(startIndex.coerceIn(tracks.indices), 0, play = true)
     }
 
+    @Synchronized
     fun playQueueItem(i: Int) {
         if (_phone.value != null) return
         if (i in _queue.value.indices) startLocal(i, 0, play = true)
     }
 
+    @Synchronized
     fun togglePlay() {
         when (engine.state.value.status) {
             EngineStatus.PLAYING, EngineStatus.LOADING -> engine.pause()
@@ -101,30 +122,51 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
         }
     }
 
+    @Synchronized
     fun next() {
-        if (_phone.value != null) return request(RemoteRequest.NEXT)
+        if (_phone.value != null) {
+            // Straight on to the phone's next song when it allows it; the phone follows.
+            val up = remoteUpNext.firstOrNull()?.takeIf { autoAdvance && it.url.isNotBlank() }
+            if (up != null) return startRemote(up, remoteUpNext.drop(1), 0, play = true)
+            return request(RemoteRequest.NEXT)
+        }
         val i = step(+1, wrap = _repeat.value != Repeat.OFF) ?: return
         startLocal(i, 0, play = true)
     }
 
+    @Synchronized
     fun previous() {
-        if (_phone.value != null) return request(RemoteRequest.PREVIOUS)
         // A few seconds in, previous goes back to the start of the song, as on the phone.
-        if (engine.positionMs() > RESTART_AFTER_MS) return engine.seek(0)
+        if (engine.positionMs() > RESTART_AFTER_MS) return seek(0)
+        if (_phone.value != null) return request(RemoteRequest.PREVIOUS)
         val i = step(-1, wrap = _repeat.value != Repeat.OFF) ?: return engine.seek(0)
         startLocal(i, 0, play = true)
     }
 
-    fun seek(positionMs: Long) = engine.seek(positionMs.coerceAtLeast(0))
+    @Synchronized
+    fun seek(positionMs: Long) {
+        val pos = positionMs.coerceAtLeast(0)
+        val t = remoteTrack
+        if (_phone.value != null && t != null) {
+            // From the fetched copy once there is one: no waiting on the phone.
+            val s = engine.state.value
+            val playing = s.status == EngineStatus.PLAYING || s.status == EngineStatus.LOADING
+            engine.load(sourceFor(t), pos, playing, s.durationMs.takeIf { it > 0 } ?: t.durationMs)
+        } else {
+            engine.seek(pos)
+        }
+    }
 
     val volume: Float get() = engine.volume
 
+    @Synchronized
     fun toggleShuffle() {
         _shuffle.value = !_shuffle.value
         order = makeOrder(_queue.value.size, _index.value.coerceAtLeast(0))
         refreshUpNext()
     }
 
+    @Synchronized
     fun cycleRepeat() {
         _repeat.value = when (_repeat.value) {
             Repeat.OFF -> Repeat.ALL
@@ -138,10 +180,7 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
         val t = _queue.value.getOrNull(i) ?: return
         _index.value = i
         engine.load(t.path, startMs, play, t.durationMs)
-        _nowPlaying.value = NowPlaying(
-            key = t.path, title = t.title, artist = t.artist, album = t.album, durationMs = t.durationMs,
-            art = Art.Local(t), quality = t.quality, fromPhone = null, upNext = localUpNext(i),
-        )
+        _nowPlaying.value = localNowPlaying(t, i)
     }
 
     private fun makeOrder(size: Int, first: Int): List<Int> {
@@ -176,27 +215,97 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
         if (np.fromPhone == null && _index.value >= 0) _nowPlaying.value = np.copy(upNext = localUpNext(_index.value))
     }
 
+    @Synchronized
     private fun onEnded() {
         if (_phone.value != null) return // the phone decides what's next
+        // Normally the engine has gone on by itself ([upcoming]); this is when that couldn't start.
         if (_repeat.value == Repeat.ONE) return startLocal(_index.value, 0, play = true)
         val i = step(+1, wrap = _repeat.value == Repeat.ALL) ?: return
         startLocal(i, 0, play = true)
     }
+
+    /** What the engine plays after the current song, without a gap. */
+    @Synchronized
+    private fun upcoming(): Upcoming? {
+        if (_phone.value != null) {
+            val up = remoteUpNext.firstOrNull()?.takeIf { autoAdvance && it.url.isNotBlank() } ?: return null
+            return Upcoming(sourceFor(up), up.durationMs, RemoteNext(up))
+        }
+        if (_index.value < 0) return null
+        val i = if (_repeat.value == Repeat.ONE) _index.value else step(+1, wrap = _repeat.value == Repeat.ALL) ?: return null
+        val t = _queue.value.getOrNull(i) ?: return null
+        return Upcoming(t.path, t.durationMs, LocalNext(i))
+    }
+
+    @Synchronized
+    private fun onAdvanced(up: Upcoming) {
+        when (val tag = up.tag) {
+            is LocalNext -> {
+                val t = _queue.value.getOrNull(tag.index) ?: return
+                _index.value = tag.index
+                _nowPlaying.value = localNowPlaying(t, tag.index)
+            }
+            is RemoteNext -> {
+                if (_phone.value == null) return
+                remoteTrack = tag.track
+                remoteUpNext = remoteUpNext.drop(1)
+                showRemote(tag.track)
+                fetch()
+            }
+        }
+    }
+
+    private fun localNowPlaying(t: LocalTrack, i: Int) = NowPlaying(
+        key = t.path, title = t.title, artist = t.artist, album = t.album, durationMs = t.durationMs,
+        art = Art.Local(t), quality = t.quality, fromPhone = null, upNext = localUpNext(i),
+    )
 
     // ---- The phone's music (Harmony Connect) ----------------------------------
 
     @Synchronized
     override fun play(request: PlayRequest) {
         val t = request.track
-        remoteTrack = t
+        val same = _phone.value != null && remoteTrack?.id == t.id &&
+            engine.state.value.status.let { it == EngineStatus.PLAYING || it == EngineStatus.PAUSED || it == EngineStatus.LOADING }
         _phone.value = request.phoneName
+        autoAdvance = request.autoAdvance
+        if (request.followUp && same) {
+            // The phone catching up with what plays here, or a new "up next": carry on as is.
+            remoteTrack = t
+            remoteUpNext = request.upNext
+            if (request.playing) engine.play() else engine.pause()
+            showRemote(t)
+            fetch()
+            return
+        }
         pending.clear()
-        engine.load(t.url, request.positionMs, request.playing, t.durationMs)
+        startRemote(t, request.upNext, request.positionMs, request.playing)
+    }
+
+    private fun startRemote(t: RemoteTrack, upNext: List<RemoteTrack>, positionMs: Long, play: Boolean) {
+        remoteTrack = t
+        remoteUpNext = upNext
+        engine.load(sourceFor(t), positionMs, play, t.durationMs)
+        showRemote(t)
+        fetch()
+    }
+
+    private fun showRemote(t: RemoteTrack) {
+        val phone = _phone.value ?: return
         _nowPlaying.value = NowPlaying(
             key = "phone:" + t.id, title = t.title, artist = t.artist, album = t.album, durationMs = t.durationMs,
-            art = t.artUrl?.let { Art.Url(it) }, quality = t.quality, fromPhone = request.phoneName,
-            upNext = request.upNext.take(UP_NEXT).map { UpNext(it.title, it.artist, it.artUrl?.let { u -> Art.Url(u) }, null) },
+            art = t.artUrl?.let { Art.Url(it) }, quality = t.quality, fromPhone = phone,
+            upNext = remoteUpNext.take(UP_NEXT).map { UpNext(it.title, it.artist, it.artUrl?.let { u -> Art.Url(u) }, null) },
         )
+    }
+
+    /** The fetched copy when it's complete, else straight from the phone. */
+    private fun sourceFor(t: RemoteTrack): String = cache?.localFor(t.url) ?: t.url
+
+    /** Fetches the song playing, then the next, and forgets the rest. */
+    private fun fetch() {
+        val c = cache ?: return
+        c.keep(listOfNotNull(remoteTrack?.url, remoteUpNext.firstOrNull()?.url?.takeIf { autoAdvance }))
     }
 
     @Synchronized
@@ -204,14 +313,14 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
         if (_phone.value == null) return
         when (request.action) {
             ControlAction.PLAY -> {
-                request.positionMs?.let { engine.seek(it) }
+                request.positionMs?.let { seek(it) }
                 engine.play()
             }
             ControlAction.PAUSE -> {
                 engine.pause()
-                request.positionMs?.let { engine.seek(it) }
+                request.positionMs?.let { seek(it) }
             }
-            ControlAction.SEEK -> request.positionMs?.let { engine.seek(it) }
+            ControlAction.SEEK -> request.positionMs?.let { seek(it) }
             ControlAction.STOP -> leaveRemote()
         }
     }
@@ -255,11 +364,12 @@ class PlayerController(private val engine: AudioEngine) : RemoteRenderer {
         if (_phone.value == null) return
         engine.stop()
         remoteTrack = null
+        remoteUpNext = emptyList()
+        autoAdvance = false
         _phone.value = null
         pending.clear()
-        _nowPlaying.value = _queue.value.getOrNull(_index.value)?.let { t ->
-            NowPlaying(t.path, t.title, t.artist, t.album, t.durationMs, Art.Local(t), t.quality, null, localUpNext(_index.value))
-        }
+        cache?.clear()
+        _nowPlaying.value = _queue.value.getOrNull(_index.value)?.let { t -> localNowPlaying(t, _index.value) }
     }
 
     private companion object {

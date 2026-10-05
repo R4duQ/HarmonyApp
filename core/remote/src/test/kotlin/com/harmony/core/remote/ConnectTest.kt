@@ -52,6 +52,11 @@ class ConnectTest {
     @Test fun `messages survive the trip through JSON`() {
         val play = PlayRequest(track(), 61_000, playing = true, phoneName = "Pixel 8", upNext = listOf(track("43"), track("44").copy(artUrl = null, quality = null)))
         assertEquals(play, PlayRequest.fromJson(play.toJson()))
+        val following = play.copy(autoAdvance = true, followUp = true)
+        assertEquals(following, PlayRequest.fromJson(following.toJson()))
+        // An older phone says nothing about either: the computer waits for it, as before.
+        val old = org.json.JSONObject(play.toJson()).apply { remove("autoAdvance"); remove("followUp") }.toString()
+        assertEquals(play, PlayRequest.fromJson(old))
         val status = RemoteStatus(RemoteState.PLAYING, "42", 12_345, 337_000, 0.8f, null, listOf(RemoteRequest.NEXT))
         assertEquals(status, RemoteStatus.fromJson(status.toJson()))
         assertEquals(ControlRequest(ControlAction.SEEK, 90_000), ControlRequest.fromJson(ControlRequest(ControlAction.SEEK, 90_000).toJson()))

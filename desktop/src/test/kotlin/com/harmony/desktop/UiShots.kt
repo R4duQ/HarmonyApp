@@ -8,6 +8,9 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import com.harmony.core.remote.PlayRequest
 import com.harmony.core.remote.RemoteTrack
@@ -53,7 +56,7 @@ class UiShots {
         LibraryCache(File(tmp, "library.json")).save(tracks())
         val store = SettingsStore(File(tmp, "settings.json"))
         store.update { it.copy(folders = listOf("C:\\Users\\radu\\Music"), pcName = "RADU-DESKTOP", eq = eq, darkTheme = dark, phones = mapOf("t1" to "Pixel 8 Pro")) }
-        val engine = AudioEngine({ CountingSink() })
+        val engine = AudioEngine({ CountingSink(realTime = true) })
         val player = PlayerController(engine)
         val udp = DatagramSocket().use { it.localPort }
         val connect = ConnectHost(store.current.pcId, { store.current.pcName }, player, store.current.phones, {}, httpPort = 0, discoveryPort = udp)
@@ -94,6 +97,61 @@ class UiShots {
     }
 
     @Test fun equalizer() = shot("equalizer", app(EqConfig(enabled = true, winampGainsDb = listOf(6f, 4f, 2f, 0f, -2f, -1f, 2f, 4f, 5f, 6f), winampPreampDb = -4f, clarity = true)), nav = "nav_equalizer")
+
+    @Test fun discKeepsTurningAfterTheSongChanges() = runDesktopComposeUiTest(200, 200) {
+        mainClock.autoAdvance = false
+        val key = androidx.compose.runtime.mutableStateOf("song-1")
+        val loader = com.harmony.desktop.ui.ImageLoader(CoverCache(createTempDir("covers")))
+        setContent {
+            androidx.compose.foundation.layout.Box(Modifier.testTag("disc")) {
+                com.harmony.desktop.ui.Disc(null, loader, playing = true, size = androidx.compose.ui.unit.Dp(160f), key = key.value)
+            }
+        }
+        fun frame() = onNodeWithTag("disc").captureToImage().toAwtImage().let { img -> IntArray(img.width * img.height) { img.getRGB(it % img.width, it / img.width) } }
+        mainClock.advanceTimeBy(1_000)
+        key.value = "song-2"
+        repeat(30) { mainClock.advanceTimeBy(100) }
+        val a = frame()
+        repeat(10) { mainClock.advanceTimeBy(100) }
+        val b = frame()
+        key.value = "song-3"
+        repeat(30) { mainClock.advanceTimeBy(100) }
+        val c = frame()
+        repeat(10) { mainClock.advanceTimeBy(100) }
+        val d = frame()
+        assertTrue("still turning after the second song", !a.contentEquals(b))
+        assertTrue("and after the third", !c.contentEquals(d))
+    }
+
+    @Test fun equalizerLive() {
+        // Pink noise through a bass-and-treble curve, so the analyzer has something to show.
+        val noise = File(createTempDir("noise"), "pink.wav")
+        val p = ProcessBuilder(
+            com.harmony.desktop.engine.FfmpegTools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "anoisesrc=color=pink:amplitude=0.25:duration=20:sample_rate=48000", noise.absolutePath,
+        ).redirectErrorStream(true).start()
+        p.inputStream.readBytes()
+        org.junit.Assume.assumeTrue("ffmpeg is needed", p.waitFor() == 0)
+        val eq = EqConfig(
+            enabled = true, winampGainsDb = listOf(8f, 6f, 3f, 0f, -2f, -1f, 2f, 5f, 6f, 7f), winampPreampDb = -6f,
+            bassDb = 3f, trebleDb = 2f, width = 1.3f, leveling = true,
+        )
+        val a = app(eq)
+        val engine = a.engine
+        a.engine.load(noise.absolutePath, 0, play = true, durationMs = 20_000)
+        runDesktopComposeUiTest(width, height + 500) {
+            mainClock.autoAdvance = false
+            setContent { HarmonyDesktopApp(a) }
+            mainClock.advanceTimeBy(800)
+            onNodeWithTag("nav_equalizer").performSemanticsAction(SemanticsActions.OnClick)
+            repeat(10) { mainClock.advanceTimeBy(300); waitForIdle() }
+            Thread.sleep(1_500)
+            repeat(20) { mainClock.advanceTimeBy(40); Thread.sleep(15) }
+            ImageIO.write(onAllNodes(isRoot())[0].captureToImage().toAwtImage(), "png", File(dir, "equalizer-live.png"))
+        }
+        engine.stop()
+        a.close()
+    }
 
     @Test fun connect() {
         val a = app()

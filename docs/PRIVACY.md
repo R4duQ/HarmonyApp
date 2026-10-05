@@ -8,8 +8,9 @@ made on (on Windows, in Harmony's own app data folder). Nothing is sent to us: H
 has no account, no server of its own, no analytics and no ads.
 
 **Harmony Connect.** When you choose to play your phone's music on your computer, the
-phone and the computer talk directly over your home network. The song is streamed from
-the phone to the computer while it plays; nothing is copied, and nothing leaves your
+phone and the computer talk directly over your home network. The song (and the one after
+it) is fetched from the phone while it plays and kept only in a temporary folder on the
+computer, deleted when the phone lets go and whenever Harmony starts; nothing leaves your
 network. A computer only accepts a phone after you type the pairing code it shows, and
 you can remove a phone at any time on the Connect page.
 

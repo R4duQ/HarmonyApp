@@ -123,7 +123,7 @@ fun PlayerBar(app: DesktopApp, loader: ImageLoader, onOpenNowPlaying: () -> Unit
                 )
             }
             Row(Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(formatTime(position), fontSize = 11.sp, color = c.muted, modifier = Modifier.width(44.dp))
+                PositionText(position, 11.sp, c.muted, Modifier.width(44.dp))
                 WaveProgress(position, song?.durationMs ?: 0, playing, c.line, app.player::seek, Modifier.weight(1f).height(22.dp))
                 Text(formatTime(song?.durationMs ?: 0), fontSize = 11.sp, color = c.muted, modifier = Modifier.width(44.dp).padding(start = 8.dp))
             }
@@ -189,7 +189,7 @@ fun NowPlayingPage(app: DesktopApp, loader: ImageLoader) {
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 28.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(formatTime(position), fontSize = 12.sp, color = c.muted, modifier = Modifier.width(52.dp))
+                PositionText(position, 12.sp, c.muted, Modifier.width(52.dp))
                 WaveProgress(position, song.durationMs, playing, c.line, app.player::seek, Modifier.weight(1f).height(26.dp))
                 Text(formatTime(song.durationMs), fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(start = 10.dp))
             }
