@@ -105,6 +105,11 @@ class ConnectSession @Inject constructor(
     /** After a command, the computer's answers lag; don't let them undo what was just asked. */
     private var trustLocalUntil = 0L
     private var failures = 0
+    /** When the computer stopped answering; 0 while it answers. */
+    private var failingSince = 0L
+    /** When the computer was last paused from here or there; the locks are kept a while after. */
+    private var pausedAt = 0L
+    private var lockJob: Job? = null
     private var pollJob: Job? = null
     private var searchJob: Job? = null
 
@@ -319,6 +324,7 @@ class ConnectSession @Inject constructor(
             remoteState = result.getOrNull()?.state ?: RemoteState.LOADING
             wantPlay = playing && item != null
             failures = 0
+            failingSince = 0L
             anchor(position)
             trustLocalUntil = SystemClock.elapsedRealtime() + TRUST_LOCAL_MS
             // The phone falls silent; from here on it is the remote.
@@ -584,12 +590,19 @@ class ConnectSession @Inject constructor(
             end(error = "$name doesn't know this phone any more. Connect again to pair.", tellComputer = false)
             return
         }
+        // A Wi-Fi hiccup is not the end: the computer keeps playing meanwhile. Only a
+        // computer that stays silent for a while (switched off, out of range) ends it.
         failures++
-        if (failures >= MAX_FAILURES) end(error = "Lost the connection to $name. The music is back on this phone.", tellComputer = false)
+        val now = SystemClock.elapsedRealtime()
+        if (failingSince == 0L) failingSince = now
+        if (failures >= MIN_FAILURES && now - failingSince >= GIVE_UP_AFTER_MS) {
+            end(error = "Lost the connection to $name. The music is back on this phone.", tellComputer = false)
+        }
     }
 
     private fun onStatus(status: RemoteStatus) {
         failures = 0
+        failingSince = 0L
         val exo = exo ?: return
         val player = player ?: return
         val now = SystemClock.elapsedRealtime()
@@ -609,6 +622,18 @@ class ConnectSession @Inject constructor(
         if (kotlin.math.abs(status.volume - remoteVolume) > 0.005f && now >= trustLocalUntil) {
             remoteVolume = status.volume
             player.notifyVolume()
+        }
+
+        // The computer let go of this phone's song (its own music took over, or it
+        // restarted): it's paused as far as the phone goes, and play sends it again.
+        if (status.state == RemoteState.IDLE && status.trackId == null && sentId != null && now >= trustLocalUntil) {
+            if (remoteState != RemoteState.IDLE || wantPlay) {
+                remoteState = RemoteState.IDLE
+                wantPlay = false
+                player.notifyPlayState()
+                updateLocks()
+            }
+            return
         }
 
         // Still about the song before; the new one is on its way.
@@ -693,9 +718,23 @@ class ConnectSession @Inject constructor(
         updateLocks()
     }
 
-    /** Held while the computer plays: it pulls the song from this phone as it goes. */
+    /**
+     * Held while the computer plays (it pulls the song from this phone as it
+     * goes) and for a while after a pause, so a sleeping phone doesn't drop
+     * off the Wi-Fi and miss the play that follows.
+     */
     private fun updateLocks() {
-        val hold = isActive && wantPlay
+        val now = SystemClock.elapsedRealtime()
+        if (wantPlay || pausedAt == 0L) pausedAt = if (wantPlay) 0L else now
+        val hold = isActive && (wantPlay || now - pausedAt < PAUSED_HOLD_MS)
+        lockJob?.cancel()
+        if (hold && !wantPlay) {
+            // Let go once the pause has lasted long enough.
+            lockJob = scope.launch {
+                delay(PAUSED_HOLD_MS - (now - pausedAt) + 1_000)
+                updateLocks()
+            }
+        }
         runCatching {
             if (hold) {
                 wifiLock?.acquire()
@@ -708,6 +747,8 @@ class ConnectSession @Inject constructor(
     }
 
     private fun releaseLocks() {
+        lockJob?.cancel()
+        pausedAt = 0L
         runCatching {
             if (wifiLock?.isHeld == true) wifiLock?.release()
             if (wakeLock?.isHeld == true) wakeLock?.release()
@@ -763,7 +804,11 @@ class ConnectSession @Inject constructor(
         const val POLL_MS = 500L
         const val TRUST_LOCAL_MS = 1_500L
         const val DRIFT_MS = 1_500L
-        const val MAX_FAILURES = 8
+        const val MIN_FAILURES = 6
+        /** How long the computer may stay silent before the music comes back to the phone. */
+        const val GIVE_UP_AFTER_MS = 30_000L
+        /** Locks kept this long into a pause. */
+        const val PAUSED_HOLD_MS = 10 * 60 * 1000L
         const val UP_NEXT = 3
         const val REFRESH_DELAY_MS = 400L
         const val VOLUME_STEPS = 25

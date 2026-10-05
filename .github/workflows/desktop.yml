@@ -106,9 +106,29 @@ jobs:
           v="1.0.${{ github.run_number }}"
           cp desktop/build/compose/binaries/main/msi/*.msi "dist/Harmony-Windows-$v.msi"
           cp desktop/build/compose/binaries/main/exe/*.exe "dist/Harmony-Windows-$v-setup.exe"
+          # For installs that can't be removed from Settings (see the script).
+          cp desktop/windows/Dezinstaleaza-Harmony.cmd dist/
           (cd dist && sha256sum * > SHA256SUMS.txt)
           echo "version=$v" >> "$GITHUB_OUTPUT"
           ls -la dist
+
+      - name: Install, then uninstall with the script
+        # The installer must install, and Dezinstaleaza-Harmony.cmd must remove it again.
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist\*.msi | Select-Object -First 1
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "install failed: $($p.ExitCode)" }
+          $find = {
+            Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall, HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall -ErrorAction SilentlyContinue |
+              Get-ItemProperty -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Harmony' }
+          }
+          $installed = & $find
+          if (-not $installed) { throw 'Harmony is not registered after installing' }
+          Write-Host "Installed: $($installed.DisplayVersion) at $($installed.InstallLocation)"
+          cmd /c "echo.| desktop\windows\Dezinstaleaza-Harmony.cmd"
+          if (& $find) { throw 'Harmony is still installed after the uninstall script' }
+          Write-Host 'Install and uninstall: OK'
 
       - uses: actions/upload-artifact@v4
         with:

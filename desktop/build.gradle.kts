@@ -77,7 +77,11 @@ compose.desktop {
                 menuGroup = "Harmony"
                 shortcut = true
                 menu = true
-                dirChooser = true
+                // No folder choice: a per-user install outside the system drive (say D:\) needs
+                // administrator rights for Windows Installer's rollback folder (D:\Config.Msi), so
+                // it can't be uninstalled normally ("Could not set file security ... Error: 5").
+                // Harmony always goes to the user's own app folder, no administrator needed.
+                dirChooser = false
                 perUserInstall = true
                 // Fixed for good: lets each new installer replace the old one.
                 upgradeUuid = "6f3d6a7e-6b1e-4c86-9d5e-6a3f4f0e8c21"

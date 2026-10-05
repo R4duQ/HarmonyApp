@@ -80,6 +80,16 @@ class PlayerController(
     private var remoteTrack: RemoteTrack? = null
     private var remoteUpNext: List<RemoteTrack> = emptyList()
     private var autoAdvance = false
+
+    /**
+     * The phone's song when the computer's own music took over: the phone
+     * still sees it, paused where it was, and play on the phone brings it back.
+     */
+    private data class SetAside(val phone: String, val track: RemoteTrack, val upNext: List<RemoteTrack>, val autoAdvance: Boolean, val positionMs: Long)
+    private var setAside: SetAside? = null
+
+    /** Tries left to get a broken-off phone song going again. */
+    private var recoveries = 0
     private val pending = mutableListOf<RemoteRequest>()
     /** The order songs play in when shuffling: positions in the queue. */
     private var order: List<Int> = emptyList()
@@ -92,6 +102,7 @@ class PlayerController(
         engine.onEnded = { onEnded() }
         engine.upcoming = { upcoming() }
         engine.onAdvanced = { onAdvanced(it) }
+        engine.onError = { source, at, _ -> onEngineError(source, at) }
     }
 
     fun positionMs(): Long = engine.positionMs()
@@ -115,6 +126,14 @@ class PlayerController(
 
     @Synchronized
     fun togglePlay() {
+        if (_phone.value != null) {
+            if (resumeFromCopy()) return
+            // Broken off and not recovered: try again from where it stopped.
+            val t = remoteTrack
+            if (t != null && engine.state.value.status == EngineStatus.ERROR) {
+                return engine.load(sourceFor(t), engine.positionMs(), play = true, t.durationMs)
+            }
+        }
         when (engine.state.value.status) {
             EngineStatus.PLAYING, EngineStatus.LOADING -> engine.pause()
             EngineStatus.IDLE -> if (_index.value >= 0) startLocal(_index.value, 0, play = true)
@@ -282,7 +301,41 @@ class PlayerController(
         startRemote(t, request.upNext, request.positionMs, request.playing)
     }
 
+    /**
+     * Playing (or paused) from the phone over the network while the whole
+     * song is already here: carry on from the copy, which no Wi-Fi drop or
+     * sleeping phone can interrupt. True when it did.
+     */
+    private fun resumeFromCopy(): Boolean {
+        val t = remoteTrack ?: return false
+        val local = cache?.localFor(t.url) ?: return false
+        val s = engine.state.value
+        if (s.source == local || s.status != EngineStatus.PAUSED) return false
+        engine.load(local, engine.positionMs(), play = true, s.durationMs.takeIf { it > 0 } ?: t.durationMs)
+        return true
+    }
+
+    /** A phone song broke off: start it again where it stopped, from the copy if there is one. */
+    @Synchronized
+    private fun onEngineError(source: String, at: Long) {
+        val t = remoteTrack ?: return
+        if (_phone.value == null || (source != t.url && source != cache?.localFor(t.url))) return
+        if (recoveries >= MAX_RECOVERIES) return
+        recoveries++
+        val attempt = recoveries
+        Thread({
+            Thread.sleep(RECOVERY_DELAY_MS * attempt)
+            synchronized(this) {
+                // Only if nothing else happened meanwhile.
+                if (remoteTrack?.id != t.id || engine.state.value.status != EngineStatus.ERROR) return@synchronized
+                engine.load(sourceFor(t), at, play = true, t.durationMs)
+            }
+        }, "harmony-recover").apply { isDaemon = true }.start()
+    }
+
     private fun startRemote(t: RemoteTrack, upNext: List<RemoteTrack>, positionMs: Long, play: Boolean) {
+        if (remoteTrack?.id != t.id) recoveries = 0
+        setAside = null
         remoteTrack = t
         remoteUpNext = upNext
         engine.load(sourceFor(t), positionMs, play, t.durationMs)
@@ -310,18 +363,34 @@ class PlayerController(
 
     @Synchronized
     override fun control(request: ControlRequest) {
-        if (_phone.value == null) return
+        if (_phone.value == null) {
+            // The computer's own music took over; play on the phone brings its song back.
+            val aside = setAside ?: return
+            when (request.action) {
+                ControlAction.PLAY -> {
+                    _phone.value = aside.phone
+                    autoAdvance = aside.autoAdvance
+                    startRemote(aside.track, aside.upNext, request.positionMs ?: aside.positionMs, play = true)
+                }
+                ControlAction.SEEK -> request.positionMs?.let { setAside = aside.copy(positionMs = it) }
+                else -> {}
+            }
+            return
+        }
         when (request.action) {
             ControlAction.PLAY -> {
                 request.positionMs?.let { seek(it) }
-                engine.play()
+                if (!resumeFromCopy()) engine.play()
             }
             ControlAction.PAUSE -> {
                 engine.pause()
                 request.positionMs?.let { seek(it) }
             }
             ControlAction.SEEK -> request.positionMs?.let { seek(it) }
-            ControlAction.STOP -> leaveRemote()
+            ControlAction.STOP -> {
+                leaveRemote()
+                setAside = null
+            }
         }
     }
 
@@ -333,7 +402,9 @@ class PlayerController(
     override fun status(): RemoteStatus {
         val track = remoteTrack
         if (_phone.value == null || track == null) {
-            // The computer's own music took over (or nothing plays): the phone should let go.
+            // The computer's own music took over: to the phone its song is paused, where it was.
+            val aside = setAside
+            if (aside != null) return RemoteStatus(RemoteState.PAUSED, aside.track.id, aside.positionMs, aside.track.durationMs, engine.volume)
             return RemoteStatus(RemoteState.IDLE, volume = engine.volume)
         }
         val s = engine.state.value
@@ -353,6 +424,8 @@ class PlayerController(
     @Synchronized
     override fun disconnect(phoneName: String?) {
         if (_phone.value != null) leaveRemote()
+        // The phone let go: nothing to bring back.
+        setAside = null
     }
 
     @Synchronized
@@ -361,7 +434,8 @@ class PlayerController(
     }
 
     private fun leaveRemote() {
-        if (_phone.value == null) return
+        val phone = _phone.value ?: return
+        remoteTrack?.let { setAside = SetAside(phone, it, remoteUpNext, autoAdvance, engine.positionMs()) }
         engine.stop()
         remoteTrack = null
         remoteUpNext = emptyList()
@@ -375,5 +449,7 @@ class PlayerController(
     private companion object {
         const val UP_NEXT = 8
         const val RESTART_AFTER_MS = 3_000L
+        const val MAX_RECOVERIES = 3
+        const val RECOVERY_DELAY_MS = 1_500L
     }
 }

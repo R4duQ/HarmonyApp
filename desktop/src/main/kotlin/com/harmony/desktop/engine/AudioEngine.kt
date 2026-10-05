@@ -73,6 +73,9 @@ class AudioEngine(
     /** Called on the playback thread when playback has gone on to [Upcoming] by itself. */
     @Volatile var onAdvanced: (Upcoming) -> Unit = {}
 
+    /** Called when playback of [source] broke off at [positionMs] (the file vanished, the network dropped). */
+    @Volatile var onError: (source: String, positionMs: Long, message: String) -> Unit = { _, _, _ -> }
+
     @Volatile var volume: Float = 1f
         set(value) { field = value.coerceIn(0f, 1f) }
 
@@ -268,6 +271,14 @@ class AudioEngine(
                         fail(gen, src, duration, error)
                         return
                     }
+                    // Ended well before its end: the stream broke (the phone's Wi-Fi dropped,
+                    // say), it didn't finish. Over the network even a quiet stop counts.
+                    val reachedMs = startOffsetMs + decodedFrames * 1000L / sampleRate
+                    val remote = src.startsWith("http://") || src.startsWith("https://")
+                    if (duration > 0 && reachedMs < duration - CUT_SHORT_MS && (error != null || remote)) {
+                        fail(gen, src, duration, error ?: "The song stopped coming")
+                        return
+                    }
                     // Straight on to the next song, if there is one.
                     val next = nextStream(gen)
                     if (next != null) {
@@ -424,10 +435,13 @@ class AudioEngine(
     }
 
     private fun fail(gen: Long, source: String, durationMs: Long, message: String) {
+        val at: Long
         synchronized(lock) {
             if (gen != generation) return
+            at = positionMs()
             _state.value = EngineState(EngineStatus.ERROR, source, durationMs, message)
         }
+        onError(source, at, message)
     }
 
     // ---- The sound shaping ----------------------------------------------------------
@@ -515,5 +529,7 @@ class AudioEngine(
         /** The next song starts decoding this long before the current one ends. */
         const val PRELOAD_AHEAD_MS = 20_000L
         const val PRELOAD_WAIT_S = 6L
+        /** A song stopping this much before its end has broken off. */
+        const val CUT_SHORT_MS = 3_000L
     }
 }

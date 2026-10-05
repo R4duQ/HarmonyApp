@@ -12,7 +12,13 @@ The phone app is a separate download, on its own release: **Harmony 1.0** (tag `
 Harmony Connect needs the phone at build 128 or newer (129 or newer for songs running
 straight into each other and next acting at once on the computer).
 
-Each new build installs over the last one. The installer isn't signed yet, so Windows may
+Each new build installs over the last one, into your own app folder (no administrator
+needed).
+
+**Can't uninstall?** An earlier build let you pick the folder; installed on another drive
+than C:, removing it from Settings fails with "Could not set file security ... Config.Msi
+... Error: 5". Download `Dezinstaleaza-Harmony.cmd` from this release and double-click it:
+it asks for administrator rights and removes Harmony. Then install the new build. The installer isn't signed yet, so Windows may
 say "Windows protected your PC": choose **More info**, then **Run anyway**.
 
 ## What's in it
@@ -49,6 +55,10 @@ say "Windows protected your PC": choose **More info**, then **Run anyway**.
   deleted when the phone lets go and when Harmony starts. With a phone at build 129 or newer
   the computer also goes straight on to the next song by itself, without a gap, and next
   pressed on the computer acts at once; the phone follows.
+  If the phone's Wi-Fi drops mid-song, the computer starts the song again where it stopped
+  (from its copy when it has one). Play music from the computer's own library while the
+  phone is connected and the phone's song is set aside, paused; play on the phone brings it
+  back.
   If Windows asks whether Harmony may use the network, allow it on private networks.
 
 Harmony for Windows uses FFmpeg (LGPL build, from BtbN/FFmpeg-Builds) to read and decode
