@@ -33,3 +33,8 @@ __pycache__/
 
 # Website build output (website/build.mjs)
 website/dist/
+
+# Harmony for Windows: build output, and the ffmpeg CI drops in before packaging.
+/desktop/build/
+/desktop/.gradle/
+/desktop/resources/windows/

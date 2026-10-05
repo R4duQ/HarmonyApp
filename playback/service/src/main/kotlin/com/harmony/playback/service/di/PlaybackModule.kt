@@ -3,7 +3,9 @@ package com.harmony.playback.service.di
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import com.harmony.domain.playback.ConnectController
 import com.harmony.domain.playback.PlaybackController
+import com.harmony.playback.service.connect.ConnectSession
 import com.harmony.playback.service.controller.PlaybackConnection
 import com.harmony.playback.service.player.HarmonyPlayer
 import com.harmony.playback.service.player.ReplayGainAudioProcessor
@@ -34,6 +36,10 @@ abstract class PlaybackBindsModule {
     @Binds
     @Singleton
     abstract fun bindPlaybackController(impl: PlaybackConnection): PlaybackController
+
+    @Binds
+    @Singleton
+    abstract fun bindConnectController(impl: ConnectSession): ConnectController
 }
 
 @OptIn(UnstableApi::class)

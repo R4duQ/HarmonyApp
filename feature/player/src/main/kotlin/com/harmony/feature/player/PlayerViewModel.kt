@@ -40,6 +40,7 @@ class PlayerViewModel @Inject constructor(
     private val startJourneyToMood: StartJourneyToMoodUseCase,
     private val favorites: FavoritesRepository,
     private val settings: SettingsRepository,
+    private val connect: com.harmony.domain.playback.ConnectController,
 ) : ViewModel() {
 
     val playerState: StateFlow<PlayerState> = playback.playerState
@@ -52,6 +53,19 @@ class PlayerViewModel @Inject constructor(
     /** Device kinds the listener picked, keyed by device name; see [OutputForms]. */
     val outputForms: StateFlow<Map<String, com.harmony.core.model.OutputForm>> = settings.outputForms
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Harmony Connect: playing on a computer, the phone as the remote. */
+    val connectState: StateFlow<com.harmony.domain.playback.ConnectState> = connect.state
+
+    internal val playOnActions = PlayOnActions(
+        search = connect::search,
+        connect = connect::connect,
+        pair = connect::pair,
+        addByAddress = connect::addByAddress,
+        playHere = connect::disconnect,
+        forget = connect::forget,
+        dismissError = connect::dismissError,
+    )
 
     /** Remembers what kind of device [name] is; null returns to the automatic guess. */
     fun setOutputForm(name: String, form: com.harmony.core.model.OutputForm?) {

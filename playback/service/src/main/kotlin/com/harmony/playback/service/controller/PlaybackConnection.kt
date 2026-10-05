@@ -27,6 +27,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -60,6 +62,7 @@ class PlaybackConnection @Inject constructor(
     private val historyRepository: com.harmony.domain.library.repository.PlaybackHistoryRepository,
     private val settingsRepository: com.harmony.core.datastore.SettingsRepository,
     private val audioOutputMonitor: com.harmony.playback.service.player.AudioOutputMonitor,
+    private val connect: com.harmony.playback.service.connect.ConnectSession,
 ) : PlaybackController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -112,6 +115,13 @@ class PlaybackConnection @Inject constructor(
         // trigger to reach the UI.
         scope.launch {
             audioOutputMonitor.output.collect { syncState() }
+        }
+        // Likewise moving the music to a computer and back (Harmony Connect).
+        scope.launch {
+            connect.state
+                .map { it.active }
+                .distinctUntilChanged()
+                .collect { syncState() }
         }
     }
 
@@ -374,7 +384,9 @@ class PlaybackConnection @Inject constructor(
             upcomingSong = upcomingSong,
             playNextCount = playNextCount,
             advancedAutomatically = lastAdvanceWasAutomatic,
-            audioOutput = audioOutputMonitor.output.value,
+            audioOutput = connect.state.value.active
+                ?.let { com.harmony.core.model.AudioOutput(com.harmony.core.model.AudioOutputType.COMPUTER, it.name) }
+                ?: audioOutputMonitor.output.value,
         )
     }
 

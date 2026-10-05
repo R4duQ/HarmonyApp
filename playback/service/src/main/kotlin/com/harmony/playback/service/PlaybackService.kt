@@ -7,6 +7,8 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import com.harmony.playback.service.connect.ConnectPlayer
+import com.harmony.playback.service.connect.ConnectSession
 import com.harmony.playback.service.controller.PlaybackConnection
 import com.harmony.playback.service.player.CrossfadeController
 import com.harmony.playback.service.player.HarmonyPlayer
@@ -58,6 +60,7 @@ class PlaybackService : MediaLibraryService() {
     @Inject lateinit var albumJourneys: com.harmony.domain.library.repository.AlbumJourneyRepository
     @Inject lateinit var audioOutput: com.harmony.playback.service.player.AudioOutputMonitor
     @Inject lateinit var autoEq: com.harmony.playback.service.autoeq.AutoEqCoordinator
+    @Inject lateinit var connect: ConnectSession
 
     // Lazy: only touched when the app is swiped away, and the service must
     // not be the thing that decides when the in-app connection gets built.
@@ -78,7 +81,11 @@ class PlaybackService : MediaLibraryService() {
         AutoDiagnostics.init(this)
         val createStart = android.os.SystemClock.elapsedRealtime()
         super.onCreate()
-        val sessionBuilder = MediaLibrarySession.Builder(this, harmonyPlayer.exoPlayer, callback)
+        // The session sees the ExoPlayer through ConnectPlayer, which answers
+        // for the computer while the music plays on one (Harmony Connect).
+        val sessionPlayer = ConnectPlayer(harmonyPlayer.exoPlayer, connect)
+        connect.attach(harmonyPlayer.exoPlayer, sessionPlayer)
+        val sessionBuilder = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setId(SESSION_ID)
         packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
             sessionBuilder.setSessionActivity(
@@ -96,7 +103,8 @@ class PlaybackService : MediaLibraryService() {
             .also { it.start() }
         startPeriodicStateSaving()
         albumListening = AlbumListeningMonitor(harmonyPlayer.exoPlayer, albumJourneys).also { it.start() }
-        sleepTimer.attach(harmonyPlayer.exoPlayer, serviceScope)
+        // Through the session's player, so it also pauses a computer playing over Connect.
+        sleepTimer.attach(sessionPlayer, serviceScope)
         callback.attach(harmonyPlayer, crossfade!!, sleepTimer)
         autoEq.start(serviceScope)
         harmonyPlayer.exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
@@ -272,6 +280,7 @@ class PlaybackService : MediaLibraryService() {
         autoEq.stop()
         crossfade?.stop()
         sleepTimer.detach()
+        connect.detach()
         callback.close()
         mediaSession?.run {
             player.release()

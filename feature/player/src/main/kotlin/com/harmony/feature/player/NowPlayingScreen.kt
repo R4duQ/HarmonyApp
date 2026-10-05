@@ -183,6 +183,8 @@ fun NowPlayingScreen(
     var showShuffleSheet by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showPlayOn by remember { mutableStateOf(false) }
+    val connectState by viewModel.connectState.collectAsStateWithLifecycle()
 
     val song = state.currentSong
     val context = LocalContext.current
@@ -473,7 +475,7 @@ fun NowPlayingScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    MetaRow(state, outputChoice, journeyProgress, palette, centered = true)
+                    MetaRow(state, outputChoice, journeyProgress, palette, centered = true, onOutput = { showPlayOn = true })
                     Spacer(Modifier.height(14.dp))
                     SeekBlock(
                         progress = dragFraction ?: animatedProgress,
@@ -548,6 +550,7 @@ fun NowPlayingScreen(
                 state, outputChoice, journeyProgress, palette,
                 centered = false,
                 modifier = Modifier.padding(top = 7.dp),
+                onOutput = { showPlayOn = true },
             )
             Spacer(Modifier.height(18.dp))
             SeekBlock(
@@ -585,6 +588,20 @@ fun NowPlayingScreen(
     if (showQueue) {
         ModalBottomSheet(onDismissRequest = { showQueue = false }) {
             QueueSheet(viewModel)
+        }
+    }
+    if (showPlayOn) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlayOn = false },
+            // Fully open: a code or an address gets typed in here, above the keyboard.
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            PlayOnSheet(
+                connect = connectState,
+                phoneOutput = state.audioOutput,
+                output = outputChoice,
+                actions = viewModel.playOnActions,
+            )
         }
     }
     if (showShuffleSheet) {
@@ -961,13 +978,14 @@ private fun MetaRow(
     palette: PlayerPalette,
     centered: Boolean,
     modifier: Modifier = Modifier,
+    onOutput: () -> Unit = {},
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
     ) {
-        OutputLabel(state, output, palette)
+        OutputLabel(state, output, palette, onOutput)
         AnimatedVisibility(visible = journeyProgress != null) {
             Text(
                 " · Journey ${((journeyProgress ?: 0f) * 100).toInt()}%",
@@ -996,53 +1014,35 @@ private fun MetaRow(
 }
 
 /** The device kind to draw, whether the listener picked it, and how to pick one (null when it can't apply). */
-private class OutputChoice(val form: OutputForm?, val chosen: Boolean, val pick: ((OutputForm?) -> Unit)?)
+internal class OutputChoice(val form: OutputForm?, val chosen: Boolean, val pick: ((OutputForm?) -> Unit)?)
 
 /**
- * Icon and name of the output. For headphones and speakers the icon follows
- * the kind of device; a tap lets the listener correct it for that device.
+ * Icon and name of where the music plays. A tap opens "Play on": this phone
+ * (and what kind of device its output is) or a computer over Harmony Connect.
  */
 @Composable
-private fun OutputLabel(state: PlayerState, output: OutputChoice, palette: PlayerPalette) {
-    var open by remember { mutableStateOf(false) }
-    val pick = output.pick
-    Box {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .then(if (pick != null) Modifier.clickable(onClickLabel = "Choose the kind of device") { open = true } else Modifier)
-                .padding(horizontal = 2.dp, vertical = 3.dp),
-        ) {
-            Icon(
-                imageVector = OutputIcons.forOutput(state.audioOutput.type, output.form),
-                contentDescription = output.form?.label ?: "Audio output",
-                tint = palette.muted,
-                modifier = Modifier.size(15.dp),
-            )
-            Text(
-                state.audioOutput.label,
-                fontSize = 11.sp,
-                color = palette.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 5.dp),
-            )
-        }
-        if (pick != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(if (output.chosen) "Automatic" else "Automatic · current") },
-                leadingIcon = { Icon(OutputIcons.forOutput(state.audioOutput.type, null), null, Modifier.size(20.dp)) },
-                onClick = { pick(null); open = false },
-            )
-            OutputIcons.pickable(state.audioOutput.type).forEach { form ->
-                DropdownMenuItem(
-                    text = { Text(if (output.chosen && output.form == form) "${form.label} · current" else form.label) },
-                    leadingIcon = { Icon(OutputIcons.forForm(form), null, Modifier.size(20.dp)) },
-                    onClick = { pick(form); open = false },
-                )
-            }
-        }
+private fun OutputLabel(state: PlayerState, output: OutputChoice, palette: PlayerPalette, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClickLabel = "Choose where to play") { onClick() }
+            .padding(horizontal = 2.dp, vertical = 3.dp),
+    ) {
+        Icon(
+            imageVector = OutputIcons.forOutput(state.audioOutput.type, output.form),
+            contentDescription = output.form?.label ?: "Audio output",
+            tint = if (state.audioOutput.type == com.harmony.core.model.AudioOutputType.COMPUTER) palette.accent else palette.muted,
+            modifier = Modifier.size(15.dp),
+        )
+        Text(
+            state.audioOutput.label,
+            fontSize = 11.sp,
+            color = if (state.audioOutput.type == com.harmony.core.model.AudioOutputType.COMPUTER) palette.accent else palette.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 5.dp),
+        )
     }
 }
 

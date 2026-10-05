@@ -16,6 +16,8 @@ dependencies {
     implementation(projects.core.common)
     implementation(projects.core.model)
     implementation(projects.core.datastore)
+    // Harmony Connect: playing on a computer running Harmony for Windows.
+    implementation(projects.core.remote)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)

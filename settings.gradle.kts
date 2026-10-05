@@ -30,6 +30,7 @@ rootProject.name = "Harmony"
 include(":app")
 include(":core:common")
 include(":core:model")
+include(":core:remote")
 include(":domain:playback")
 include(":playback:service")
 include(":core:media")

@@ -1,7 +1,10 @@
 package com.harmony.core.model
 
-/** Where audio is currently going. [CAR] means Android Auto is connected to the player. */
-enum class AudioOutputType { SPEAKER, WIRED, BLUETOOTH, USB, HDMI, OTHER, CAR }
+/**
+ * Where audio is currently going. [CAR] means Android Auto is connected to the
+ * player; [COMPUTER] means it plays on a computer through Harmony Connect.
+ */
+enum class AudioOutputType { SPEAKER, WIRED, BLUETOOTH, USB, HDMI, OTHER, CAR, COMPUTER }
 
 /**
  * The active audio output route.
@@ -24,6 +27,7 @@ data class AudioOutput(
             !name.isNullOrBlank() && type == AudioOutputType.USB -> name
             // The car's Bluetooth name when there is one, so two cars can be told apart.
             !name.isNullOrBlank() && type == AudioOutputType.CAR -> "Android Auto · $name"
+            !name.isNullOrBlank() && type == AudioOutputType.COMPUTER -> name
             else -> when (type) {
                 AudioOutputType.SPEAKER -> "Phone speaker"
                 AudioOutputType.WIRED -> "Headphones"
@@ -32,6 +36,7 @@ data class AudioOutput(
                 AudioOutputType.HDMI -> "HDMI"
                 AudioOutputType.OTHER -> "External audio"
                 AudioOutputType.CAR -> "Android Auto"
+                AudioOutputType.COMPUTER -> "Computer"
             }
         }
 }
