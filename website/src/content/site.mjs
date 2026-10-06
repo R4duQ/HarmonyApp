@@ -8,7 +8,7 @@ const repo = 'https://github.com/R4duQ/HarmonyApp';
 
 export const release = {
   version: '1.0',
-  versionCode: 131,
+  versionCode: 132,
   tag: 'v1.0',
   date: '2026-09-24', // GitHub release published_at
   // 'stable' shows "Download Harmony"; 'beta' shows "Try the beta";

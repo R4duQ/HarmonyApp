@@ -286,7 +286,7 @@ class ConnectSession @Inject constructor(
         val playing = if (previous != null) wantPlay else exo.playWhenReady
         val upNext = upNextItems(exo)
         val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
-        val duration = exo.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+        val duration = knownDuration(exo)
         _state.update { it.copy(busyWith = target.id, error = null, needsCode = null) }
         scope.launch {
             val fresh = ConnectClient(target.host, target.port, token)
@@ -380,7 +380,7 @@ class ConnectSession @Inject constructor(
         val catchUp = followUp || following
         following = false
         val position = exo.currentPosition.coerceAtLeast(0)
-        val duration = exo.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+        val duration = knownDuration(exo)
         val upNext = upNextItems(exo)
         val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
         sentId = item.mediaId
@@ -438,7 +438,7 @@ class ConnectSession @Inject constructor(
             title = md.title?.toString() ?: uri.lastPathSegment ?: "Unknown",
             artist = md.artist?.toString() ?: "",
             album = md.albumTitle?.toString() ?: "",
-            durationMs = durationMs,
+            durationMs = durationMs.takeIf { it > 0 } ?: md.durationMs ?: 0L,
             url = url,
             artUrl = art,
         )
@@ -447,10 +447,18 @@ class ConnectSession @Inject constructor(
             // The first one can be played straight on: the computer fetches it ahead of time.
             val nextUri = it.localConfiguration?.uri
             val (nextUrl, nextArt) = if (i == 0 && autoAdvance && nextUri != null) files.share(it.mediaId, nextUri, coverFor(it), host) else ("" to null)
-            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", 0, nextUrl, nextArt)
+            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt)
         }
         return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp)
     }
+
+    /**
+     * The current song's length: the player's once it has read the file, else
+     * the library's. Right after a skip the player doesn't know it yet, and a
+     * computer told "0" can't draw its progress bar.
+     */
+    private fun knownDuration(exo: ExoPlayer): Long =
+        exo.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: exo.currentMediaItem?.mediaMetadata?.durationMs ?: 0L
 
     private fun coverFor(item: MediaItem): ByteArray? {
         val md = item.mediaMetadata

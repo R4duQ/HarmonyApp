@@ -55,7 +55,8 @@ say "Windows protected your PC": choose **More info**, then **Run anyway**.
   deleted when the phone lets go and when Harmony starts. With a phone at build 129 or newer
   the computer also goes straight on to the next song by itself, without a gap, and next
   pressed on the computer acts at once; the phone follows.
-  If the phone's Wi-Fi drops mid-song, the computer starts the song again where it stopped
+  The progress bar knows each phone song's length, and the player shows its quality
+  (FLAC 16/44.1) as for your own songs. If the phone's Wi-Fi drops mid-song, the computer starts the song again where it stopped
   (from its copy when it has one). Play music from the computer's own library while the
   phone is connected and the phone's song is set aside, paused; play on the phone brings it
   back.

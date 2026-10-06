@@ -587,6 +587,8 @@ class PlaybackConnection @Inject constructor(
                 .setTitle(song.title)
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
+                // Its length, known before the player has read the file (Connect sends it on).
+                .setDurationMs(song.durationMs.takeIf { it > 0 })
                 // A content:// URI, not the raw file:// path: these items
                 // reach out-of-process controllers (the Auto host, the
                 // notification), which cannot read this app's private

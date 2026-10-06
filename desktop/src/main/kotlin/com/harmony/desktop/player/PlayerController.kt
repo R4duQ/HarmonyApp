@@ -270,6 +270,7 @@ class PlayerController(
                 remoteUpNext = remoteUpNext.drop(1)
                 showRemote(tag.track)
                 fetch()
+                learnAbout(tag.track)
             }
         }
     }
@@ -289,11 +290,16 @@ class PlayerController(
         _phone.value = request.phoneName
         autoAdvance = request.autoAdvance
         if (request.followUp && same) {
-            // The phone catching up with what plays here, or a new "up next": carry on as is.
-            remoteTrack = t
+            // The phone catching up with what plays here, or a new "up next": carry on as is,
+            // keeping what was learned about the song here.
+            val known = remoteTrack
+            remoteTrack = t.copy(
+                durationMs = t.durationMs.takeIf { it > 0 } ?: known?.durationMs ?: 0,
+                quality = t.quality ?: known?.quality,
+            )
             remoteUpNext = request.upNext
             if (request.playing) engine.play() else engine.pause()
-            showRemote(t)
+            remoteTrack?.let(::showRemote)
             fetch()
             return
         }
@@ -341,6 +347,31 @@ class PlayerController(
         engine.load(sourceFor(t), positionMs, play, t.durationMs)
         showRemote(t)
         fetch()
+        learnAbout(t)
+    }
+
+    /**
+     * A phone song sent without its length (or quality): ask ffprobe, from the
+     * copy if there is one, and fill them in, so the progress bar works and the
+     * next song can be made ready in time.
+     */
+    private fun learnAbout(t: RemoteTrack) {
+        if (t.durationMs > 0 && t.quality != null) return
+        val source = sourceFor(t)
+        Thread({
+            val probed = runCatching { com.harmony.desktop.library.Ffprobe.probe(source) }.getOrNull() ?: return@Thread
+            synchronized(this) {
+                val now = remoteTrack ?: return@synchronized
+                if (now.id != t.id) return@synchronized
+                val better = now.copy(
+                    durationMs = now.durationMs.takeIf { it > 0 } ?: probed.durationMs,
+                    quality = now.quality ?: probed.quality,
+                )
+                remoteTrack = better
+                engine.setDuration(engine.state.value.source ?: source, better.durationMs)
+                showRemote(better)
+            }
+        }, "harmony-probe").apply { isDaemon = true }.start()
     }
 
     private fun showRemote(t: RemoteTrack) {

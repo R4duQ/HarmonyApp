@@ -64,10 +64,14 @@ data class LocalTrack(
 
 /** Reads a song's tags and format with ffprobe. */
 object Ffprobe {
-    fun read(file: File, ffprobe: String = FfmpegTools.ffprobe): LocalTrack? {
+    fun read(file: File, ffprobe: String = FfmpegTools.ffprobe): LocalTrack? = probe(file.absolutePath, ffprobe)
+
+    /** [source] is a file path or a URL (a phone's song). */
+    fun probe(source: String, ffprobe: String = FfmpegTools.ffprobe): LocalTrack? {
+        val file = File(source)
         val process = runCatching {
             ProcessBuilder(
-                ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", file.absolutePath,
+                ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", source,
             ).redirectErrorStream(false).start()
         }.getOrNull() ?: return null
         val text = process.inputStream.use { String(it.readBytes(), Charsets.UTF_8) }
