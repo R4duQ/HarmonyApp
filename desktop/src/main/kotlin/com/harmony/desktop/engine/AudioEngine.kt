@@ -210,6 +210,15 @@ class AudioEngine(
         }
     }
 
+    /** Learned [durationMs] of [source] late (it came without one): used if it's still what plays. */
+    fun setDuration(source: String, durationMs: Long) {
+        if (durationMs <= 0) return
+        synchronized(lock) {
+            val s = _state.value
+            if (s.source == source && s.durationMs <= 0) _state.value = s.copy(durationMs = durationMs)
+        }
+    }
+
     /** Where the song is, in ms. */
     fun positionMs(): Long {
         val s = sink
@@ -326,6 +335,8 @@ class AudioEngine(
                     return
                 }
                 gotAny = true
+                // A length learned while playing (see setDuration).
+                if (duration <= 0) _state.value.takeIf { it.source == src }?.let { duration = it.durationMs }
                 val frames = n / frameBytes
                 process(buf, frames)
                 if (boundaryPending) {

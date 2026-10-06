@@ -201,6 +201,8 @@ object BrowseTree {
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
                 .setSubtitle(song.artist)
+                // Its length, known before the player has read the file (Connect sends it on).
+                .setDurationMs(song.durationMs.takeIf { it > 0 })
                 // Through the provider, NOT song.artworkUri: that's a
                 // file:// path into this app's private storage, which the
                 // Auto host cannot read — which is why artwork came up

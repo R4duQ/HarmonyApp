@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **131**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 130), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **132**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 131), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -148,7 +148,8 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   doesn't end it (the computer keeps playing; only half a minute of silence brings the
   music back to the phone), and the phone stays on the Wi-Fi through a pause. If music
   from the computer's own library takes over, the phone shows its song paused and play
-  brings it back. Choose **This phone** to bring the music back, paused where it was.
+  brings it back. The computer is told each song's length, so its progress bar follows
+  along. Choose **This phone** to bring the music back, paused where it was.
 - **Closing the app closes the notification.** Swiping Harmony away stops playback and
   removes its notification unless Android Auto is connected. Before, the system's media
   controls, Bluetooth or a watch could be mistaken for the car, leaving music and a

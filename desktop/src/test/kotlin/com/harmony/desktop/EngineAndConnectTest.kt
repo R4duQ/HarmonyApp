@@ -302,6 +302,31 @@ class EngineAndConnectTest {
         engine.stop()
     }
 
+    @Test fun `a phone song sent without its length gets one, and its quality`() {
+        val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
+            if (req.path == "/track/7") HttpResponse.ranged(FileRangeSource(quiet), req.header("Range"), "audio/wav") else HttpResponse.text(404, "no")
+        }.start()
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val player = PlayerController(engine)
+        try {
+            // As a phone sends it right after a skip: no length yet.
+            val a = RemoteTrack("7", "Tone Song", "Test Artist", "Test Album", 0, "http://127.0.0.1:${phoneFiles.boundPort}/track/7")
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8"))
+            waitFor(what = "a length") { (player.nowPlaying.value?.durationMs ?: 0) > 0 }
+            // A 12 s song (long enough to still be playing at the end of this test).
+            assertEquals(12_000.0, player.nowPlaying.value!!.durationMs.toDouble(), 60.0)
+            assertNotNull(player.nowPlaying.value?.quality)
+            waitFor(what = "the engine to know it") { engine.state.value.durationMs > 0 }
+            assertEquals(12_000.0, player.status().durationMs.toDouble(), 60.0)
+            // The phone catching up with no length doesn't lose it.
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", followUp = true))
+            assertEquals(12_000.0, player.nowPlaying.value!!.durationMs.toDouble(), 60.0)
+        } finally {
+            engine.stop()
+            phoneFiles.close()
+        }
+    }
+
     @Test fun `the phone's song comes back after the computer's own music`() {
         val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
             if (req.path == "/track/7") HttpResponse.ranged(FileRangeSource(flac), req.header("Range"), "audio/flac") else HttpResponse.text(404, "no")
