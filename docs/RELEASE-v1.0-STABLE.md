@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **130**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 129), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **131**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 130), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -153,6 +153,11 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   removes its notification unless Android Auto is connected. Before, the system's media
   controls, Bluetooth or a watch could be mistaken for the car, leaving music and a
   notification that could not be dismissed.
+  - *No player left behind.* Harmony no longer offers Android a "resume" player, so on
+    phones and tablets that keep media players in quick settings (Samsung's do by
+    default) no Harmony card stays there after you close or force-stop the app. A card
+    left over from an earlier build goes once you swipe it away (or long-press it and
+    choose Hide). Android Auto can still offer the last song when the car connects.
 - **Notification opens the app.** Tapping the playback notification or the lock-screen
   player brings Harmony to the front, or starts it if it was closed.
 - **Tablet layout.** On tablets a glass navigation rail on the left replaces the bottom

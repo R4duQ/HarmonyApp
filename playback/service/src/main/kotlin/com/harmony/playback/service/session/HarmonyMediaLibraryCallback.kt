@@ -238,6 +238,15 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         params: LibraryParams?,
     ): ListenableFuture<LibraryResult<MediaItem>> {
         AutoDiagnostics.log("root requested by ${browser.packageName} · recent=${params?.isRecent} offline=${params?.isOffline}")
+        // "Recent" is how Android's system UI asks whether it may keep a resume
+        // player for this app in the quick settings after the app is gone. Saying
+        // yes left a Harmony card there after closing or even force-stopping it, on
+        // phones and tablets that keep media players (Samsung's do by default).
+        // Harmony is closed when it is closed: no for everyone but Android Auto,
+        // which uses it to offer the last song when the car connects.
+        if (params?.isRecent == true && browser.packageName !in RESUME_HOSTS) {
+            return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_NOT_SUPPORTED))
+        }
         val root = BrowseTree.browsable(
             id = BrowseTree.ROOT,
             title = "Harmony",
@@ -608,6 +617,9 @@ class HarmonyMediaLibraryCallback @Inject constructor(
     }
 
     companion object {
+        /** May ask for the recent root (see onGetLibraryRoot): Android Auto only. */
+        val RESUME_HOSTS = setOf("com.google.android.projection.gearhead")
+
         const val ROOT_ID = BrowseTree.ROOT
 
         /**
