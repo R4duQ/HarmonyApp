@@ -19,6 +19,7 @@ import com.harmony.core.remote.ControlAction
 import com.harmony.core.remote.ControlRequest
 import com.harmony.core.remote.Discovery
 import com.harmony.core.remote.PlayRequest
+import com.harmony.core.remote.RemoteRepeat
 import com.harmony.core.remote.RemoteRequest
 import com.harmony.core.remote.RemoteState
 import com.harmony.core.remote.RemoteStatus
@@ -33,7 +34,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -93,6 +96,16 @@ class ConnectSession @Inject constructor(
     private var following = false
     private var refreshJob: Job? = null
 
+    /**
+     * Shuffle as the app has it: Smart Shuffle re-orders the queue itself and
+     * leaves the player's own shuffle off, so the player alone can't tell.
+     */
+    private var appShuffle = false
+    private val _shuffleRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+
+    /** Shuffle pressed on the computer: the app does what its own shuffle button does. */
+    val shuffleRequests: SharedFlow<Unit> = _shuffleRequests
+
     /** What the listener wants: playing or paused. */
     private var wantPlay = false
     private var remoteState: RemoteState? = null
@@ -140,6 +153,21 @@ class ConnectSession @Inject constructor(
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) = refreshUpNext()
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = refreshUpNext()
         override fun onRepeatModeChanged(repeatMode: Int) = refreshUpNext()
+    }
+
+    /** The app's shuffle changed: the computer's shuffle button shows it. */
+    fun setAppShuffle(on: Boolean) {
+        if (appShuffle == on) return
+        appShuffle = on
+        refreshUpNext()
+    }
+
+    private fun shuffleOn(exo: ExoPlayer) = appShuffle || exo.shuffleModeEnabled
+
+    private fun repeatOf(exo: ExoPlayer) = when (exo.repeatMode) {
+        Player.REPEAT_MODE_ALL -> RemoteRepeat.ALL
+        Player.REPEAT_MODE_ONE -> RemoteRepeat.ONE
+        else -> RemoteRepeat.OFF
     }
 
     private fun refreshUpNext() {
@@ -287,6 +315,8 @@ class ConnectSession @Inject constructor(
         val upNext = upNextItems(exo)
         val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
         val duration = knownDuration(exo)
+        val shuffle = shuffleOn(exo)
+        val repeat = repeatOf(exo)
         _state.update { it.copy(busyWith = target.id, error = null, needsCode = null) }
         scope.launch {
             val fresh = ConnectClient(target.host, target.port, token)
@@ -294,7 +324,7 @@ class ConnectSession @Inject constructor(
                 runCatching {
                     previous?.disconnect()
                     files.start()
-                    if (item != null) fresh.play(playRequest(fresh, item, position, playing, duration, upNext, canAdvance, followUp = false)) else fresh.status()
+                    if (item != null) fresh.play(playRequest(fresh, item, position, playing, duration, upNext, canAdvance, followUp = false, shuffle, repeat)) else fresh.status()
                 }
             }
             result.onFailure { e ->
@@ -394,7 +424,9 @@ class ConnectSession @Inject constructor(
             player?.notifyPlayState()
             updateLocks()
         }
-        send { c.play(playRequest(c, item, position, playing, duration, upNext, canAdvance, catchUp)) }
+        val shuffle = shuffleOn(exo)
+        val repeat = repeatOf(exo)
+        send { c.play(playRequest(c, item, position, playing, duration, upNext, canAdvance, catchUp, shuffle, repeat)) }
     }
 
     /** The computer went on to [id] by itself: move the phone's queue there too, without restarting it. */
@@ -428,6 +460,8 @@ class ConnectSession @Inject constructor(
         upNext: List<MediaItem>,
         autoAdvance: Boolean,
         followUp: Boolean,
+        shuffle: Boolean,
+        repeat: RemoteRepeat,
     ): PlayRequest {
         val uri = item.localConfiguration?.uri ?: throw IOException("nothing to play")
         val host = localAddressToward(c.host)
@@ -449,7 +483,7 @@ class ConnectSession @Inject constructor(
             val (nextUrl, nextArt) = if (i == 0 && autoAdvance && nextUri != null) files.share(it.mediaId, nextUri, coverFor(it), host) else ("" to null)
             RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt)
         }
-        return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp)
+        return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat)
     }
 
     /**
@@ -624,6 +658,13 @@ class ConnectSession @Inject constructor(
         for (request in status.requests) when (request) {
             RemoteRequest.NEXT -> if (exo.hasNextMediaItem()) player.seekToNextMediaItem()
             RemoteRequest.PREVIOUS -> player.seekToPrevious()
+            // The new "up next" goes back to the computer by itself (see the listener).
+            RemoteRequest.SHUFFLE -> _shuffleRequests.tryEmit(Unit)
+            RemoteRequest.REPEAT -> player.repeatMode = when (exo.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
         }
         if (status.requests.isNotEmpty()) return
 

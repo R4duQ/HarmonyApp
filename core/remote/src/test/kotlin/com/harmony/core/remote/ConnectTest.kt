@@ -57,8 +57,15 @@ class ConnectTest {
         // An older phone says nothing about either: the computer waits for it, as before.
         val old = org.json.JSONObject(play.toJson()).apply { remove("autoAdvance"); remove("followUp") }.toString()
         assertEquals(play, PlayRequest.fromJson(old))
-        val status = RemoteStatus(RemoteState.PLAYING, "42", 12_345, 337_000, 0.8f, null, listOf(RemoteRequest.NEXT))
+        // The phone's shuffle and repeat, so the computer's buttons show them; older phones send neither.
+        val modes = play.copy(shuffle = true, repeat = RemoteRepeat.ALL)
+        assertEquals(modes, PlayRequest.fromJson(modes.toJson()))
+        assertEquals(null, PlayRequest.fromJson(old)?.shuffle)
+        val status = RemoteStatus(RemoteState.PLAYING, "42", 12_345, 337_000, 0.8f, null, listOf(RemoteRequest.NEXT, RemoteRequest.SHUFFLE, RemoteRequest.REPEAT))
         assertEquals(status, RemoteStatus.fromJson(status.toJson()))
+        // A request a phone doesn't know (from a newer computer) is skipped, not an error.
+        val newer = status.toJson().replace("\"shuffle\"", "\"teleport\"")
+        assertEquals(listOf(RemoteRequest.NEXT, RemoteRequest.REPEAT), RemoteStatus.fromJson(newer)?.requests)
         assertEquals(ControlRequest(ControlAction.SEEK, 90_000), ControlRequest.fromJson(ControlRequest(ControlAction.SEEK, 90_000).toJson()))
         assertEquals(ControlRequest(ControlAction.PAUSE), ControlRequest.fromJson(ControlRequest(ControlAction.PAUSE).toJson()))
         val info = PcInfo("id", "PC", 47800)

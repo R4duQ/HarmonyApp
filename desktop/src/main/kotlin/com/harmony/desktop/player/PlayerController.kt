@@ -4,6 +4,7 @@ import com.harmony.core.remote.ControlAction
 import com.harmony.core.remote.ControlRequest
 import com.harmony.core.remote.PlayRequest
 import com.harmony.core.remote.RemoteRenderer
+import com.harmony.core.remote.RemoteRepeat
 import com.harmony.core.remote.RemoteRequest
 import com.harmony.core.remote.RemoteState
 import com.harmony.core.remote.RemoteStatus
@@ -66,10 +67,22 @@ class PlayerController(
     private val _index = MutableStateFlow(-1)
     val index: StateFlow<Int> = _index.asStateFlow()
 
+    /**
+     * What the shuffle and repeat buttons show: the computer's own modes, or
+     * the phone's while it plays here (it owns that queue).
+     */
     private val _shuffle = MutableStateFlow(false)
     val shuffle: StateFlow<Boolean> = _shuffle.asStateFlow()
     private val _repeat = MutableStateFlow(Repeat.OFF)
     val repeat: StateFlow<Repeat> = _repeat.asStateFlow()
+
+    /** The computer's own modes, for its own music. */
+    private var localShuffle = false
+    private var localRepeat = Repeat.OFF
+
+    /** The phone's modes as it last said (null: a phone that doesn't say). */
+    private var remoteShuffle: Boolean? = null
+    private var remoteRepeat: RemoteRepeat? = null
 
     /** The phone playing here now, if one is. */
     private val _phone = MutableStateFlow<String?>(null)
@@ -156,7 +169,7 @@ class PlayerController(
             if (up != null) return startRemote(up, remoteUpNext.drop(1), 0, play = true)
             return request(RemoteRequest.NEXT)
         }
-        val i = step(+1, wrap = _repeat.value != Repeat.OFF) ?: return
+        val i = step(+1, wrap = localRepeat != Repeat.OFF) ?: return
         startLocal(i, 0, play = true)
     }
 
@@ -165,7 +178,7 @@ class PlayerController(
         // A few seconds in, previous goes back to the start of the song, as on the phone.
         if (engine.positionMs() > RESTART_AFTER_MS) return seek(0)
         if (_phone.value != null) return request(RemoteRequest.PREVIOUS)
-        val i = step(-1, wrap = _repeat.value != Repeat.OFF) ?: return engine.seek(0)
+        val i = step(-1, wrap = localRepeat != Repeat.OFF) ?: return engine.seek(0)
         startLocal(i, 0, play = true)
     }
 
@@ -187,19 +200,44 @@ class PlayerController(
 
     @Synchronized
     fun toggleShuffle() {
-        _shuffle.value = !_shuffle.value
+        if (_phone.value != null) {
+            // The phone's queue: the phone shuffles it and sends the new "up next".
+            remoteShuffle = remoteShuffle?.not()
+            request(RemoteRequest.SHUFFLE)
+            return publishModes()
+        }
+        localShuffle = !localShuffle
         order = makeOrder(_queue.value.size, _index.value.coerceAtLeast(0))
+        publishModes()
         refreshUpNext()
     }
 
     @Synchronized
     fun cycleRepeat() {
-        _repeat.value = when (_repeat.value) {
+        if (_phone.value != null) {
+            remoteRepeat = remoteRepeat?.let { RemoteRepeat.entries[(it.ordinal + 1) % RemoteRepeat.entries.size] }
+            request(RemoteRequest.REPEAT)
+            return publishModes()
+        }
+        localRepeat = when (localRepeat) {
             Repeat.OFF -> Repeat.ALL
             Repeat.ALL -> Repeat.ONE
             Repeat.ONE -> Repeat.OFF
         }
+        publishModes()
         refreshUpNext()
+    }
+
+    private fun publishModes() {
+        val phone = _phone.value != null
+        _shuffle.value = remoteShuffle?.takeIf { phone } ?: localShuffle
+        _repeat.value = remoteRepeat?.takeIf { phone }?.let {
+            when (it) {
+                RemoteRepeat.OFF -> Repeat.OFF
+                RemoteRepeat.ALL -> Repeat.ALL
+                RemoteRepeat.ONE -> Repeat.ONE
+            }
+        } ?: localRepeat
     }
 
     private fun startLocal(i: Int, startMs: Long, play: Boolean) {
@@ -211,7 +249,7 @@ class PlayerController(
 
     private fun makeOrder(size: Int, first: Int): List<Int> {
         if (size == 0) return emptyList()
-        return if (_shuffle.value) listOf(first) + (0 until size).filter { it != first }.shuffled() else (0 until size).toList()
+        return if (localShuffle) listOf(first) + (0 until size).filter { it != first }.shuffled() else (0 until size).toList()
     }
 
     /** The queue position [delta] steps along the play order from now, or null at an end. */
@@ -232,7 +270,7 @@ class PlayerController(
         val q = _queue.value
         if (order.size != q.size) order = makeOrder(q.size, i)
         val at = order.indexOf(i).coerceAtLeast(0)
-        val after = order.drop(at + 1) + if (_repeat.value == Repeat.ALL) order.take(at) else emptyList()
+        val after = order.drop(at + 1) + if (localRepeat == Repeat.ALL) order.take(at) else emptyList()
         return after.take(UP_NEXT).map { qi -> UpNext(q[qi].title, q[qi].artist, Art.Local(q[qi]), qi) }
     }
 
@@ -245,8 +283,8 @@ class PlayerController(
     private fun onEnded() {
         if (_phone.value != null) return // the phone decides what's next
         // Normally the engine has gone on by itself ([upcoming]); this is when that couldn't start.
-        if (_repeat.value == Repeat.ONE) return startLocal(_index.value, 0, play = true)
-        val i = step(+1, wrap = _repeat.value == Repeat.ALL) ?: return
+        if (localRepeat == Repeat.ONE) return startLocal(_index.value, 0, play = true)
+        val i = step(+1, wrap = localRepeat == Repeat.ALL) ?: return
         startLocal(i, 0, play = true)
     }
 
@@ -258,7 +296,7 @@ class PlayerController(
             return Upcoming(sourceFor(up), up.durationMs, RemoteNext(up))
         }
         if (_index.value < 0) return null
-        val i = if (_repeat.value == Repeat.ONE) _index.value else step(+1, wrap = _repeat.value == Repeat.ALL) ?: return null
+        val i = if (localRepeat == Repeat.ONE) _index.value else step(+1, wrap = localRepeat == Repeat.ALL) ?: return null
         val t = _queue.value.getOrNull(i) ?: return null
         return Upcoming(t.path, t.durationMs, LocalNext(i))
     }
@@ -296,6 +334,9 @@ class PlayerController(
             engine.state.value.status.let { it == EngineStatus.PLAYING || it == EngineStatus.PAUSED || it == EngineStatus.LOADING }
         _phone.value = request.phoneName
         autoAdvance = request.autoAdvance
+        remoteShuffle = request.shuffle
+        remoteRepeat = request.repeat
+        publishModes()
         if (request.followUp && same) {
             // The phone catching up with what plays here, or a new "up next": carry on as is,
             // keeping what was learned about the song here.
@@ -307,6 +348,13 @@ class PlayerController(
             remoteUpNext = request.upNext
             if (request.playing) engine.play() else engine.pause()
             remoteTrack?.let(::showRemote)
+            fetch()
+            return
+        }
+        if (request.followUp && remoteTrack?.id == t.id && engine.state.value.status == EngineStatus.ENDED) {
+            // Only a new "up next" for a song that has finished here: nothing to restart.
+            remoteUpNext = request.upNext
+            showRemote(t)
             fetch()
             return
         }
@@ -479,6 +527,9 @@ class PlayerController(
         remoteUpNext = emptyList()
         autoAdvance = false
         _phone.value = null
+        remoteShuffle = null
+        remoteRepeat = null
+        publishModes()
         pending.clear()
         cache?.clear()
         _nowPlaying.value = _queue.value.getOrNull(_index.value)?.let { t -> localNowPlaying(t, _index.value) }

@@ -148,28 +148,10 @@ class PlayerViewModel @Inject constructor(
      * press. Plain random is still available, but as a deliberate choice in
      * the Smart Shuffle sheet rather than a surprise stop on the way to off.
      */
-    fun cycleShuffleMode() {
-        val current = playerState.value.shuffleMode
-        val next = if (current == ShuffleMode.OFF) ShuffleMode.SMART else ShuffleMode.OFF
-        setShuffleMode(next)
-    }
+    fun cycleShuffleMode() = coordinator.toggleShuffle()
 
-    /**
-     * Explicit mode selection from the Smart Shuffle sheet. Ends any running
-     * journey FIRST, so the journey's own teardown can't flip shuffle back
-     * on immediately after the user asked for Off.
-     */
-    fun setShuffleMode(mode: ShuffleMode) {
-        val wasSmart = playerState.value.shuffleMode.let {
-            it == ShuffleMode.SMART || it == ShuffleMode.JOURNEY
-        }
-        coordinator.onShuffleModeChosen(mode)
-        playback.setShuffleMode(mode)
-        // Only a real switch INTO Smart Shuffle clears the linear queue.
-        // Tapping "Smart" while it is already on (or while a journey hands
-        // back to it) must keep the picks already lined up.
-        if (mode == ShuffleMode.SMART && !wasSmart) coordinator.onShuffleActivated()
-    }
+    /** Explicit mode selection from the Smart Shuffle sheet. */
+    fun setShuffleMode(mode: ShuffleMode) = coordinator.chooseShuffleMode(mode)
 
     fun setPlaybackSpeed(speed: Float) = playback.setPlaybackSpeed(speed)
     fun setSleepTimerMinutes(minutes: Int?, finishTrack: Boolean) =

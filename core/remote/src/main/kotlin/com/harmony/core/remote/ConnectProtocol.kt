@@ -124,6 +124,10 @@ data class RemoteTrack(
  * song and the phone follows. [followUp] marks the phone catching up with
  * that (or only updating what's next): if the computer already plays [track]
  * it keeps playing it as it is.
+ *
+ * [shuffle] and [repeat] are the phone's modes, so the computer's buttons show
+ * them (null from phones that don't send them); pressing them on the computer
+ * comes back as [RemoteRequest.SHUFFLE] / [RemoteRequest.REPEAT].
  */
 data class PlayRequest(
     val track: RemoteTrack,
@@ -133,6 +137,8 @@ data class PlayRequest(
     val upNext: List<RemoteTrack> = emptyList(),
     val autoAdvance: Boolean = false,
     val followUp: Boolean = false,
+    val shuffle: Boolean? = null,
+    val repeat: RemoteRepeat? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("track", track.toJsonObject())
@@ -142,6 +148,8 @@ data class PlayRequest(
         .put("upNext", JSONArray().apply { upNext.forEach { put(it.toJsonObject()) } })
         .put("autoAdvance", autoAdvance)
         .put("followUp", followUp)
+        .putOpt("shuffle", shuffle)
+        .putOpt("repeat", repeat?.name?.lowercase())
         .toString()
 
     companion object {
@@ -156,6 +164,9 @@ data class PlayRequest(
                 upNext = if (next == null) emptyList() else List(next.length()) { RemoteTrack.fromJson(next.getJSONObject(it)) },
                 autoAdvance = o.optBoolean("autoAdvance", false),
                 followUp = o.optBoolean("followUp", false),
+                shuffle = if (o.has("shuffle")) o.optBoolean("shuffle") else null,
+                repeat = o.optString("repeat").takeIf { it.isNotEmpty() }
+                    ?.let { r -> runCatching { RemoteRepeat.valueOf(r.uppercase()) }.getOrNull() },
             )
         }.getOrNull()
     }
@@ -177,8 +188,15 @@ data class ControlRequest(val action: ControlAction, val positionMs: Long? = nul
 
 enum class RemoteState { IDLE, LOADING, PLAYING, PAUSED, ENDED, ERROR }
 
-/** Something pressed on the computer that the phone, which owns the queue, has to act on. */
-enum class RemoteRequest { NEXT, PREVIOUS }
+/** The phone's repeat mode. */
+enum class RemoteRepeat { OFF, ALL, ONE }
+
+/**
+ * Something pressed on the computer that the phone, which owns the queue, has
+ * to act on: next, previous, shuffle on/off, the next repeat mode. Phones that
+ * don't know one ignore it.
+ */
+enum class RemoteRequest { NEXT, PREVIOUS, SHUFFLE, REPEAT }
 
 data class RemoteStatus(
     val state: RemoteState,
