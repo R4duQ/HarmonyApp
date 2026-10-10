@@ -84,8 +84,26 @@ $env:TMP = $tmp
 
 $stuck = @()
 foreach ($code in $codes) {
+    # Without its cached copy of the package Windows Installer can't uninstall (error 2318 / 1612)
+    # and with a window it even waits for the original .msi: then go straight to removing it here.
+    $pp = Pack $code
+    $cached = Get-ChildItem $userData -ErrorAction SilentlyContinue | ForEach-Object {
+        (Get-ItemProperty "$($_.PSPath)\Products\$pp\InstallProperties" -ErrorAction SilentlyContinue).LocalPackage
+    } | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    if (-not $cached) {
+        Write-Host "Harmony $code nu mai are pachetul de dezinstalare al Windows; il scot eu."
+        $stuck += $code
+        continue
+    }
     Write-Host "Dezinstalez Harmony $code ..."
-    $p = Start-Process msiexec.exe -ArgumentList "/x $code /qb /norestart /l*v `"$log`"" -Wait -PassThru
+    $p = Start-Process msiexec.exe -ArgumentList "/x $code /qb /norestart /l*v `"$log`"" -PassThru
+    $null = $p.Handle  # keeps the exit code readable after WaitForExit
+    if (-not $p.WaitForExit(300000)) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        Write-Host 'Windows Installer nu a terminat in 5 minute; il scot eu.'
+        $stuck += $code
+        continue
+    }
     if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
         Write-Host 'Gata: Windows Installer a dezinstalat Harmony.'
     } elseif ($p.ExitCode -eq 1605) {

@@ -115,6 +115,7 @@ jobs:
       - name: Install, then uninstall with the script
         # The installer must install, and Dezinstaleaza-Harmony.cmd must remove it again.
         shell: pwsh
+        timeout-minutes: 20
         run: |
           $msi = Get-ChildItem dist\*.msi | Select-Object -First 1
           $p = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
