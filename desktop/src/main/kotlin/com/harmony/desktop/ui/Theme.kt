@@ -19,6 +19,12 @@ class HarmonyColors(
     val muted: Color,
     val line: Color,
     val chip: Color,
+    /** The soft, raised surfaces of the player: the base, and its lit and shaded edges. */
+    val neu: Color,
+    val neuLight: Color,
+    val neuDark: Color,
+    /** The dark panel that holds the top tracks, in both themes. */
+    val panel: Color,
 )
 
 object Accent {
@@ -49,6 +55,10 @@ val DarkColors = HarmonyColors(
     muted = Color(0xFF9AA3B5),
     line = Color(0x1FFFFFFF),
     chip = Color(0xFF262C38),
+    neu = Color(0xFF1D2029),
+    neuLight = Color(0xFF2A2E3A),
+    neuDark = Color(0xFF0C0E13),
+    panel = Color(0xFF14161D),
 )
 
 val LightColors = HarmonyColors(
@@ -61,6 +71,10 @@ val LightColors = HarmonyColors(
     muted = Color(0xFF6B6B80),
     line = Color(0x1F15151C),
     chip = Color(0xFFE4F8FB),
+    neu = Color(0xFFEEF0F6),
+    neuLight = Color(0xFFFFFFFF),
+    neuDark = Color(0xFFC9CDDA),
+    panel = Color(0xFF1B1C22),
 )
 
 val LocalHarmonyColors = staticCompositionLocalOf { DarkColors }

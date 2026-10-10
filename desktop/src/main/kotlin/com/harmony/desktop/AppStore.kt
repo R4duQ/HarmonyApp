@@ -18,6 +18,7 @@ object AppDirs {
     val library: File get() = File(root, "library.json")
     val covers: File get() = File(root, "covers")
     val settings: File get() = File(root, "settings.json")
+    val plays: File get() = File(root, "plays.json")
 }
 
 /** Everything the desktop app remembers between runs. */
@@ -30,6 +31,8 @@ data class DesktopSettings(
     /** Connect tokens: token -> phone name. */
     val phones: Map<String, String> = emptyMap(),
     val darkTheme: Boolean = true,
+    /** Songs marked with the heart: their paths. */
+    val favorites: List<String> = emptyList(),
 ) {
     fun toJson(): String = JSONObject()
         .put("folders", JSONArray(folders))
@@ -52,6 +55,7 @@ data class DesktopSettings(
         .put("pcName", pcName)
         .put("phones", JSONObject(phones))
         .put("dark", darkTheme)
+        .put("favorites", JSONArray(favorites))
         .toString(2)
 
     companion object {
@@ -91,6 +95,7 @@ data class DesktopSettings(
                 pcName = o.optString("pcName").ifEmpty { d.pcName },
                 phones = phones?.keys()?.asSequence()?.associateWith { phones.getString(it) } ?: emptyMap(),
                 darkTheme = o.optBoolean("dark", true),
+                favorites = o.optJSONArray("favorites")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
             )
         }.getOrDefault(DesktopSettings())
     }

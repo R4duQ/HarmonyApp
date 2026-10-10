@@ -30,6 +30,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -113,10 +115,10 @@ private fun SearchBox(query: String, onChange: (String) -> Unit) {
 }
 
 /** The first song of each album: stands in for the album's cover. */
-private fun albumCovers(tracks: List<LocalTrack>): Map<String, LocalTrack> =
+internal fun albumCovers(tracks: List<LocalTrack>): Map<String, LocalTrack> =
     tracks.groupBy { it.album + "|" + (it.albumArtist ?: it.artist) }.mapValues { (_, t) -> t.firstOrNull { it.hasCover } ?: t.first() }
 
-private fun albumKey(t: LocalTrack) = t.album + "|" + (t.albumArtist ?: t.artist)
+internal fun albumKey(t: LocalTrack) = t.album + "|" + (t.albumArtist ?: t.artist)
 
 @Composable
 fun SongsPage(
@@ -125,22 +127,29 @@ fun SongsPage(
     filterArtist: String?,
     onOpenAlbum: (String, String) -> Unit,
     onBack: (() -> Unit)? = null,
+    initialQuery: String = "",
+    favoritesOnly: Boolean = false,
 ) {
     val c = LocalHarmonyColors.current
     val all by app.tracks.collectAsState()
     val np by app.player.nowPlaying.collectAsState()
     val settings by app.settingsFlow.collectAsState()
-    var query by remember { mutableStateOf("") }
+    var query by remember(initialQuery) { mutableStateOf(initialQuery) }
     val covers = remember(all) { albumCovers(all) }
-    val shown = remember(all, query, filterArtist) {
-        val base = if (filterArtist == null) all else all.filter { it.artist == filterArtist || it.albumArtist == filterArtist }
+    val favorites = settings.favorites.toSet()
+    val shown = remember(all, query, filterArtist, favoritesOnly, favorites) {
+        val base = when {
+            favoritesOnly -> all.filter { it.path in favorites }
+            filterArtist == null -> all
+            else -> all.filter { it.artist == filterArtist || it.albumArtist == filterArtist }
+        }
         val q = query.trim().lowercase()
         if (q.isEmpty()) base else base.filter { q in it.title.lowercase() || q in it.artist.lowercase() || q in it.album.lowercase() }
     }
     Column(Modifier.fillMaxSize()) {
         PageHeader(
-            title = filterArtist ?: "Songs",
-            subtitle = "${shown.size} songs" + if (filterArtist == null) " · ${settings.folders.size} folder${if (settings.folders.size == 1) "" else "s"}" else "",
+            title = if (favoritesOnly) "Favourites" else filterArtist ?: "Songs",
+            subtitle = "${shown.size} songs" + if (filterArtist == null && !favoritesOnly) " · ${settings.folders.size} folder${if (settings.folders.size == 1) "" else "s"}" else "",
             onBack = onBack,
         ) {
             SearchBox(query) { query = it }
@@ -153,6 +162,10 @@ fun SongsPage(
             ActionButton("Play", Icons.Rounded.PlayArrow, { if (shown.isNotEmpty()) app.player.playLocal(shown, 0) }, primary = true)
         }
         ScanBar(app)
+        if (favoritesOnly && shown.isEmpty() && query.isEmpty()) {
+            EmptyState("No favourites yet", "Tap the heart on a song, here or in the player, and it shows up here.")
+            return@Column
+        }
         if (all.isEmpty() && app.scan.value == null) {
             EmptyState(
                 "Add your music",
@@ -168,6 +181,7 @@ fun SongsPage(
             HeaderCell("TITLE", Modifier.weight(2.2f))
             HeaderCell("ALBUM", Modifier.weight(1.4f))
             HeaderCell("QUALITY", Modifier.width(120.dp))
+            HeaderCell("", Modifier.width(40.dp))
             HeaderCell("TIME", Modifier.width(56.dp))
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp)) {
@@ -175,6 +189,8 @@ fun SongsPage(
                 SongRow(
                     index = i, track = t, cover = covers[albumKey(t)] ?: t, loader = loader,
                     current = np?.key == t.path,
+                    favorite = t.path in favorites,
+                    onFavorite = { app.toggleFavorite(t.path) },
                     onPlay = { app.player.playLocal(shown, i) },
                     onAlbum = { onOpenAlbum(t.album, t.albumArtist ?: t.artist) },
                 )
@@ -189,7 +205,17 @@ private fun HeaderCell(text: String, modifier: Modifier) {
 }
 
 @Composable
-private fun SongRow(index: Int, track: LocalTrack, cover: LocalTrack, loader: ImageLoader, current: Boolean, onPlay: () -> Unit, onAlbum: () -> Unit) {
+private fun SongRow(
+    index: Int,
+    track: LocalTrack,
+    cover: LocalTrack,
+    loader: ImageLoader,
+    current: Boolean,
+    favorite: Boolean,
+    onFavorite: () -> Unit,
+    onPlay: () -> Unit,
+    onAlbum: () -> Unit,
+) {
     val c = LocalHarmonyColors.current
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -228,13 +254,23 @@ private fun SongRow(index: Int, track: LocalTrack, cover: LocalTrack, loader: Im
         Box(Modifier.width(120.dp)) {
             Pill(track.quality, if (track.lossless) Accent.Cyan else c.muted)
         }
+        Box(Modifier.width(40.dp)) {
+            if (favorite || hovered) {
+                Icon(
+                    if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = if (favorite) "Remove from favourites" else "Add to favourites",
+                    tint = if (favorite) Accent.Pink else c.muted,
+                    modifier = Modifier.size(18.dp).clickable(onClick = onFavorite),
+                )
+            }
+        }
         Text(formatTime(track.durationMs), fontSize = 12.sp, color = c.muted, modifier = Modifier.width(56.dp))
     }
 }
 
-private data class AlbumEntry(val album: String, val artist: String, val tracks: List<LocalTrack>, val cover: LocalTrack)
+internal data class AlbumEntry(val album: String, val artist: String, val tracks: List<LocalTrack>, val cover: LocalTrack)
 
-private fun albums(tracks: List<LocalTrack>): List<AlbumEntry> = tracks
+internal fun albums(tracks: List<LocalTrack>): List<AlbumEntry> = tracks
     .groupBy { albumKey(it) }
     .map { (_, t) -> AlbumEntry(t.first().album, t.first().albumArtist ?: t.first().artist, t, t.firstOrNull { it.hasCover } ?: t.first()) }
     .sortedBy { it.album.lowercase() }

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -58,6 +60,8 @@ import androidx.compose.ui.unit.sp
 import com.harmony.desktop.DesktopApp
 
 enum class Section(val label: String, val icon: ImageVector) {
+    HOME("Discover", Icons.Rounded.Explore),
+    FAVORITES("Favourites", Icons.Rounded.Favorite),
     SONGS("Songs", Icons.Rounded.MusicNote),
     ALBUMS("Albums", Icons.Rounded.Album),
     ARTISTS("Artists", Icons.Rounded.Person),
@@ -71,6 +75,7 @@ sealed interface Place {
     data class Top(val section: Section) : Place
     data class AlbumPage(val album: String, val artist: String) : Place
     data class ArtistPage(val artist: String) : Place
+    data class Search(val query: String) : Place
 }
 
 /**
@@ -80,7 +85,7 @@ sealed interface Place {
 fun HarmonyDesktopApp(app: DesktopApp) {
     val settings by app.settingsFlow.collectAsState()
     val loader = remember(app) { ImageLoader(app.covers) }
-    var place by remember { mutableStateOf<Place>(Place.Top(Section.SONGS)) }
+    var place by remember { mutableStateOf<Place>(Place.Top(Section.HOME)) }
     val phone by app.player.phone.collectAsState()
 
     HarmonyTheme(dark = settings.darkTheme) {
@@ -101,15 +106,18 @@ fun HarmonyDesktopApp(app: DesktopApp) {
                     ) { p ->
                         when (p) {
                             is Place.Top -> when (p.section) {
+                                Section.HOME -> HomePage(app, loader, onOpenAlbum = { a, ar -> place = Place.AlbumPage(a, ar) }, onSearch = { place = Place.Search(it) })
+                                Section.FAVORITES -> SongsPage(app, loader, filterArtist = null, onOpenAlbum = { a, ar -> place = Place.AlbumPage(a, ar) }, favoritesOnly = true)
                                 Section.SONGS -> SongsPage(app, loader, filterArtist = null, onOpenAlbum = { a, ar -> place = Place.AlbumPage(a, ar) })
                                 Section.ALBUMS -> AlbumsPage(app, loader, onOpen = { a, ar -> place = Place.AlbumPage(a, ar) })
                                 Section.ARTISTS -> ArtistsPage(app, loader, onOpen = { place = Place.ArtistPage(it) })
-                                Section.NOW_PLAYING -> NowPlayingPage(app, loader)
+                                Section.NOW_PLAYING -> NowPlayingPage(app, loader, onOpenEqualizer = { place = Place.Top(Section.EQUALIZER) })
                                 Section.EQUALIZER -> EqualizerPage(app)
                                 Section.CONNECT -> ConnectPage(app)
                             }
                             is Place.AlbumPage -> AlbumPage(app, loader, p.album, p.artist, onBack = { place = Place.Top(Section.ALBUMS) })
                             is Place.ArtistPage -> SongsPage(app, loader, filterArtist = p.artist, onOpenAlbum = { a, ar -> place = Place.AlbumPage(a, ar) }, onBack = { place = Place.Top(Section.ARTISTS) })
+                            is Place.Search -> SongsPage(app, loader, filterArtist = null, onOpenAlbum = { a, ar -> place = Place.AlbumPage(a, ar) }, onBack = { place = Place.Top(Section.HOME) }, initialQuery = p.query)
                         }
                     }
                 }
@@ -138,8 +146,10 @@ private fun Sidebar(current: Section?, phone: String?, dark: Boolean, onSelect: 
             }
             Text("Harmony", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.padding(start = 10.dp))
         }
-        SectionLabel("LIBRARY")
-        listOf(Section.SONGS, Section.ALBUMS, Section.ARTISTS).forEach { NavItem(it, it == current, onSelect) }
+        NavItem(Section.HOME, Section.HOME == current, onSelect)
+        Spacer(Modifier.height(14.dp))
+        SectionLabel("MUSIC")
+        listOf(Section.SONGS, Section.ALBUMS, Section.ARTISTS, Section.FAVORITES).forEach { NavItem(it, it == current, onSelect) }
         Spacer(Modifier.height(14.dp))
         SectionLabel("PLAYER")
         listOf(Section.NOW_PLAYING, Section.EQUALIZER).forEach { NavItem(it, it == current, onSelect) }
@@ -180,19 +190,19 @@ private fun NavItem(section: Section, selected: Boolean, onSelect: (Section) -> 
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) Brush.horizontalGradient(listOf(Accent.Purple.copy(alpha = 0.32f), Accent.Purple.copy(alpha = 0.08f))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+            .background(if (selected) Brush.horizontalGradient(listOf(Accent.Purple, Color(0xFF9D6BFF))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(role = Role.Tab) { onSelect(section) }
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .testTag("nav_${section.name.lowercase()}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(section.icon, contentDescription = null, tint = if (selected) Accent.PurpleLight else c.muted, modifier = Modifier.size(19.dp))
+        Icon(section.icon, contentDescription = null, tint = if (selected) Color.White else c.muted, modifier = Modifier.size(19.dp))
         Text(
             section.label,
             fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) c.ink else c.ink.copy(alpha = 0.8f),
+            color = if (selected) Color.White else c.ink.copy(alpha = 0.8f),
             modifier = Modifier.padding(start = 12.dp).weight(1f),
         )
         if (badge != null) {
