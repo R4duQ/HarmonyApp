@@ -51,17 +51,26 @@ class UiShots {
         )
     }
 
-    private fun app(eq: EqConfig = EqConfig(), dark: Boolean = true): DesktopApp {
+    private fun app(eq: EqConfig = EqConfig(), dark: Boolean = true, library: List<LocalTrack> = tracks()): DesktopApp {
         val tmp = createTempDir("harmony-ui")
-        LibraryCache(File(tmp, "library.json")).save(tracks())
+        LibraryCache(File(tmp, "library.json")).save(library)
         val store = SettingsStore(File(tmp, "settings.json"))
-        store.update { it.copy(folders = listOf("C:\\Users\\radu\\Music"), pcName = "RADU-DESKTOP", eq = eq, darkTheme = dark, phones = mapOf("t1" to "Pixel 8 Pro")) }
+        store.update {
+            it.copy(
+                folders = listOf("C:\\Users\\radu\\Music"), pcName = "RADU-DESKTOP", eq = eq, darkTheme = dark, phones = mapOf("t1" to "Pixel 8 Pro"),
+                favorites = listOf(library[0].path, library[4].path, library[9].path),
+            )
+        }
+        // A listening history, for Most played and Jump back in.
+        var now = 1_700_000_000_000L
+        val plays = PlayStats(File(tmp, "plays.json")) { now }
+        listOf(0, 0, 0, 0, 0, 4, 4, 4, 4, 9, 9, 9, 13, 13, 2, 2, 7, 11, 18, 22, 25).forEach { now += 60_000; plays.record(library[it].path) }
         val engine = AudioEngine({ CountingSink(realTime = true) })
         val player = PlayerController(engine)
         val udp = DatagramSocket().use { it.localPort }
         val connect = ConnectHost(store.current.pcId, { store.current.pcName }, player, store.current.phones, {}, httpPort = 0, discoveryPort = udp)
         connect.start()
-        return DesktopApp(store, engine, player, connect, LibraryCache(File(tmp, "library.json")), LibraryScanner { null }, CoverCache(File(tmp, "covers")))
+        return DesktopApp(store, engine, player, connect, LibraryCache(File(tmp, "library.json")), LibraryScanner { null }, CoverCache(File(tmp, "covers")), plays)
     }
 
     private fun shot(name: String, app: DesktopApp, nav: String? = null, before: () -> Unit = {}) = runDesktopComposeUiTest(width, height) {
@@ -77,9 +86,46 @@ class UiShots {
         app.close()
     }
 
-    @Test fun songs() = shot("songs", app()) { }
+    @Test fun home() = shot("home", app())
 
-    @Test fun songsLight() = shot("songs-light", app(dark = false))
+    @Test fun homeLight() = shot("home-light", app(dark = false))
+
+    @Test fun songs() = shot("songs", app(), nav = "nav_songs")
+
+    @Test fun songsLight() = shot("songs-light", app(dark = false), nav = "nav_songs")
+
+    @Test fun favourites() = shot("favourites", app(), nav = "nav_favorites")
+
+    /** A real song on disk (made with ffmpeg), so the waveform has a shape. */
+    private fun songOnDisk(): LocalTrack {
+        val file = File(createTempDir("harmony-song"), "Midnight Drive.flac")
+        runCatching {
+            ProcessBuilder(
+                com.harmony.desktop.engine.FfmpegTools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                "-i", "aevalsrc=0.7*sin(2*PI*110*t)*(0.35+0.65*abs(sin(PI*t/37)))*(0.6+0.4*abs(sin(PI*t*1.9))):s=44100:d=226",
+                "-c:a", "flac", file.path,
+            ).inheritIO().start().waitFor()
+        }
+        return tracks()[0].copy(path = file.path, title = "Midnight Drive", artist = "Neon Coast", album = "Chill Vibes", durationMs = 226_000, codec = "flac", sampleRate = 44_100, bitDepth = 16, bitrateKbps = 1411)
+    }
+
+    private fun nowPlayingLocal(name: String, dark: Boolean) {
+        val song = songOnDisk()
+        val library = listOf(song) + tracks().drop(1)
+        val a = app(dark = dark, library = library)
+        a.setVolume(0.62f)
+        a.setEq(EqConfig(enabled = true, bassDb = 2.4f))
+        if (song.path.let(::File).isFile) kotlinx.coroutines.runBlocking { com.harmony.desktop.engine.Waveforms.of(song.path) }
+        shot(name, a, nav = "nav_now_playing") {
+            a.player.playLocal(library, 0)
+            a.player.togglePlay()
+            a.player.seek(84_000)
+        }
+    }
+
+    @Test fun nowPlaying() = nowPlayingLocal("now-playing", dark = true)
+
+    @Test fun nowPlayingLight() = nowPlayingLocal("now-playing-light", dark = false)
 
     @Test fun albums() = shot("albums", app(), nav = "nav_albums")
 

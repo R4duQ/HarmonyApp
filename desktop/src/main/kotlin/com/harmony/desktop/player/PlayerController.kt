@@ -141,6 +141,13 @@ class PlayerController(
         }
     }
 
+    /** Stops: paused, back at the start of the song. */
+    @Synchronized
+    fun stop() {
+        engine.pause()
+        seek(0)
+    }
+
     @Synchronized
     fun next() {
         if (_phone.value != null) {

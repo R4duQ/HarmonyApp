@@ -34,6 +34,7 @@ class DesktopApp(
     private val libraryCache: LibraryCache,
     private val scanner: LibraryScanner,
     val covers: CoverCache,
+    val plays: PlayStats = PlayStats(),
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -48,9 +49,47 @@ class DesktopApp(
 
     private var scanJob: Job? = null
 
+    private val _muted = MutableStateFlow(false)
+    val muted: StateFlow<Boolean> = _muted.asStateFlow()
+
     init {
         engine.volume = settings.current.volume
         engine.eq = settings.current.eq
+        countPlays()
+    }
+
+    /**
+     * A song of the computer's own counts as played once it has played for
+     * half a minute (or to its end, if shorter).
+     */
+    private fun countPlays() {
+        scope.launch {
+            var counted: String? = null
+            while (true) {
+                kotlinx.coroutines.delay(1_000)
+                val np = player.nowPlaying.value
+                if (np == null || np.fromPhone != null) continue
+                if (np.key == counted) continue
+                val playing = engine.state.value.status == com.harmony.desktop.engine.EngineStatus.PLAYING
+                val enough = minOf(PLAYED_AFTER_MS, (np.durationMs - 1_000).coerceAtLeast(1_000))
+                if (playing && engine.positionMs() >= enough) {
+                    counted = np.key
+                    plays.record(np.key)
+                }
+            }
+        }
+    }
+
+    fun isFavorite(path: String): Boolean = path in _settings.value.favorites
+
+    fun toggleFavorite(path: String) = update { s ->
+        s.copy(favorites = if (path in s.favorites) s.favorites - path else s.favorites + path)
+    }
+
+    fun toggleMute() {
+        val m = !_muted.value
+        _muted.value = m
+        player.setVolume(if (m) 0f else settings.current.volume)
     }
 
     fun rescan() {
@@ -82,6 +121,7 @@ class DesktopApp(
     }
 
     fun setVolume(v: Float) {
+        _muted.value = false
         player.setVolume(v)
         update { it.copy(volume = v.coerceIn(0f, 1f)) }
     }
@@ -96,10 +136,13 @@ class DesktopApp(
         connect.close()
         engine.shutdown()
         settings.flush()
+        plays.flush()
         scope.cancel()
     }
 
     companion object {
+        const val PLAYED_AFTER_MS = 30_000L
+
         fun create(): DesktopApp {
             val settings = SettingsStore()
             val engine = AudioEngine()
