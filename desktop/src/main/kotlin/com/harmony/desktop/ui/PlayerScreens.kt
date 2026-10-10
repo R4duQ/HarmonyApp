@@ -86,94 +86,6 @@ import com.harmony.desktop.player.Repeat
 
 private fun EngineStatus.isPlaying() = this == EngineStatus.PLAYING || this == EngineStatus.LOADING
 
-/** The player along the bottom of the window. */
-@Composable
-fun PlayerBar(app: DesktopApp, loader: ImageLoader, onOpenNowPlaying: () -> Unit) {
-    val c = LocalHarmonyColors.current
-    val np by app.player.nowPlaying.collectAsState()
-    val engine by app.player.engineState.collectAsState()
-    val shuffle by app.player.shuffle.collectAsState()
-    val repeat by app.player.repeat.collectAsState()
-    val settings by app.settingsFlow.collectAsState()
-    val playing = engine.status.isPlaying()
-    val position = rememberPosition(playing) { app.player.positionMs() }
-    val song = np
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(104.dp)
-            .background(c.surface)
-            .drawBehind { drawLine(c.line, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f) }
-            .padding(horizontal = 20.dp)
-            .testTag("player_bar"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The song.
-        Row(Modifier.width(320.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button, onClick = onOpenNowPlaying),
-            ) {
-                Disc(song?.art, loader, playing, 72.dp, key = song?.key)
-            }
-            Column(Modifier.padding(start = 14.dp).weight(1f)) {
-                AnimatedContent(
-                    targetState = song,
-                    transitionSpec = { (slideInHorizontally(tween(260)) { it / 4 } + fadeIn(tween(260))).togetherWith(fadeOut(tween(140))) },
-                    contentKey = { it?.key },
-                ) { s ->
-                    Column {
-                        Text(s?.title ?: "Nothing playing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(s?.artist ?: "Pick a song, or play one from your phone", fontSize = 12.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                if (song?.fromPhone != null) {
-                    Pill("FROM ${song.fromPhone.uppercase()}", Accent.PurpleLight, Modifier.padding(top = 6.dp), icon = Icons.Rounded.Cast)
-                }
-            }
-            if (song != null && song.fromPhone == null) {
-                val fav = song.key in settings.favorites
-                RoundButton(
-                    if (fav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    if (fav) "Remove from favourites" else "Add to favourites",
-                    { app.toggleFavorite(song.key) }, size = 34.dp, active = fav,
-                )
-            }
-        }
-        // Controls and the wave.
-        Column(Modifier.weight(1f).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundButton(Icons.Rounded.Shuffle, "Shuffle", app.player::toggleShuffle, size = 36.dp, active = shuffle)
-                RoundButton(Icons.Rounded.SkipPrevious, "Previous", app.player::previous, size = 40.dp)
-                PlayButton(playing, app.player::togglePlay, size = 46.dp)
-                RoundButton(Icons.Rounded.SkipNext, "Next", app.player::next, size = 40.dp)
-                RoundButton(
-                    if (repeat == Repeat.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                    "Repeat", app.player::cycleRepeat, size = 36.dp, active = repeat != Repeat.OFF,
-                )
-            }
-            Row(Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                PositionText(position, 11.sp, c.muted, Modifier.width(44.dp))
-                WaveProgress(position, song?.durationMs ?: 0, playing, c.line, app.player::seek, Modifier.weight(1f).height(22.dp))
-                Text(formatTime(song?.durationMs ?: 0), fontSize = 11.sp, color = c.muted, modifier = Modifier.width(44.dp).padding(start = 8.dp))
-            }
-        }
-        // Volume and quality.
-        Column(Modifier.width(220.dp), horizontalAlignment = Alignment.End) {
-            if (song?.quality != null) Pill(song.quality, Accent.Cyan)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                Icon(Icons.Rounded.VolumeDown, contentDescription = null, tint = c.muted, modifier = Modifier.size(18.dp))
-                var vol by remember { mutableFloatStateOf(settings.volume) }
-                HSlider(vol, { vol = it; app.setVolume(it) }, Modifier.width(140.dp).height(24.dp).padding(horizontal = 4.dp))
-                Icon(Icons.Rounded.VolumeUp, contentDescription = null, tint = c.muted, modifier = Modifier.size(18.dp))
-            }
-            if (engine.status == EngineStatus.ERROR && engine.error != null) {
-                Text(engine.error!!, fontSize = 11.sp, color = Accent.Pink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-    }
-}
-
 /**
  * The song, as a hi-fi: a soft panel with a volume knob and a bass knob either
  * side of the song's waveform and the transport, the progress groove along the
@@ -233,25 +145,7 @@ fun NowPlayingPage(app: DesktopApp, loader: ImageLoader, onOpenEqualizer: () -> 
                         )
                         Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "What's next", tint = c.ink.copy(alpha = 0.7f), modifier = Modifier.padding(start = 10.dp).size(22.dp))
                     }
-                    DropdownMenu(expanded = queueOpen, onDismissRequest = { queueOpen = false }) {
-                        Text("UP NEXT", fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = c.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                        if (song.upNext.isEmpty()) {
-                            DropdownMenuItem(text = { Text("Nothing after this song") }, onClick = { queueOpen = false }, enabled = false)
-                        }
-                        song.upNext.forEach { item ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(item.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(item.artist, fontSize = 12.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                },
-                                leadingIcon = { ArtImage(item.art, loader, RoundedCornerShape(8.dp), Modifier.size(36.dp)) },
-                                enabled = item.queueIndex != null,
-                                onClick = { queueOpen = false; item.queueIndex?.let(app.player::playQueueItem) },
-                            )
-                        }
-                    }
+                    UpNextMenu(song, loader, queueOpen, { queueOpen = false }, onPlay = app.player::playQueueItem)
                 }
                 Spacer(Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -363,35 +257,6 @@ private fun NeuPlay(playing: Boolean, onClick: () -> Unit) {
                 transitionSpec = { (scaleIn(initialScale = 0.5f, animationSpec = tween(180)) + fadeIn(tween(180))).togetherWith(scaleOut(targetScale = 0.5f, animationSpec = tween(120)) + fadeOut(tween(120))) },
             ) { p ->
                 Icon(if (p) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, contentDescription = if (p) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(38.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun UpNextList(song: NowPlaying, loader: ImageLoader, onPlay: (Int?) -> Unit, modifier: Modifier) {
-    val c = LocalHarmonyColors.current
-    if (song.upNext.isEmpty()) return
-    Column(modifier) {
-        Text("UP NEXT", fontSize = 11.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold, color = c.muted)
-        LazyColumn(Modifier.padding(top = 8.dp).height(220.dp)) {
-            itemsIndexed(song.upNext) { i, item ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(enabled = item.queueIndex != null, role = Role.Button) { onPlay(item.queueIndex) }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("${i + 1}", fontSize = 12.sp, color = c.muted, modifier = Modifier.width(22.dp))
-                    ArtImage(item.art, loader, CircleShape, Modifier.size(34.dp))
-                    Column(Modifier.padding(start = 12.dp)) {
-                        Text(item.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(item.artist, fontSize = 12.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
             }
         }
     }

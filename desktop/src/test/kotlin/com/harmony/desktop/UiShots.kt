@@ -144,31 +144,6 @@ class UiShots {
 
     @Test fun equalizer() = shot("equalizer", app(EqConfig(enabled = true, winampGainsDb = listOf(6f, 4f, 2f, 0f, -2f, -1f, 2f, 4f, 5f, 6f), winampPreampDb = -4f, clarity = true)), nav = "nav_equalizer")
 
-    @Test fun discKeepsTurningAfterTheSongChanges() = runDesktopComposeUiTest(200, 200) {
-        mainClock.autoAdvance = false
-        val key = androidx.compose.runtime.mutableStateOf("song-1")
-        val loader = com.harmony.desktop.ui.ImageLoader(CoverCache(createTempDir("covers")))
-        setContent {
-            androidx.compose.foundation.layout.Box(Modifier.testTag("disc")) {
-                com.harmony.desktop.ui.Disc(null, loader, playing = true, size = androidx.compose.ui.unit.Dp(160f), key = key.value)
-            }
-        }
-        fun frame() = onNodeWithTag("disc").captureToImage().toAwtImage().let { img -> IntArray(img.width * img.height) { img.getRGB(it % img.width, it / img.width) } }
-        mainClock.advanceTimeBy(1_000)
-        key.value = "song-2"
-        repeat(30) { mainClock.advanceTimeBy(100) }
-        val a = frame()
-        repeat(10) { mainClock.advanceTimeBy(100) }
-        val b = frame()
-        key.value = "song-3"
-        repeat(30) { mainClock.advanceTimeBy(100) }
-        val c = frame()
-        repeat(10) { mainClock.advanceTimeBy(100) }
-        val d = frame()
-        assertTrue("still turning after the second song", !a.contentEquals(b))
-        assertTrue("and after the third", !c.contentEquals(d))
-    }
-
     @Test fun equalizerLive() {
         // Pink noise through a bass-and-treble curve, so the analyzer has something to show.
         val noise = File(createTempDir("noise"), "pink.wav")
