@@ -130,6 +130,33 @@ jobs:
           if (& $find) { throw 'Harmony is still installed after the uninstall script' }
           Write-Host 'Install and uninstall: OK'
 
+          # A broken install (Windows Installer's cached package and the original .msi gone,
+          # as when the uninstall stops with error 2318 / 1612): the script must still remove it.
+          $copy = Join-Path $env:RUNNER_TEMP 'Harmony-broken.msi'
+          Copy-Item $msi.FullName $copy
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$copy`" /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "second install failed: $($p.ExitCode)" }
+          $code = (& $find).PSChildName
+          $cached = Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem "$($_.PSPath)\Products" -ErrorAction SilentlyContinue } |
+            ForEach-Object { Get-ItemProperty "$($_.PSPath)\InstallProperties" -ErrorAction SilentlyContinue } |
+            Where-Object { $_.DisplayName -eq 'Harmony' } | Select-Object -ExpandProperty LocalPackage
+          Remove-Item $copy, $cached -Force
+          $p = Start-Process msiexec.exe -ArgumentList "/x $code /qn /norestart" -Wait -PassThru
+          Write-Host "Plain uninstall of the broken install: $($p.ExitCode) (expected to fail)"
+          if ($p.ExitCode -eq 0) { throw 'the install was not broken' }
+          cmd /c "echo.| desktop\windows\Dezinstaleaza-Harmony.cmd"
+          if (& $find) { throw 'Harmony is still registered after the script removed a broken install' }
+          if (Test-Path "$env:LOCALAPPDATA\Harmony\Harmony.exe") { throw 'Harmony folder left behind' }
+          if (Get-ChildItem HKCU:\Software\Microsoft\Installer\Products, HKLM:\SOFTWARE\Classes\Installer\Products -ErrorAction SilentlyContinue |
+              Get-ItemProperty -ErrorAction SilentlyContinue | Where-Object { $_.ProductName -eq 'Harmony' }) { throw 'Windows Installer still knows Harmony' }
+          # And the PC takes a fresh install afterwards.
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "install after the forced removal failed: $($p.ExitCode)" }
+          $p = Start-Process msiexec.exe -ArgumentList "/x $((& $find).PSChildName) /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall after the forced removal failed: $($p.ExitCode)" }
+          Write-Host 'Broken install removed by the script, then install and uninstall again: OK'
+
       - uses: actions/upload-artifact@v4
         with:
           name: Harmony-Windows-${{ steps.collect.outputs.version }}
