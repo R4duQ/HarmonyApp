@@ -7,6 +7,7 @@ import com.harmony.core.remote.FileRangeSource
 import com.harmony.core.remote.HttpResponse
 import com.harmony.core.remote.MiniHttpServer
 import com.harmony.core.remote.PlayRequest
+import com.harmony.core.remote.RemoteRepeat
 import com.harmony.core.remote.RemoteRequest
 import com.harmony.core.remote.RemoteState
 import com.harmony.core.remote.RemoteTrack
@@ -20,6 +21,7 @@ import com.harmony.desktop.library.Ffprobe
 import com.harmony.desktop.library.LibraryScanner
 import com.harmony.desktop.library.LocalTrack
 import com.harmony.desktop.player.PlayerController
+import com.harmony.desktop.player.Repeat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -321,6 +323,54 @@ class EngineAndConnectTest {
             // The phone catching up with no length doesn't lose it.
             player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", followUp = true))
             assertEquals(12_000.0, player.nowPlaying.value!!.durationMs.toDouble(), 60.0)
+        } finally {
+            engine.stop()
+            phoneFiles.close()
+        }
+    }
+
+    @Test fun `shuffle and repeat pressed on the computer go to the phone, and its new queue shows`() {
+        val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
+            if (req.path == "/track/7") HttpResponse.ranged(FileRangeSource(quiet), req.header("Range"), "audio/wav") else HttpResponse.text(404, "no")
+        }.start()
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val player = PlayerController(engine)
+        try {
+            val a = RemoteTrack("7", "Tone Song", "Test Artist", "Test Album", 12_000, "http://127.0.0.1:${phoneFiles.boundPort}/track/7")
+            val b = RemoteTrack("8", "B", "X", "Y", 200_000, "")
+            val c = RemoteTrack("9", "C", "X", "Y", 200_000, "")
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", upNext = listOf(b, c), shuffle = false, repeat = RemoteRepeat.OFF))
+            waitFor(what = "playing") { engine.state.value.status == EngineStatus.PLAYING }
+            assertEquals(false, player.shuffle.value)
+            val source = engine.state.value.source
+
+            // Shuffle on the computer: the phone is asked, and the button answers at once.
+            player.toggleShuffle()
+            assertEquals(true, player.shuffle.value)
+            assertEquals(listOf(RemoteRequest.SHUFFLE), player.status().requests)
+            // The phone shuffles its queue and sends the new "up next": it shows, the song carries on.
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", upNext = listOf(c, b), followUp = true, shuffle = true, repeat = RemoteRepeat.OFF))
+            assertEquals(listOf("C", "B"), player.nowPlaying.value?.upNext?.map { it.title })
+            assertEquals(source, engine.state.value.source)
+            assertTrue("not restarted: ${engine.positionMs()}", engine.positionMs() > 0)
+
+            // Repeat likewise.
+            player.cycleRepeat()
+            assertEquals(Repeat.ALL, player.repeat.value)
+            assertEquals(listOf(RemoteRequest.REPEAT), player.status().requests)
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", upNext = listOf(c, b), followUp = true, shuffle = true, repeat = RemoteRepeat.ALL))
+            assertEquals(Repeat.ALL, player.repeat.value)
+
+            // The computer's own modes were left alone, and come back when the phone lets go.
+            player.disconnect("Pixel 8")
+            assertEquals(false, player.shuffle.value)
+            assertEquals(Repeat.OFF, player.repeat.value)
+
+            // A phone that doesn't say its modes: still asked, the buttons stay as they are.
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", upNext = listOf(b, c)))
+            player.toggleShuffle()
+            assertEquals(false, player.shuffle.value)
+            assertEquals(listOf(RemoteRequest.SHUFFLE), player.status().requests)
         } finally {
             engine.stop()
             phoneFiles.close()

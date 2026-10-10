@@ -591,6 +591,31 @@ class SmartQueueCoordinator @Inject constructor(
      * the transport toggle). Any running journey ends without overriding
      * the mode they just chose.
      */
+    /**
+     * The shuffle button: off turns Smart Shuffle on, anything else turns
+     * shuffle off. Also what shuffle pressed on a Harmony Connect computer does.
+     */
+    fun toggleShuffle() {
+        val current = playback.playerState.value.shuffleMode
+        chooseShuffleMode(if (current == ShuffleMode.OFF) ShuffleMode.SMART else ShuffleMode.OFF)
+    }
+
+    /**
+     * Picks a shuffle mode. Ends any running journey FIRST, so the journey's
+     * own teardown can't flip shuffle back on right after the user asked for
+     * Off, and only a real switch INTO Smart Shuffle clears the linear queue:
+     * choosing "Smart" while it is already on (or while a journey hands back
+     * to it) keeps the picks already lined up.
+     */
+    fun chooseShuffleMode(mode: ShuffleMode) {
+        val wasSmart = playback.playerState.value.shuffleMode.let {
+            it == ShuffleMode.SMART || it == ShuffleMode.JOURNEY
+        }
+        onShuffleModeChosen(mode)
+        playback.setShuffleMode(mode)
+        if (mode == ShuffleMode.SMART && !wasSmart) onShuffleActivated()
+    }
+
     fun onShuffleModeChosen(mode: ShuffleMode) {
         if (_journey.value != null && mode != ShuffleMode.JOURNEY) {
             finishJourney(revertToSmart = false)
