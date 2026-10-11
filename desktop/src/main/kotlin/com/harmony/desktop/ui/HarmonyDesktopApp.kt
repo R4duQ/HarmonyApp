@@ -44,6 +44,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -132,81 +140,118 @@ private fun Sidebar(current: Section?, phone: String?, dark: Boolean, onSelect: 
     val c = LocalHarmonyColors.current
     Column(
         Modifier
-            .width(232.dp)
+            .width(240.dp)
             .fillMaxHeight()
             .background(c.sidebar)
-            .padding(horizontal = 14.dp, vertical = 18.dp),
+            .drawBehind { drawLine(c.line, Offset(size.width - 0.5f, 0f), Offset(size.width - 0.5f, size.height), strokeWidth = 1f) }
+            .padding(horizontal = 14.dp, vertical = 20.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, bottom = 22.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp, bottom = 26.dp)) {
             Box(
-                Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(Accent.Purple, Color(0xFF39B9D3)))),
+                Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(Brush.linearGradient(listOf(Color(0xFF9B78FF), Accent.PurpleDeep))),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
             }
-            Text("Harmony", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.padding(start = 10.dp))
+            Text("Harmony", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.padding(start = 11.dp))
         }
         NavItem(Section.HOME, Section.HOME == current, onSelect)
-        Spacer(Modifier.height(14.dp))
-        SectionLabel("MUSIC")
+        SectionLabel("Music")
         listOf(Section.SONGS, Section.ALBUMS, Section.ARTISTS, Section.FAVORITES).forEach { NavItem(it, it == current, onSelect) }
-        Spacer(Modifier.height(14.dp))
-        SectionLabel("PLAYER")
+        SectionLabel("Player")
         listOf(Section.NOW_PLAYING, Section.EQUALIZER).forEach { NavItem(it, it == current, onSelect) }
         NavItem(Section.CONNECT, Section.CONNECT == current, onSelect, badge = phone)
         Spacer(Modifier.weight(1f))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .pointerHoverIcon(PointerIcon.Hand)
-                .clickable(role = Role.Button, onClick = onToggleTheme)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(if (dark) Icons.Rounded.LightMode else Icons.Rounded.DarkMode, contentDescription = null, tint = c.muted, modifier = Modifier.size(18.dp))
-            Text(if (dark) "Light theme" else "Dark theme", fontSize = 13.sp, color = c.muted, modifier = Modifier.padding(start = 10.dp))
-        }
+        ThemeSwitch(dark, onToggleTheme)
     }
 }
 
 @Composable
 private fun SectionLabel(text: String) {
     Text(
-        text,
-        fontSize = 10.sp,
-        letterSpacing = 1.6.sp,
+        text.uppercase(),
+        fontSize = 10.5.sp,
+        letterSpacing = 1.4.sp,
         fontWeight = FontWeight.Bold,
-        color = LocalHarmonyColors.current.muted,
-        modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
+        color = LocalHarmonyColors.current.muted.copy(alpha = 0.8f),
+        modifier = Modifier.padding(start = 12.dp, top = 22.dp, bottom = 6.dp),
     )
 }
 
 @Composable
 private fun NavItem(section: Section, selected: Boolean, onSelect: (Section) -> Unit, badge: String? = null) {
     val c = LocalHarmonyColors.current
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val accent = if (c.dark) Accent.PurpleLight else Accent.Purple
+    val bg by animateColorAsState(
+        when {
+            selected -> Accent.Purple.copy(alpha = if (c.dark) 0.2f else 0.12f)
+            hovered -> c.ink.copy(alpha = 0.05f)
+            else -> Color.Transparent
+        },
+        tween(140),
+    )
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) Brush.horizontalGradient(listOf(Accent.Purple, Color(0xFF9D6BFF))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+            .padding(vertical = 1.dp)
+            .height(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg)
+            .drawBehind {
+                // The selected item's accent bar on the left.
+                if (selected) drawRoundRect(accent, Offset(0f, size.height * 0.25f), Size(3.dp.toPx(), size.height * 0.5f), CornerRadius(2.dp.toPx()))
+            }
+            .hoverable(hover)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(role = Role.Tab) { onSelect(section) }
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .clickable(hover, indication = null, role = Role.Tab) { onSelect(section) }
+            .padding(horizontal = 14.dp)
             .testTag("nav_${section.name.lowercase()}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(section.icon, contentDescription = null, tint = if (selected) Color.White else c.muted, modifier = Modifier.size(19.dp))
+        Icon(section.icon, contentDescription = null, tint = if (selected) accent else c.ink.copy(alpha = if (hovered) 0.9f else 0.6f), modifier = Modifier.size(19.dp))
         Text(
             section.label,
             fontSize = 14.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) Color.White else c.ink.copy(alpha = 0.8f),
-            modifier = Modifier.padding(start = 12.dp).weight(1f),
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) c.ink else c.ink.copy(alpha = if (hovered) 0.95f else 0.75f),
+            modifier = Modifier.padding(start = 13.dp).weight(1f),
         )
         if (badge != null) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF3CDB5A)))
+        }
+    }
+}
+
+/** Light and dark, side by side; the chosen one raised. */
+@Composable
+private fun ThemeSwitch(dark: Boolean, onToggle: () -> Unit) {
+    val c = LocalHarmonyColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.ink.copy(alpha = 0.05f))
+            .padding(4.dp)
+            .testTag("theme_switch"),
+    ) {
+        listOf(false to Icons.Rounded.LightMode, true to Icons.Rounded.DarkMode).forEach { (isDark, icon) ->
+            val chosen = isDark == dark
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (chosen) c.surface else Color.Transparent)
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .clickable(role = Role.Button) { if (!chosen) onToggle() },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, contentDescription = null, tint = if (chosen) c.ink else c.muted, modifier = Modifier.size(16.dp))
+                Text(if (isDark) "Dark" else "Light", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (chosen) c.ink else c.muted, modifier = Modifier.padding(start = 6.dp))
+            }
         }
     }
 }
@@ -221,7 +266,7 @@ fun PageHeader(title: String, subtitle: String?, onBack: (() -> Unit)? = null, a
             Spacer(Modifier.width(14.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1)
+            Text(title, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, maxLines = 1)
             if (subtitle != null) Text(subtitle, fontSize = 13.sp, color = c.muted, modifier = Modifier.padding(top = 2.dp))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { actions() }

@@ -6,6 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +34,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -47,6 +51,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -77,28 +83,54 @@ fun chooseFolder(): File? = runCatching {
     if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
 }.getOrNull()
 
+/** "1 song", "36 songs". */
+internal fun count(n: Int, one: String, many: String = one + "s") = "$n ${if (n == 1) one else many}"
+
+/**
+ * A page's button: [primary] is filled with the accent, the rest are quiet
+ * tonal buttons; both light up under the mouse and give a little when pressed.
+ */
 @Composable
 fun ActionButton(text: String, icon: ImageVector, onClick: () -> Unit, primary: Boolean = false, modifier: Modifier = Modifier) {
     val c = LocalHarmonyColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, tween(100))
+    val shape = RoundedCornerShape(12.dp)
     Row(
         modifier
-            .clip(RoundedCornerShape(50))
-            .background(if (primary) Brush.linearGradient(listOf(Accent.Purple, Accent.PurpleDeep)) else Brush.linearGradient(listOf(c.chip, c.chip)))
+            .height(38.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(shape)
+            .background(
+                if (primary) Brush.linearGradient(if (hovered) listOf(Color(0xFF9473FF), Accent.Purple) else listOf(Accent.Purple, Accent.PurpleDeep))
+                else SolidColor(if (hovered) c.ink.copy(alpha = 0.1f) else c.ink.copy(alpha = 0.06f)),
+            )
+            .then(if (primary) Modifier else Modifier.border(1.dp, c.line, shape))
+            .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 9.dp),
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = if (primary) Color.White else c.ink, modifier = Modifier.size(17.dp))
-        Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (primary) Color.White else c.ink, modifier = Modifier.padding(start = 7.dp))
+        Icon(icon, contentDescription = null, tint = if (primary) Color.White else c.ink.copy(alpha = 0.85f), modifier = Modifier.size(17.dp))
+        Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (primary) Color.White else c.ink, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
 @Composable
 private fun SearchBox(query: String, onChange: (String) -> Unit) {
     val c = LocalHarmonyColors.current
+    var focused by remember { mutableStateOf(false) }
     Row(
-        Modifier.width(260.dp).clip(RoundedCornerShape(50)).background(c.chip).padding(horizontal = 14.dp, vertical = 9.dp),
+        Modifier
+            .width(260.dp)
+            .height(38.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.ink.copy(alpha = 0.05f))
+            .border(1.dp, if (focused) Accent.Purple.copy(alpha = 0.7f) else c.line, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Rounded.Search, contentDescription = null, tint = c.muted, modifier = Modifier.size(17.dp))
@@ -106,9 +138,9 @@ private fun SearchBox(query: String, onChange: (String) -> Unit) {
             if (query.isEmpty()) Text("Search songs, artists, albums", fontSize = 13.sp, color = c.muted)
             BasicTextField(
                 query, onChange, singleLine = true,
-                textStyle = TextStyle(fontSize = 13.sp, color = c.ink),
+                textStyle = TextStyle(fontSize = 13.sp, color = c.ink, fontFamily = Figtree),
                 cursorBrush = SolidColor(Accent.Purple),
-                modifier = Modifier.fillMaxWidth().testTag("search"),
+                modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }.testTag("search"),
             )
         }
     }
@@ -149,7 +181,7 @@ fun SongsPage(
     Column(Modifier.fillMaxSize()) {
         PageHeader(
             title = if (favoritesOnly) "Favourites" else filterArtist ?: "Songs",
-            subtitle = "${shown.size} songs" + if (filterArtist == null && !favoritesOnly) " · ${settings.folders.size} folder${if (settings.folders.size == 1) "" else "s"}" else "",
+            subtitle = count(shown.size, "song") + if (filterArtist == null && !favoritesOnly) " · ${settings.folders.size} folder${if (settings.folders.size == 1) "" else "s"}" else "",
             onBack = onBack,
         ) {
             SearchBox(query) { query = it }
@@ -178,8 +210,8 @@ fun SongsPage(
         // Column titles.
         Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             HeaderCell("#", Modifier.width(44.dp))
-            HeaderCell("TITLE", Modifier.weight(2.2f))
-            HeaderCell("ALBUM", Modifier.weight(1.4f))
+            HeaderCell("TITLE", Modifier.weight(3f))
+            HeaderCell("ALBUM", Modifier.weight(2f))
             HeaderCell("QUALITY", Modifier.width(120.dp))
             HeaderCell("", Modifier.width(40.dp))
             HeaderCell("TIME", Modifier.width(56.dp))
@@ -217,42 +249,46 @@ private fun SongRow(
     onAlbum: () -> Unit,
 ) {
     val c = LocalHarmonyColors.current
+    val accent = if (c.dark) Accent.PurpleLight else Accent.Purple
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(
                 when {
-                    current -> Accent.Purple.copy(alpha = 0.16f)
-                    hovered -> c.ink.copy(alpha = 0.05f)
+                    current -> Accent.Purple.copy(alpha = if (c.dark) 0.14f else 0.09f)
+                    hovered -> c.ink.copy(alpha = 0.045f)
                     else -> Color.Transparent
                 },
             )
             .hoverable(hover)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(role = Role.Button, onClick = onPlay)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(44.dp)) {
-            if (hovered || current) Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Accent.PurpleLight, modifier = Modifier.size(18.dp))
-            else Text("${index + 1}", fontSize = 12.sp, color = c.muted)
+            when {
+                current -> Icon(Icons.Rounded.GraphicEq, contentDescription = "Playing", tint = accent, modifier = Modifier.size(18.dp))
+                hovered -> Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = c.ink, modifier = Modifier.size(18.dp))
+                else -> Text("${index + 1}", fontSize = 13.sp, color = c.muted)
+            }
         }
-        Row(Modifier.weight(2.2f), verticalAlignment = Alignment.CenterVertically) {
-            ArtImage(Art.Local(cover), loader, RoundedCornerShape(8.dp), Modifier.size(40.dp))
-            Column(Modifier.padding(start = 12.dp)) {
-                Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (current) Accent.PurpleLight else c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, fontSize = 12.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.weight(3f), verticalAlignment = Alignment.CenterVertically) {
+            ArtImage(Art.Local(cover), loader, RoundedCornerShape(8.dp), Modifier.size(42.dp))
+            Column(Modifier.padding(start = 14.dp, end = 12.dp)) {
+                Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (current) accent else c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(track.artist, fontSize = 12.5.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 1.dp))
             }
         }
         Text(
-            track.album, fontSize = 13.sp, color = c.ink.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1.4f).padding(end = 12.dp).clickable(onClick = onAlbum),
+            track.album, fontSize = 13.sp, color = c.ink.copy(alpha = if (hovered) 0.9f else 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(2f).padding(end = 12.dp).clickable(onClick = onAlbum),
         )
         Box(Modifier.width(120.dp)) {
-            Pill(track.quality, if (track.lossless) Accent.Cyan else c.muted)
+            QualityTag(track)
         }
         Box(Modifier.width(40.dp)) {
             if (favorite || hovered) {
@@ -264,7 +300,7 @@ private fun SongRow(
                 )
             }
         }
-        Text(formatTime(track.durationMs), fontSize = 12.sp, color = c.muted, modifier = Modifier.width(56.dp))
+        Text(formatTime(track.durationMs), fontSize = 13.sp, color = c.muted, modifier = Modifier.width(56.dp))
     }
 }
 
@@ -281,7 +317,7 @@ fun AlbumsPage(app: DesktopApp, loader: ImageLoader, onOpen: (String, String) ->
     val list = remember(all) { albums(all) }
     val c = LocalHarmonyColors.current
     Column(Modifier.fillMaxSize()) {
-        PageHeader("Albums", "${list.size} albums") {
+        PageHeader("Albums", count(list.size, "album")) {
             ActionButton("Add folder", Icons.Rounded.CreateNewFolder, { chooseFolder()?.let(app::addFolder) })
             ActionButton("Rescan", Icons.Rounded.Refresh, app::rescan)
         }
@@ -293,17 +329,7 @@ fun AlbumsPage(app: DesktopApp, loader: ImageLoader, onOpen: (String, String) ->
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             items(list, key = { it.album + "|" + it.artist }) { a ->
-                Column(
-                    Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(role = Role.Button) { onOpen(a.album, a.artist) }
-                        .padding(6.dp),
-                ) {
-                    ArtImage(Art.Local(a.cover), loader, RoundedCornerShape(16.dp), Modifier.fillMaxWidth().aspectRatio(1f))
-                    Text(a.album, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
-                    Text("${a.artist} · ${a.tracks.size} songs", fontSize = 12.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                AlbumCard(a, loader, onOpen = { onOpen(a.album, a.artist) }, onPlay = { app.player.playLocal(a.tracks, 0) })
             }
         }
     }
@@ -327,7 +353,7 @@ fun AlbumPage(app: DesktopApp, loader: ImageLoader, album: String, artist: Strin
                 Text(artist, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.padding(top = 16.dp))
                 val total = tracks.sumOf { it.durationMs }
                 Text(
-                    listOfNotNull(tracks.firstOrNull()?.year?.toString(), "${tracks.size} songs", formatTime(total)).joinToString(" · "),
+                    listOfNotNull(tracks.firstOrNull()?.year?.toString(), count(tracks.size, "song"), formatTime(total)).joinToString(" · "),
                     fontSize = 13.sp, color = c.muted, modifier = Modifier.padding(top = 4.dp),
                 )
                 tracks.firstOrNull()?.let { Pill(it.quality, if (it.lossless) Accent.Cyan else c.muted, Modifier.padding(top = 10.dp)) }
@@ -388,7 +414,7 @@ fun ArtistsPage(app: DesktopApp, loader: ImageLoader, onOpen: (String) -> Unit) 
                 ) {
                     ArtImage(Art.Local(cover), loader, CircleShape, Modifier.fillMaxWidth().aspectRatio(1f).border(2.dp, Brush.sweepGradient(Accent.Rim), CircleShape))
                     Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
-                    Text("${tracks.size} songs", fontSize = 12.sp, color = c.muted)
+                    Text(count(tracks.size, "song"), fontSize = 12.sp, color = c.muted)
                 }
             }
         }
@@ -408,5 +434,62 @@ fun FolderList(app: DesktopApp) {
         }
         Spacer(Modifier.height(6.dp))
         ActionButton("Add folder", Icons.Rounded.CreateNewFolder, { chooseFolder()?.let(app::addFolder) })
+    }
+}
+
+/**
+ * A song's quality, quietly: hi-res (over 16-bit or 48 kHz) as an accent
+ * badge, other lossless as an outlined one, lossy as plain text.
+ */
+@Composable
+internal fun QualityTag(track: LocalTrack) {
+    val c = LocalHarmonyColors.current
+    val hiRes = track.lossless && ((track.bitDepth ?: 16) > 16 || (track.sampleRate ?: 44_100) > 48_000)
+    val shape = RoundedCornerShape(6.dp)
+    when {
+        hiRes -> Text(
+            track.quality, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = if (c.dark) Accent.Orange else Color(0xFFB4661C),
+            modifier = Modifier.clip(shape).background(Accent.Orange.copy(alpha = 0.14f)).padding(horizontal = 7.dp, vertical = 3.dp),
+        )
+        track.lossless -> Text(
+            track.quality, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = c.ink.copy(alpha = 0.7f),
+            modifier = Modifier.border(1.dp, c.ink.copy(alpha = 0.18f), shape).padding(horizontal = 7.dp, vertical = 3.dp),
+        )
+        else -> Text(track.quality, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = c.muted, modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp))
+    }
+}
+
+/** An album in the grid: the cover lifts a little under the mouse and shows a play button. */
+@Composable
+private fun AlbumCard(a: AlbumEntry, loader: ImageLoader, onOpen: () -> Unit, onPlay: () -> Unit) {
+    val c = LocalHarmonyColors.current
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val lift by animateFloatAsState(if (hovered) 1f else 0f, tween(160))
+    Column(
+        Modifier
+            .hoverable(hover)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(hover, indication = null, role = Role.Button, onClick = onOpen)
+            .padding(4.dp),
+    ) {
+        Box(Modifier.graphicsLayer { translationY = -4.dp.toPx() * lift }) {
+            ArtImage(Art.Local(a.cover), loader, RoundedCornerShape(14.dp), Modifier.fillMaxWidth().aspectRatio(1f))
+            if (lift > 0.01f) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                        .graphicsLayer { alpha = lift; translationY = 8.dp.toPx() * (1 - lift) }
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFF9B78FF), Accent.PurpleDeep)))
+                        .clickable(role = Role.Button, onClickLabel = "Play ${a.album}", onClick = onPlay),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+            }
+        }
+        Text(a.album, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp))
+        Text("${a.artist} · ${count(a.tracks.size, "song")}", fontSize = 12.5.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
     }
 }
