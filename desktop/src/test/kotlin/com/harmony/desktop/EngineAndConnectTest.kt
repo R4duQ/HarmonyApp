@@ -261,7 +261,10 @@ class EngineAndConnectTest {
         waitFor(what = "the second song") { player.index.value == 1 }
         assertEquals("B", player.nowPlaying.value?.title)
         waitFor(what = "the end of the queue") { engine.state.value.status == EngineStatus.ENDED }
+        // The watcher polls on its own thread: let it see the end too before stopping it.
+        waitFor(what = "the watcher to see the end") { synchronized(statuses) { EngineStatus.ENDED in statuses } }
         watcher.interrupt()
+        watcher.join(1_000)
         assertEquals(1, player.index.value)
         // One song straight into the next: no stop, no reload in between, every frame of both.
         assertEquals("statuses $statuses", listOf(EngineStatus.LOADING, EngineStatus.PLAYING, EngineStatus.ENDED), statuses.filter { it != EngineStatus.IDLE })
