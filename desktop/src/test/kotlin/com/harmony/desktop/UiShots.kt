@@ -70,16 +70,21 @@ class UiShots {
         val udp = DatagramSocket().use { it.localPort }
         val connect = ConnectHost(store.current.pcId, { store.current.pcName }, player, store.current.phones, {}, httpPort = 0, discoveryPort = udp)
         connect.start()
-        return DesktopApp(store, engine, player, connect, LibraryCache(File(tmp, "library.json")), LibraryScanner { null }, CoverCache(File(tmp, "covers")), plays)
+        return DesktopApp(store, engine, player, connect, LibraryCache(File(tmp, "library.json")), LibraryScanner { null }, CoverCache(File(tmp, "covers")), plays,
+            outputs = { listOf("Speakers (Realtek(R) Audio)", "Headphones (WH-1000XM4)", "LG ULTRAGEAR (NVIDIA High Definition Audio)") })
     }
 
-    private fun shot(name: String, app: DesktopApp, nav: String? = null, before: () -> Unit = {}) = runDesktopComposeUiTest(width, height) {
+    private fun shot(name: String, app: DesktopApp, nav: String? = null, click: String? = null, before: () -> Unit = {}) = runDesktopComposeUiTest(width, height) {
         mainClock.autoAdvance = false
         before()
         setContent { HarmonyDesktopApp(app) }
         mainClock.advanceTimeBy(800)
         if (nav != null) {
             onNodeWithTag(nav).performSemanticsAction(SemanticsActions.OnClick)
+            repeat(10) { mainClock.advanceTimeBy(300); waitForIdle() }
+        }
+        if (click != null) {
+            onNodeWithTag(click).performSemanticsAction(SemanticsActions.OnClick)
             repeat(10) { mainClock.advanceTimeBy(300); waitForIdle() }
         }
         ImageIO.write(onAllNodes(isRoot())[0].captureToImage().toAwtImage(), "png", File(dir, "$name.png"))
@@ -109,14 +114,15 @@ class UiShots {
         return tracks()[0].copy(path = file.path, title = "Midnight Drive", artist = "Neon Coast", album = "Chill Vibes", durationMs = 226_000, codec = "flac", sampleRate = 44_100, bitDepth = 16, bitrateKbps = 1411)
     }
 
-    private fun nowPlayingLocal(name: String, dark: Boolean) {
+    private fun nowPlayingLocal(name: String, dark: Boolean, click: String? = null) {
         val song = songOnDisk()
         val library = listOf(song) + tracks().drop(1)
         val a = app(dark = dark, library = library)
         a.setVolume(0.62f)
         a.setEq(EqConfig(enabled = true, bassDb = 2.4f))
         if (song.path.let(::File).isFile) kotlinx.coroutines.runBlocking { com.harmony.desktop.engine.Waveforms.of(song.path) }
-        shot(name, a, nav = "nav_now_playing") {
+        if (click == "np_devices") a.setOutputDevice("Headphones (WH-1000XM4)")
+        shot(name, a, nav = "nav_now_playing", click = click) {
             a.player.playLocal(library, 0)
             a.player.togglePlay()
             a.player.seek(84_000)
@@ -127,16 +133,25 @@ class UiShots {
 
     @Test fun nowPlayingLight() = nowPlayingLocal("now-playing-light", dark = false)
 
+    @Test fun devicesPanel() = nowPlayingLocal("now-playing-devices", dark = true, click = "np_devices")
+
+    @Test fun queuePanelLight() = nowPlayingLocal("now-playing-queue-light", dark = false, click = "np_queue")
+
     @Test fun albums() = shot("albums", app(), nav = "nav_albums")
 
-    @Test fun nowPlayingFromPhone() {
+    @Test fun nowPlayingFromPhone() = fromPhone("now-playing-phone")
+
+    @Test fun phoneQueue() = fromPhone("now-playing-phone-queue", click = "np_queue")
+
+    private fun fromPhone(name: String, click: String? = null) {
         val a = app()
-        shot("now-playing-phone", a, nav = "nav_now_playing") {
+        shot(name, a, nav = "nav_now_playing", click = click) {
             a.player.play(
                 PlayRequest(
                     RemoteTrack("1", "Instant Crush", "Daft Punk", "Random Access Memories", 337_000, "http://127.0.0.1:9/none", null, "FLAC 16/44.1"),
                     positionMs = 120_000, playing = false, phoneName = "Pixel 8 Pro",
-                    upNext = listOf(RemoteTrack("2", "Blinding Lights", "The Weeknd", "After Hours", 200_000, "x"), RemoteTrack("3", "Glimpse of Us", "Joji", "Smithereens", 233_000, "y")),
+                    upNext = listOf(RemoteTrack("2", "Blinding Lights", "The Weeknd", "After Hours", 200_000, "x"), RemoteTrack("3", "Glimpse of Us", "Joji", "Smithereens", 233_000, "y")) +
+                        List(8) { RemoteTrack("${10 + it}", titles[it % titles.size], artists[it % artists.size], albums[it % albums.size], 200_000, "") },
                 ),
             )
         }

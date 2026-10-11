@@ -7,6 +7,7 @@ import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.DataLine
 import javax.sound.sampled.SourceDataLine
 
 /** Where ffmpeg and ffprobe are: next to the app (the installer bundles them), or on the PATH. */
@@ -118,14 +119,34 @@ interface PcmSink {
     fun close()
 }
 
-/** The sound card, through Java Sound (DirectSound / WASAPI on Windows). */
-class JavaSoundSink(private val bufferMs: Int = 200) : PcmSink {
+/** The sound outputs Windows offers (speakers, headphones, HDMI...), by name. */
+object AudioOutputs {
+    /** Java Sound's name for whatever Windows has as its default. */
+    private val SYSTEM_DEFAULT = setOf("Primary Sound Driver", "Default Audio Device")
+
+    fun list(): List<String> = runCatching {
+        val info = DataLine.Info(SourceDataLine::class.java, AudioFormat(48_000f, 16, 2, true, false))
+        AudioSystem.getMixerInfo()
+            .filter { mi -> runCatching { AudioSystem.getMixer(mi).isLineSupported(info) }.getOrDefault(false) }
+            .map { it.name }
+            .filter { it !in SYSTEM_DEFAULT }
+            .distinct()
+    }.getOrDefault(emptyList())
+}
+
+/**
+ * The sound card, through Java Sound (DirectSound / WASAPI on Windows): the
+ * output named by [device], or the system's default when it's null or gone.
+ */
+class JavaSoundSink(private val bufferMs: Int = 200, private val device: () -> String? = { null }) : PcmSink {
     private var line: SourceDataLine? = null
     private var frameBytes = 4
 
     override fun open(sampleRate: Int, channels: Int) {
         val format = AudioFormat(sampleRate.toFloat(), 16, channels, true, false)
-        val l = AudioSystem.getSourceDataLine(format)
+        val chosen = device()?.let { name -> AudioSystem.getMixerInfo().firstOrNull { it.name == name } }
+        val l = chosen?.let { runCatching { AudioSystem.getMixer(it).getLine(DataLine.Info(SourceDataLine::class.java, format)) as SourceDataLine }.getOrNull() }
+            ?: AudioSystem.getSourceDataLine(format)
         frameBytes = 2 * channels
         l.open(format, sampleRate * frameBytes * bufferMs / 1000)
         line = l

@@ -33,6 +33,8 @@ data class DesktopSettings(
     val darkTheme: Boolean = true,
     /** Songs marked with the heart: their paths. */
     val favorites: List<String> = emptyList(),
+    /** The sound output chosen by name; null for Windows' default. */
+    val outputDevice: String? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("folders", JSONArray(folders))
@@ -56,6 +58,7 @@ data class DesktopSettings(
         .put("phones", JSONObject(phones))
         .put("dark", darkTheme)
         .put("favorites", JSONArray(favorites))
+        .putOpt("outputDevice", outputDevice)
         .toString(2)
 
     companion object {
@@ -96,6 +99,7 @@ data class DesktopSettings(
                 phones = phones?.keys()?.asSequence()?.associateWith { phones.getString(it) } ?: emptyMap(),
                 darkTheme = o.optBoolean("dark", true),
                 favorites = o.optJSONArray("favorites")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
+                outputDevice = o.optString("outputDevice").takeIf { it.isNotEmpty() },
             )
         }.getOrDefault(DesktopSettings())
     }

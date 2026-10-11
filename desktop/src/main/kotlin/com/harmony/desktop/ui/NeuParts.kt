@@ -96,10 +96,10 @@ fun Modifier.neumorphic(corner: Dp, elevation: Dp = 10.dp, pressed: Boolean = fa
 
 /** A round soft button with an icon; [active] tints it with the accent. */
 @Composable
-fun NeuIconButton(icon: ImageVector, description: String, onClick: () -> Unit, size: Dp = 52.dp, active: Boolean = false, enabled: Boolean = true) {
+fun NeuIconButton(icon: ImageVector, description: String, onClick: () -> Unit, size: Dp = 52.dp, active: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier) {
     val c = LocalHarmonyColors.current
     Box(
-        Modifier
+        modifier
             .size(size)
             .neumorphic(size / 2, elevation = 8.dp, circle = true)
             .then(if (active) Modifier.drawBehind { drawCircle(Accent.Purple, radius = this.size.minDimension / 2 - 1.dp.toPx(), style = Stroke(1.5.dp.toPx())) } else Modifier)

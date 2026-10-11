@@ -111,7 +111,7 @@ fun HarmonyDesktopApp(app: DesktopApp) {
                                 Section.SONGS -> SongsPage(app, loader, filterArtist = null, onOpenAlbum = { a, ar -> place = Place.AlbumPage(a, ar) })
                                 Section.ALBUMS -> AlbumsPage(app, loader, onOpen = { a, ar -> place = Place.AlbumPage(a, ar) })
                                 Section.ARTISTS -> ArtistsPage(app, loader, onOpen = { place = Place.ArtistPage(it) })
-                                Section.NOW_PLAYING -> NowPlayingPage(app, loader, onOpenEqualizer = { place = Place.Top(Section.EQUALIZER) })
+                                Section.NOW_PLAYING -> NowPlayingPage(app, loader, onOpenEqualizer = { place = Place.Top(Section.EQUALIZER) }, onOpenConnect = { place = Place.Top(Section.CONNECT) })
                                 Section.EQUALIZER -> EqualizerPage(app)
                                 Section.CONNECT -> ConnectPage(app)
                             }

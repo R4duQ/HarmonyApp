@@ -536,7 +536,8 @@ class PlayerController(
     }
 
     private companion object {
-        const val UP_NEXT = 8
+        /** What the queue shows after the song playing. */
+        const val UP_NEXT = 30
         const val RESTART_AFTER_MS = 3_000L
         const val MAX_RECOVERIES = 3
         const val RECOVERY_DELAY_MS = 1_500L
