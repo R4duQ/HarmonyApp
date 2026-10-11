@@ -1,12 +1,18 @@
 package com.harmony.desktop.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,8 +36,6 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -68,24 +72,16 @@ private fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit)
     val c = LocalHarmonyColors.current
     Box(
         modifier
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(c.surface)
-            .border(1.dp, c.line, RoundedCornerShape(22.dp))
-            .padding(22.dp),
+            .border(1.dp, c.line, RoundedCornerShape(20.dp))
+            .padding(horizontal = 24.dp, vertical = 22.dp),
     ) { content() }
-}
-
-@Composable
-private fun HarmonySwitch(checked: Boolean, onChange: (Boolean) -> Unit, tag: String) {
-    Switch(
-        checked, onChange,
-        colors = SwitchDefaults.colors(checkedTrackColor = Accent.Purple, checkedThumbColor = Color.White),
-        modifier = Modifier.testTag(tag),
-    )
 }
 
 private val BAND_LABELS = listOf("60", "170", "310", "600", "1K", "3K", "6K", "12K", "14K", "16K")
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EqualizerPage(app: DesktopApp) {
     val c = LocalHarmonyColors.current
@@ -96,43 +92,51 @@ fun EqualizerPage(app: DesktopApp) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageHeader("Equalizer", "Winamp's equalizer, tone, Clarity and even volume: watch it work on the music below") {
             CompareButton(app, eq.enabled)
-            Text(if (eq.enabled) "On" else "Off", fontSize = 14.sp, color = c.muted)
-            HarmonySwitch(eq.enabled, { app.setEq(eq.copy(enabled = it)) }, "eq_on")
+            Row(
+                Modifier
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(c.ink.copy(alpha = 0.06f))
+                    .border(1.dp, c.line, RoundedCornerShape(12.dp))
+                    .padding(start = 14.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (eq.enabled) "Sound shaping on" else "Sound shaping off", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.padding(end = 10.dp))
+                HarmonySwitch(eq.enabled, { app.setEq(eq.copy(enabled = it)) }, Modifier.testTag("eq_on"))
+            }
         }
         Card(Modifier.padding(horizontal = 32.dp).padding(bottom = 18.dp).fillMaxWidth()) {
             EqVisualizer(app, eq, playing)
         }
         Card(Modifier.padding(horizontal = 32.dp).fillMaxWidth()) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("WINAMP", fontSize = 12.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3CDB5A), fontFamily = FontFamily.Monospace)
-                    Spacer(Modifier.weight(1f))
-                    Text("Reset", fontSize = 13.sp, color = Accent.PurpleLight, modifier = Modifier.clickable { app.setEq(eq.copy(winampGainsDb = List(10) { 0f }, winampPreampDb = 0f)) }.padding(6.dp))
+                CardHeader(Icons.Rounded.Equalizer, listOf(Color(0xFF2FCB6B), Color(0xFF1E9E8C)), "Winamp equalizer", "Ten bands and a preamp. Drag a slider; double-click it to centre it.") {
+                    TonalButton("Reset", { app.setEq(eq.copy(winampGainsDb = List(10) { 0f }, winampPreampDb = 0f)) })
                 }
-                Row(Modifier.fillMaxWidth().padding(top = 14.dp).height(250.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 18.dp)
+                        .height(264.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (c.dark) Color(0xFF0E1015) else Color(0xFF1A1C23))
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
                     EqSlider("PRE", eq.winampPreampDb, eq.enabled) { app.setEq(eq.copy(enabled = true, winampPreampDb = it)) }
-                    Box(Modifier.width(1.dp).fillMaxSize().padding(vertical = 20.dp).background(c.line))
+                    Box(Modifier.width(1.dp).fillMaxSize().padding(vertical = 18.dp).background(Color.White.copy(alpha = 0.08f)))
                     BAND_LABELS.forEachIndexed { i, label ->
                         EqSlider(label, eq.winampGainsDb.getOrElse(i) { 0f }, eq.enabled) { v ->
                             app.setEq(eq.copy(enabled = true, winampGainsDb = eq.winampGainsDb.toMutableList().also { it[i] = v }))
                         }
                     }
                 }
-                Text("PRESETS", fontSize = 11.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold, color = c.muted, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("PRESETS", fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, color = c.muted, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     WinampEqDesign.PRESETS.forEach { (name, values) ->
                         val (preamp, gains) = values
                         val on = eq.winampPreampDb == preamp && eq.winampGainsDb == gains
-                        Text(
-                            name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                            color = if (on) Color.White else c.ink,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(if (on) Brush.linearGradient(listOf(Accent.Purple, Accent.PurpleDeep)) else Brush.linearGradient(listOf(c.chip, c.chip)))
-                                .pointerHoverIcon(PointerIcon.Hand)
-                                .clickable(role = Role.Button) { app.setEq(eq.copy(enabled = true, winampPreampDb = preamp, winampGainsDb = gains.toList())) }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                        )
+                        ChoiceChip(name, on, { app.setEq(eq.copy(enabled = true, winampPreampDb = preamp, winampGainsDb = gains.toList())) })
                     }
                 }
             }
@@ -142,41 +146,37 @@ fun EqualizerPage(app: DesktopApp) {
         }
         Card(Modifier.padding(horizontal = 32.dp, vertical = 18.dp).fillMaxWidth()) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Brush.linearGradient(listOf(Color(0xFFB45CFF), Color(0xFFE2BBFF)))), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text("Clarity", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
-                        Text("A model of human hearing brings out what's covered up and holds back what pushes forward.", fontSize = 12.sp, color = c.muted)
-                    }
-                    HarmonySwitch(eq.clarity, { app.setEq(eq.copy(enabled = eq.enabled || it, clarity = it)) }, "clarity_on")
+                CardHeader(Icons.Rounded.AutoAwesome, listOf(Color(0xFFB45CFF), Color(0xFF7C4DFF)), "Clarity", "A model of human hearing brings out what's covered up and holds back what pushes forward.") {
+                    HarmonySwitch(eq.clarity, { app.setEq(eq.copy(enabled = eq.enabled || it, clarity = it)) }, Modifier.padding(start = 12.dp).testTag("clarity_on"))
                 }
                 if (eq.clarity) {
                     val s = eq.claritySettings
-                    Row(Modifier.padding(top = 16.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         val current = ClarityPreset.matching(s)
                         ClarityPreset.entries.forEach { p ->
                             val on = p == current
+                            val accent = if (c.dark) Accent.PurpleLight else Accent.Purple
+                            val shape = RoundedCornerShape(12.dp)
                             Column(
                                 Modifier
-                                    .width(150.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (on) Brush.linearGradient(listOf(Color(0xFFB45CFF), Color(0xFF6A5CFF))) else Brush.linearGradient(listOf(c.chip, c.chip)))
+                                    .width(160.dp)
+                                    .clip(shape)
+                                    .background(if (on) Accent.Purple.copy(alpha = if (c.dark) 0.18f else 0.1f) else c.ink.copy(alpha = 0.045f))
+                                    .border(1.dp, if (on) Accent.Purple.copy(alpha = 0.55f) else Color.Transparent, shape)
                                     .pointerHoverIcon(PointerIcon.Hand)
                                     .clickable(role = Role.Button) { app.setEq(eq.copy(claritySettings = p.settings.copy(boostDb = s.boostDb))) }
                                     .padding(12.dp),
                             ) {
-                                Text(p.label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (on) Color.White else c.ink)
-                                Text(p.blurb, fontSize = 11.sp, color = if (on) Color.White.copy(alpha = 0.8f) else c.muted, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text(p.label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (on) accent else c.ink)
+                                Text(p.blurb, fontSize = 11.5.sp, color = c.muted, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                             }
                         }
                     }
-                    ClarityControl("Recover", "${(s.recover * 100).roundToInt()}%", s.recover, 0f..1f, false, listOf(Accent.Cyan.copy(alpha = 0.6f), Accent.Cyan)) { app.setEq(eq.copy(claritySettings = s.copy(recover = it))) }
-                    ClarityControl("Tame", "${(s.tame * 100).roundToInt()}%", s.tame, 0f..1f, false, listOf(Accent.Pink.copy(alpha = 0.6f), Accent.Pink)) { app.setEq(eq.copy(claritySettings = s.copy(tame = it))) }
-                    ClarityControl("Bias", lean(s.bias, "Even", "Tame", "Recover"), s.bias, -1f..1f, true, listOf(Accent.Pink, Accent.Cyan)) { app.setEq(eq.copy(claritySettings = s.copy(bias = it))) }
-                    ClarityControl("Brighten", lean(s.brighten, "Neutral", "Darker", "Brighter"), s.brighten, -1f..1f, true, listOf(Color(0xFFFF7A2E), Color(0xFFFFE066))) { app.setEq(eq.copy(claritySettings = s.copy(brighten = it))) }
-                    ClarityControl("Boost", "%+.1f dB".format(s.boostDb), s.boostDb, -ClaritySettings.MAX_BOOST_DB..ClaritySettings.MAX_BOOST_DB, true, listOf(Color(0xFFB45CFF), Color(0xFFE2BBFF))) { v ->
+                    ClarityControl("Recover", "${(s.recover * 100).roundToInt()}%", s.recover, 0f..1f, false) { app.setEq(eq.copy(claritySettings = s.copy(recover = it))) }
+                    ClarityControl("Tame", "${(s.tame * 100).roundToInt()}%", s.tame, 0f..1f, false) { app.setEq(eq.copy(claritySettings = s.copy(tame = it))) }
+                    ClarityControl("Bias", lean(s.bias, "Even", "Tame", "Recover"), s.bias, -1f..1f, true) { app.setEq(eq.copy(claritySettings = s.copy(bias = it))) }
+                    ClarityControl("Brighten", lean(s.brighten, "Neutral", "Darker", "Brighter"), s.brighten, -1f..1f, true) { app.setEq(eq.copy(claritySettings = s.copy(brighten = it))) }
+                    ClarityControl("Boost", "%+.1f dB".format(s.boostDb), s.boostDb, -ClaritySettings.MAX_BOOST_DB..ClaritySettings.MAX_BOOST_DB, true) { v ->
                         app.setEq(eq.copy(claritySettings = s.copy(boostDb = (v * 2).roundToInt() / 2f)))
                     }
                 }
@@ -184,11 +184,8 @@ fun EqualizerPage(app: DesktopApp) {
         }
         Card(Modifier.padding(start = 32.dp, end = 32.dp, bottom = 28.dp).fillMaxWidth()) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Folder, contentDescription = null, tint = Accent.PurpleLight)
-                    Text("Music folders", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.padding(start = 10.dp))
-                }
-                Spacer(Modifier.height(10.dp))
+                CardHeader(Icons.Rounded.Folder, listOf(Color(0xFF5B8DEF), Color(0xFF7C4DFF)), "Music folders", "Where Harmony looks for your songs.")
+                Spacer(Modifier.height(12.dp))
                 FolderList(app)
             }
         }
@@ -205,28 +202,38 @@ private fun lean(v: Float, even: String, below: String, above: String): String {
 }
 
 @Composable
-private fun ClarityControl(title: String, value: String, v: Float, range: ClosedFloatingPointRange<Float>, bipolar: Boolean, colors: List<Color>, onChange: (Float) -> Unit) {
+private fun ClarityControl(title: String, value: String, v: Float, range: ClosedFloatingPointRange<Float>, bipolar: Boolean, onChange: (Float) -> Unit) {
     val c = LocalHarmonyColors.current
     Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.width(110.dp))
-        HSlider(v, { onChange((it * 100).roundToInt() / 100f) }, Modifier.weight(1f).height(28.dp), range, colors, bipolar)
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.last(), modifier = Modifier.width(110.dp).padding(start = 14.dp))
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.width(120.dp))
+        HSlider(v, { onChange((it * 100).roundToInt() / 100f) }, Modifier.weight(1f).height(28.dp), range, listOf(Accent.Purple, Accent.PurpleLight), bipolar)
+        ValueChip(value, Modifier.padding(start = 14.dp).width(110.dp))
     }
 }
 
-/** A Winamp slider: an LED ladder lighting green to red, dB on top, the band underneath. */
+/**
+ * A Winamp slider on its dark panel: a ladder of LEDs lighting green to red
+ * from the middle, a metal cap to drag, dB on top and the band underneath.
+ */
 @Composable
 private fun EqSlider(label: String, value: Float, lit: Boolean, onChange: (Float) -> Unit) {
-    val c = LocalHarmonyColors.current
     val change by rememberUpdatedState(onChange)
     val max = WinampEqDesign.MAX_DB
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val green = Color(0xFF3CDB5A)
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(48.dp)) {
-        Text(if (value > 0) "+${value.roundToInt()}" else "${value.roundToInt()}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = if (lit) Color(0xFF3CDB5A) else c.muted)
+        Text(
+            if (value > 0) "+${value.roundToInt()}" else "${value.roundToInt()}",
+            fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold,
+            color = if (lit) green else Color.White.copy(alpha = 0.35f),
+        )
         Canvas(
             Modifier
                 .weight(1f)
-                .width(34.dp)
-                .padding(vertical = 6.dp)
+                .width(36.dp)
+                .padding(vertical = 8.dp)
+                .hoverable(hover)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .pointerInput(Unit) {
                     fun at(y: Float) = ((1f - (y / size.height)) * 2f - 1f).coerceIn(-1f, 1f) * max
@@ -240,10 +247,10 @@ private fun EqSlider(label: String, value: Float, lit: Boolean, onChange: (Float
                     }
                 },
         ) {
-            val cells = 20
+            val cells = 24
             val cellH = size.height / cells
             val cx = size.width / 2
-            val w = size.width * 0.42f
+            val w = size.width * 0.34f
             val t = value / max
             val valueY = size.height * (1f - (t + 1f) / 2f)
             val centre = size.height / 2
@@ -253,17 +260,31 @@ private fun EqSlider(label: String, value: Float, lit: Boolean, onChange: (Float
                 val level = 1f - mid / size.height * 2f
                 val on = lit && ((valueY <= mid && mid <= centre) || (centre <= mid && mid <= valueY))
                 val color = when {
-                    level > 0.6f -> Color(0xFFFF4D4D)
-                    level > 0.2f -> Color(0xFFF2D21B)
-                    else -> Color(0xFF3CDB5A)
+                    kotlin.math.abs(level) > 0.66f -> Color(0xFFFF5252)
+                    kotlin.math.abs(level) > 0.3f -> Color(0xFFF5D547)
+                    else -> green
                 }
-                drawRoundRect(if (on) color else c.ink.copy(alpha = 0.06f), Offset(cx - w / 2, top + 1.5f), Size(w, cellH - 3f), CornerRadius(2f))
+                drawRoundRect(
+                    if (on) color else Color.White.copy(alpha = 0.06f),
+                    Offset(cx - w / 2, top + 1.5f), Size(w, cellH - 3f), CornerRadius(1.5.dp.toPx()),
+                )
             }
-            drawLine(c.muted, Offset(cx - w, centre), Offset(cx + w, centre), strokeWidth = 1.5f)
-            drawRoundRect(Color(0xFFD7D9E0), Offset(cx - size.width * 0.38f, valueY - 6.dp.toPx()), Size(size.width * 0.76f, 12.dp.toPx()), CornerRadius(4.dp.toPx()))
-            drawRoundRect(Color(0xFF8A8F9C), Offset(cx - size.width * 0.38f, valueY - 6.dp.toPx()), Size(size.width * 0.76f, 12.dp.toPx()), CornerRadius(4.dp.toPx()), style = Stroke(1f))
+            // 0 dB.
+            drawLine(Color.White.copy(alpha = 0.3f), Offset(cx - w * 1.15f, centre), Offset(cx + w * 1.15f, centre), strokeWidth = 1.dp.toPx())
+            // The cap: a shadow, a brushed-metal face, a groove across.
+            val capW = size.width * 0.8f
+            val capH = 13.dp.toPx()
+            val left = cx - capW / 2
+            val top = valueY - capH / 2
+            drawRoundRect(Color.Black.copy(alpha = 0.45f), Offset(left, top + 2.dp.toPx()), Size(capW, capH), CornerRadius(4.dp.toPx()))
+            drawRoundRect(
+                Brush.verticalGradient(listOf(Color(0xFFF7F8FB), Color(0xFFC9CDD6), Color(0xFFE3E6EC)), startY = top, endY = top + capH),
+                Offset(left, top), Size(capW, capH), CornerRadius(4.dp.toPx()),
+            )
+            drawLine(Color(0xFF7D8290), Offset(left + 4.dp.toPx(), valueY), Offset(left + capW - 4.dp.toPx(), valueY), strokeWidth = 1.5.dp.toPx())
+            if (hovered) drawRoundRect(Accent.PurpleLight, Offset(left, top), Size(capW, capH), CornerRadius(4.dp.toPx()), style = Stroke(1.5.dp.toPx()))
         }
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.muted)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.55f))
     }
 }
 
