@@ -2,6 +2,7 @@ package com.harmony.desktop.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,8 +21,6 @@ import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -123,17 +122,26 @@ fun EqVisualizer(app: DesktopApp, eq: EqConfig, playing: Boolean) {
     val measurer = rememberTextMeasurer()
     val labelStyle = TextStyle(fontSize = 10.sp, color = c.muted)
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = Accent.PurpleLight, modifier = Modifier.size(20.dp))
-            Text("Live", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.padding(start = 8.dp))
-            Spacer(Modifier.weight(1f))
-            Legend(Brush.verticalGradient(listOf(Accent.Purple, Color(0xFF39B9D3))), "The music now")
+        CardHeader(
+            Icons.Rounded.GraphicEq, listOf(Accent.Purple, Color(0xFF39B9D3)), "Live",
+            if (playing) "What you hear, before and after the sound shaping" else "Play a song to see it here, before and after the sound shaping",
+        ) {
+            Legend(Brush.verticalGradient(listOf(Accent.PurpleLight, Color(0xFF39B9D3))), "The music now")
             Spacer(Modifier.width(16.dp))
-            Legend(Brush.linearGradient(listOf(c.ink.copy(alpha = 0.5f), c.ink.copy(alpha = 0.5f))), "Without the equalizer")
+            Legend(Brush.linearGradient(listOf(c.ink.copy(alpha = 0.45f), c.ink.copy(alpha = 0.45f))), "Without")
             Spacer(Modifier.width(16.dp))
             Legend(Brush.horizontalGradient(listOf(Accent.Orange, Accent.Pink)), "Your curve")
         }
-        Canvas(Modifier.fillMaxWidth().height(230.dp).padding(top = 12.dp).testTag("eq_visualizer")) {
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+                .height(236.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(c.ink.copy(alpha = if (c.dark) 0.025f else 0.03f))
+                .padding(start = 36.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)
+                .testTag("eq_visualizer"),
+        ) {
             frame.intValue // redraws with each analyzer frame
             val w = size.width
             val labelH = 16.dp.toPx()
@@ -149,22 +157,30 @@ fun EqVisualizer(app: DesktopApp, eq: EqConfig, playing: Boolean) {
                 val layout = measurer.measure(label, labelStyle)
                 drawText(layout, topLeft = Offset(x - layout.size.width / 2f, h + 3.dp.toPx()))
             }
-            drawLine(c.muted.copy(alpha = 0.5f), Offset(0f, h / 2), Offset(w, h / 2), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+            // The curve's scale: 0 dB dashed, ±10 and ±20 faint, labelled on the left.
+            for (db in listOf(-20, -10, 0, 10, 20)) {
+                val y = curveY(db.toFloat())
+                if (db == 0) drawLine(c.muted.copy(alpha = 0.45f), Offset(0f, y), Offset(w, y), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+                else drawLine(c.line, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+                val text = if (db > 0) "+$db" else "$db"
+                val layout = measurer.measure(text, labelStyle)
+                drawText(layout, topLeft = Offset(-layout.size.width - 8.dp.toPx(), y - layout.size.height / 2f))
+            }
 
             // The music after the equalizer: bars, with peaks.
-            val gap = 2f
+            val gap = 3f
             for (b in 0 until bands) {
                 val x0 = xOf(SpectrumTap.LOW_HZ * (SpectrumTap.HIGH_HZ / SpectrumTap.LOW_HZ).pow(b.toDouble() / bands), w)
                 val x1 = xOf(SpectrumTap.LOW_HZ * (SpectrumTap.HIGH_HZ / SpectrumTap.LOW_HZ).pow((b + 1.0) / bands), w)
                 val top = specY(after[b])
                 if (top < h - 0.5f) {
                     drawRoundRect(
-                        Brush.verticalGradient(listOf(Accent.Purple, Color(0xFF39B9D3).copy(alpha = 0.75f)), startY = 0f, endY = h),
-                        topLeft = Offset(x0 + gap / 2, top), size = Size((x1 - x0 - gap).coerceAtLeast(1f), h - top), cornerRadius = CornerRadius(2f),
+                        Brush.verticalGradient(listOf(Accent.PurpleLight.copy(alpha = 0.95f), Accent.Purple.copy(alpha = 0.7f), Color(0xFF39B9D3).copy(alpha = 0.18f)), startY = 0f, endY = h),
+                        topLeft = Offset(x0 + gap / 2, top), size = Size((x1 - x0 - gap).coerceAtLeast(1f), h - top), cornerRadius = CornerRadius(3f),
                     )
                 }
                 val py = specY(peaks[b])
-                if (py < h - 1f) drawLine(Color.White.copy(alpha = 0.7f), Offset(x0 + gap / 2, py), Offset(x1 - gap / 2, py), strokeWidth = 2f)
+                if (py < h - 1f) drawLine(c.ink.copy(alpha = 0.55f), Offset(x0 + gap / 2, py), Offset(x1 - gap / 2, py), strokeWidth = 2f, cap = StrokeCap.Round)
             }
 
             // How it came in.
@@ -174,7 +190,7 @@ fun EqVisualizer(app: DesktopApp, eq: EqConfig, playing: Boolean) {
                 val y = specY(before[b])
                 if (b == 0) line.moveTo(x, y) else line.lineTo(x, y)
             }
-            drawPath(line, c.ink.copy(alpha = 0.5f), style = Stroke(1.5.dp.toPx()))
+            drawPath(line, c.ink.copy(alpha = 0.4f), style = Stroke(1.25.dp.toPx()))
 
             // The curve.
             val path = Path()
@@ -186,23 +202,10 @@ fun EqVisualizer(app: DesktopApp, eq: EqConfig, playing: Boolean) {
             }
             fill.lineTo(w, h / 2)
             fill.close()
-            drawPath(fill, Brush.horizontalGradient(listOf(Accent.Orange.copy(alpha = 0.16f), Accent.Pink.copy(alpha = 0.16f))))
-            drawPath(path, Brush.horizontalGradient(listOf(Accent.Orange, Accent.Pink)), style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
-            // The curve's scale, on a chip so it reads over the bars.
-            for ((text, top) in listOf("+${CURVE_DB.roundToInt()} dB" to true, "-${CURVE_DB.roundToInt()} dB" to false)) {
-                val layout = measurer.measure(text, labelStyle.copy(color = Accent.Orange))
-                val pad = 4.dp.toPx()
-                val x = w - layout.size.width - 3 * pad
-                val y = if (top) pad else h - layout.size.height - 3 * pad
-                drawRoundRect(c.surface.copy(alpha = 0.85f), Offset(x - pad, y - pad / 2), Size(layout.size.width + 2 * pad, layout.size.height + pad), CornerRadius(pad))
-                drawText(layout, topLeft = Offset(x, y))
-            }
-        }
-        if (!playing) {
-            Text(
-                "Play a song to see the music here, before and after the equalizer.",
-                fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 6.dp),
-            )
+            drawPath(fill, Brush.horizontalGradient(listOf(Accent.Orange.copy(alpha = 0.1f), Accent.Pink.copy(alpha = 0.1f))))
+            // A soft glow under the curve, then the line.
+            drawPath(path, Brush.horizontalGradient(listOf(Accent.Orange.copy(alpha = 0.18f), Accent.Pink.copy(alpha = 0.18f))), style = Stroke(9.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, Brush.horizontalGradient(listOf(Accent.Orange, Accent.Pink)), style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
         }
     }
 }
@@ -223,8 +226,10 @@ fun CompareButton(app: DesktopApp, enabled: Boolean) {
     var held by remember { mutableStateOf(false) }
     Row(
         Modifier
-            .clip(RoundedCornerShape(50))
-            .background(if (held) Accent.Pink.copy(alpha = 0.22f) else c.chip)
+            .height(38.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (held) Accent.Pink.copy(alpha = 0.2f) else c.ink.copy(alpha = 0.06f))
+            .border(1.dp, if (held) Accent.Pink.copy(alpha = 0.6f) else c.line, RoundedCornerShape(12.dp))
             .pointerHoverIcon(PointerIcon.Hand)
             .pointerInput(enabled) {
                 detectTapGestures(onPress = {
@@ -239,7 +244,7 @@ fun CompareButton(app: DesktopApp, enabled: Boolean) {
                     }
                 })
             }
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp)
             .testTag("eq_compare"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -258,30 +263,14 @@ fun CompareButton(app: DesktopApp, enabled: Boolean) {
 fun ToneCard(app: DesktopApp, eq: EqConfig) {
     val c = LocalHarmonyColors.current
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Brush.linearGradient(listOf(Accent.Orange, Accent.Pink))),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.Tune, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-            Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                Text("Tone", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
-                Text("Deep bass and clear highs at a turn, how wide the stereo sounds, and songs at an even volume.", fontSize = 12.sp, color = c.muted)
-            }
-            Text(
-                "Reset", fontSize = 13.sp, color = Accent.PurpleLight,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .pointerInput(eq) { detectTapGestures { app.setEq(eq.copy(bassDb = 0f, trebleDb = 0f, width = 1f)) } }
-                    .padding(6.dp),
-            )
+        CardHeader(Icons.Rounded.Tune, listOf(Accent.Orange, Accent.Pink), "Tone", "Deep bass and clear highs at a turn, how wide the stereo sounds, and songs at an even volume.") {
+            TonalButton("Reset", { app.setEq(eq.copy(bassDb = 0f, trebleDb = 0f, width = 1f)) }, Modifier.padding(start = 12.dp))
         }
-        ToneSlider("Bass", "%+.1f dB".format(eq.bassDb), eq.bassDb, -ToneDesign.MAX_DB..ToneDesign.MAX_DB, listOf(Accent.Purple, Accent.Orange), "tone_bass") {
+        Spacer(Modifier.height(6.dp))
+        ToneSlider("Bass", "%+.1f dB".format(eq.bassDb), eq.bassDb, -ToneDesign.MAX_DB..ToneDesign.MAX_DB, "tone_bass") {
             app.setEq(eq.copy(enabled = true, bassDb = (it * 2).roundToInt() / 2f))
         }
-        ToneSlider("Treble", "%+.1f dB".format(eq.trebleDb), eq.trebleDb, -ToneDesign.MAX_DB..ToneDesign.MAX_DB, listOf(Color(0xFF39B9D3), Color(0xFFFFE066)), "tone_treble") {
+        ToneSlider("Treble", "%+.1f dB".format(eq.trebleDb), eq.trebleDb, -ToneDesign.MAX_DB..ToneDesign.MAX_DB, "tone_treble") {
             app.setEq(eq.copy(enabled = true, trebleDb = (it * 2).roundToInt() / 2f))
         }
         ToneSlider(
@@ -290,19 +279,23 @@ fun ToneCard(app: DesktopApp, eq: EqConfig) {
                 eq.width <= 0.005f -> "Mono"
                 else -> "${(eq.width * 100).roundToInt()}%"
             },
-            eq.width, 0f..2f, listOf(Accent.Pink, Accent.Cyan), "tone_width",
+            eq.width, 0f..2f, "tone_width",
         ) { app.setEq(eq.copy(enabled = true, width = (it * 20).roundToInt() / 20f)) }
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 18.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(c.ink.copy(alpha = 0.035f))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f)) {
                 Text("Even volume", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink)
                 Text("Brings quiet songs up and loud ones down, slowly, so you don't reach for the volume.", fontSize = 12.sp, color = c.muted)
             }
             if (eq.leveling && eq.enabled) LevelingReadout(app)
-            Switch(
-                eq.leveling, { app.setEq(eq.copy(enabled = eq.enabled || it, leveling = it)) },
-                colors = SwitchDefaults.colors(checkedTrackColor = Accent.Purple, checkedThumbColor = Color.White),
-                modifier = Modifier.padding(start = 12.dp).testTag("tone_leveling"),
-            )
+            HarmonySwitch(eq.leveling, { app.setEq(eq.copy(enabled = eq.enabled || it, leveling = it)) }, Modifier.padding(start = 14.dp).testTag("tone_leveling"))
         }
     }
 }
@@ -316,12 +309,12 @@ private fun LevelingReadout(app: DesktopApp) {
         while (true) withFrameMillis { now -> if (now - last >= 400) { last = now; db = app.engine.levelingDb } }
     }
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(c.chip).padding(horizontal = 10.dp, vertical = 4.dp),
+        Modifier.clip(RoundedCornerShape(8.dp)).background(Accent.Cyan.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(Accent.Cyan))
-        Text("now %+.1f dB".format(db), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Accent.Cyan)
+        Text("now %+.1f dB".format(db), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (c.dark) Accent.Cyan else Color(0xFF0E7C93))
     }
 }
 
@@ -331,14 +324,13 @@ private fun ToneSlider(
     value: String,
     v: Float,
     range: ClosedFloatingPointRange<Float>,
-    colors: List<Color>,
     tag: String,
     onChange: (Float) -> Unit,
 ) {
     val c = LocalHarmonyColors.current
     Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.width(110.dp))
-        HSlider(v, onChange, Modifier.weight(1f).height(28.dp).testTag(tag), range, colors, bipolar = true)
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.last(), modifier = Modifier.width(110.dp).padding(start = 14.dp))
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.width(120.dp))
+        HSlider(v, onChange, Modifier.weight(1f).height(28.dp).testTag(tag), range, listOf(Accent.Purple, Accent.PurpleLight), bipolar = true)
+        ValueChip(value, Modifier.padding(start = 14.dp).width(110.dp))
     }
 }

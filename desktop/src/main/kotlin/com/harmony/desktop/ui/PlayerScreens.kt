@@ -7,8 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Headphones
@@ -25,7 +23,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.ui.text.font.FontFamily
 import com.harmony.desktop.engine.ToneDesign
 import kotlin.math.roundToInt
 import androidx.compose.animation.slideOutHorizontally
@@ -34,6 +31,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,6 +63,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -117,7 +121,21 @@ fun NowPlayingPage(app: DesktopApp, loader: ImageLoader, onOpenEqualizer: () -> 
     var panel by remember { mutableStateOf(initialPanel) }
     fun toggle(p: NowPlayingPanel) { panel = if (panel == p) null else p }
     Box(Modifier.fillMaxSize().background(c.neu)) {
-        Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    // A soft accent glow behind the panel.
+                    drawCircle(
+                        Brush.radialGradient(listOf(Accent.Purple.copy(alpha = if (c.dark) 0.10f else 0.07f), Color.Transparent), center = Offset(size.width / 2, size.height * 0.45f), radius = size.minDimension * 0.75f),
+                        radius = size.minDimension * 0.75f, center = Offset(size.width / 2, size.height * 0.45f),
+                    )
+                }
+                .padding(28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            // The knobs grow with the window, within reason.
+            val knob = (maxHeight * 0.34f).coerceIn(200.dp, 290.dp)
             Column(
                 Modifier
                     .widthIn(max = 1180.dp)
@@ -154,7 +172,7 @@ fun NowPlayingPage(app: DesktopApp, loader: ImageLoader, onOpenEqualizer: () -> 
                         onChange = { app.setVolume((it * 100).roundToInt() / 100f) },
                         icon = Icons.Rounded.MusicNote, label = "Volume",
                         readout = if (muted) "Muted" else percent(settings.volume),
-                        modifier = Modifier.testTag("knob_volume"),
+                        modifier = Modifier.testTag("knob_volume"), size = knob,
                     )
                     Column(Modifier.weight(1f).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         AnimatedContent(
@@ -163,19 +181,19 @@ fun NowPlayingPage(app: DesktopApp, loader: ImageLoader, onOpenEqualizer: () -> 
                             transitionSpec = { (fadeIn(tween(300)) + slideInHorizontally(tween(300)) { it / 6 }).togetherWith(fadeOut(tween(150))) },
                         ) { s ->
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(s.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(s.title, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    s.artist, fontSize = 13.sp, letterSpacing = 4.sp, fontFamily = FontFamily.Monospace, color = c.ink.copy(alpha = 0.75f),
+                                    s.artist.uppercase(), fontSize = 13.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold, color = c.ink.copy(alpha = 0.6f),
                                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp),
                                 )
                             }
                         }
                         if (song.quality != null) Pill(song.quality, Accent.Purple, Modifier.padding(top = 10.dp))
-                        WaveformBars(bars, position, song.durationMs, app.player::seek, Modifier.padding(top = 22.dp).widthIn(max = 420.dp).fillMaxWidth().height(76.dp))
+                        WaveformBars(bars, position, song.durationMs, app.player::seek, Modifier.padding(top = 26.dp).widthIn(max = 460.dp).fillMaxWidth().height(80.dp))
                         Row(Modifier.padding(top = 26.dp), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                            NeuTransport(Icons.Rounded.ChevronLeft, "Previous", app.player::previous, 54.dp)
+                            NeuTransport(Icons.Rounded.SkipPrevious, "Previous", app.player::previous, 62.dp)
                             NeuPlay(playing, app.player::togglePlay)
-                            NeuTransport(Icons.Rounded.ChevronRight, "Next", app.player::next, 54.dp)
+                            NeuTransport(Icons.Rounded.SkipNext, "Next", app.player::next, 62.dp)
                         }
                     }
                     val bass = if (eq.enabled) (eq.bassDb / ToneDesign.MAX_DB).coerceIn(0f, 1f) else 0f
@@ -183,7 +201,7 @@ fun NowPlayingPage(app: DesktopApp, loader: ImageLoader, onOpenEqualizer: () -> 
                         value = bass,
                         onChange = { v -> app.setEq(eq.copy(enabled = true, bassDb = ((v * ToneDesign.MAX_DB) * 2).roundToInt() / 2f)) },
                         icon = Icons.Rounded.Headphones, label = "Bass", readout = percent(bass),
-                        modifier = Modifier.testTag("knob_bass"),
+                        modifier = Modifier.testTag("knob_bass"), size = knob,
                     )
                 }
 
@@ -255,38 +273,64 @@ private fun DevicePill(app: DesktopApp, song: com.harmony.desktop.player.NowPlay
     }
 }
 
-/** A round soft transport button with a purple glyph. */
+/** Previous / next: a soft round button with an accent glyph; it sinks while pressed. */
 @Composable
 private fun NeuTransport(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: () -> Unit, size: androidx.compose.ui.unit.Dp) {
+    val c = LocalHarmonyColors.current
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
     Box(
         Modifier
             .size(size)
-            .neumorphic(size / 2, elevation = 10.dp, circle = true)
+            .neumorphic(size / 2, elevation = 10.dp, pressed = pressed, circle = true)
             .clip(CircleShape)
+            .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
+            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(size * 0.62f).clip(CircleShape).background(Brush.linearGradient(listOf(Accent.PurpleLight, Accent.Purple))), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = description, tint = Color.White, modifier = Modifier.size(size * 0.42f))
-        }
+        Icon(
+            icon, contentDescription = description,
+            tint = if (hovered) Accent.PurpleLight.takeIf { c.dark } ?: Accent.PurpleDeep else Accent.Purple.takeUnless { c.dark } ?: Accent.PurpleLight.copy(alpha = 0.9f),
+            modifier = Modifier.size(size * 0.44f),
+        )
     }
 }
 
-/** The big play / pause: a purple disc in a soft ring. */
+/** The big play / pause: a glowing purple disc in a soft ring; it gives a little when pressed. */
 @Composable
 private fun NeuPlay(playing: Boolean, onClick: () -> Unit) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.94f else if (hovered) 1.03f else 1f, tween(120))
     Box(
         Modifier
-            .size(96.dp)
-            .neumorphic(48.dp, elevation = 16.dp, circle = true)
+            .size(100.dp)
+            .neumorphic(50.dp, elevation = 16.dp, circle = true)
             .clip(CircleShape)
+            .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(role = Role.Button, onClickLabel = if (playing) "Pause" else "Play", onClick = onClick),
+            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = if (playing) "Pause" else "Play", onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.size(72.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent.PurpleLight, Accent.Purple, Accent.PurpleDeep))),
+            Modifier
+                .size(74.dp)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .drawBehind {
+                    // A soft purple glow under the disc.
+                    drawIntoCanvas { canvas ->
+                        val paint = androidx.compose.ui.graphics.Paint()
+                        val fp = paint.asFrameworkPaint()
+                        fp.maskFilter = org.jetbrains.skia.MaskFilter.makeBlur(org.jetbrains.skia.FilterBlurMode.NORMAL, 12.dp.toPx())
+                        fp.color = Accent.Purple.copy(alpha = 0.55f).toArgb()
+                        canvas.drawCircle(Offset(size.width / 2, size.height / 2 + 6.dp.toPx()), size.minDimension / 2 - 4.dp.toPx(), paint)
+                    }
+                }
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(Color(0xFF9B78FF), Accent.Purple, Accent.PurpleDeep))),
             contentAlignment = Alignment.Center,
         ) {
             AnimatedContent(

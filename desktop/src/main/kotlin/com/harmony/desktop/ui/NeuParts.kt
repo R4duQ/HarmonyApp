@@ -3,6 +3,10 @@ package com.harmony.desktop.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -34,10 +38,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -72,62 +80,100 @@ fun Modifier.neumorphic(corner: Dp, elevation: Dp = 10.dp, pressed: Boolean = fa
     drawBehind {
         val e = elevation.toPx()
         val r = if (circle) size.minDimension / 2 else corner.toPx()
+        val shade = c.neuDark.copy(alpha = if (c.dark) 0.8f else 0.7f).toArgb()
+        val lit = c.neuLight.copy(alpha = if (c.dark) 0.32f else 1f).toArgb()
         if (!pressed) {
             drawIntoCanvas { canvas ->
                 val paint = Paint()
                 val fp = paint.asFrameworkPaint()
-                fp.maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, e * 0.6f)
-                fp.color = c.neuDark.copy(alpha = if (c.dark) 0.9f else 0.75f).toArgb()
-                canvas.drawRoundRect(e * 0.45f, e * 0.45f, size.width + e * 0.45f, size.height + e * 0.45f, r, r, paint)
-                fp.color = c.neuLight.copy(alpha = if (c.dark) 0.55f else 1f).toArgb()
-                canvas.drawRoundRect(-e * 0.45f, -e * 0.45f, size.width - e * 0.45f, size.height - e * 0.45f, r, r, paint)
+                fp.maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, e * 0.7f)
+                fp.color = shade
+                canvas.drawRoundRect(e * 0.4f, e * 0.4f, size.width + e * 0.4f, size.height + e * 0.4f, r, r, paint)
+                fp.color = lit
+                canvas.drawRoundRect(-e * 0.4f, -e * 0.4f, size.width - e * 0.4f, size.height - e * 0.4f, r, r, paint)
             }
-            drawRoundRect(c.neu, cornerRadius = CornerRadius(r))
-        } else {
-            // Sunk in: shaded at the top-left inside, lit at the bottom-right.
-            drawRoundRect(c.neu, cornerRadius = CornerRadius(r))
+            // A faint sheen from the top: the surface catches the light.
             drawRoundRect(
-                Brush.linearGradient(listOf(c.neuDark.copy(alpha = 0.55f), Color.Transparent, c.neuLight.copy(alpha = 0.6f)), Offset.Zero, Offset(size.width, size.height)),
+                Brush.verticalGradient(listOf(lerp(c.neu, c.neuLight, if (c.dark) 0.18f else 0.35f), c.neu)),
                 cornerRadius = CornerRadius(r),
             )
+        } else {
+            // Sunk in: a soft shadow inside along the top-left, light along the bottom-right.
+            drawRoundRect(lerp(c.neu, c.neuDark, if (c.dark) 0.07f else 0.04f), cornerRadius = CornerRadius(r))
+            val inner = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))) }
+            clipPath(inner) {
+                drawIntoCanvas { canvas ->
+                    val paint = Paint()
+                    val fp = paint.asFrameworkPaint()
+                    fp.maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, e * 0.55f)
+                    fp.mode = org.jetbrains.skia.PaintMode.STROKE
+                    fp.strokeWidth = e
+                    val o = e * 0.35f
+                    fp.color = c.neuDark.copy(alpha = if (c.dark) 0.55f else 0.6f).toArgb()
+                    canvas.drawRoundRect(-e / 2 + o, -e / 2 + o, size.width + e / 2 + o, size.height + e / 2 + o, r + e / 2, r + e / 2, paint)
+                    fp.color = lit
+                    canvas.drawRoundRect(-e / 2 - o, -e / 2 - o, size.width + e / 2 - o, size.height + e / 2 - o, r + e / 2, r + e / 2, paint)
+                }
+            }
         }
     }
 }
 
-/** A round soft button with an icon; [active] tints it with the accent. */
+/**
+ * A round soft button with an icon. It sinks while pressed and stays sunk
+ * with an accent icon while [active]; the icon brightens under the mouse.
+ */
 @Composable
 fun NeuIconButton(icon: ImageVector, description: String, onClick: () -> Unit, size: Dp = 52.dp, active: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier) {
     val c = LocalHarmonyColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
     Box(
         modifier
             .size(size)
-            .neumorphic(size / 2, elevation = 8.dp, circle = true)
-            .then(if (active) Modifier.drawBehind { drawCircle(Accent.Purple, radius = this.size.minDimension / 2 - 1.dp.toPx(), style = Stroke(1.5.dp.toPx())) } else Modifier)
+            .neumorphic(size / 2, elevation = 8.dp, pressed = active || pressed, circle = true)
             .clip(CircleShape)
+            .hoverable(interaction, enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick)
+            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClickLabel = description, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = if (active) Accent.Purple else c.ink.copy(alpha = if (enabled) 0.8f else 0.3f), modifier = Modifier.size(size * 0.42f))
+        val tint = when {
+            !enabled -> c.ink.copy(alpha = 0.25f)
+            active -> Accent.Purple.takeUnless { c.dark } ?: Accent.PurpleLight
+            hovered -> c.ink
+            else -> c.ink.copy(alpha = 0.72f)
+        }
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.4f))
     }
 }
 
-/** A soft pill with an icon and a label (MUTE, EQ). */
+/** A soft pill with an icon and a label (MUTE, EQ): sinks while pressed, and stays sunk while [active]. */
 @Composable
 fun NeuPill(icon: ImageVector, label: String, onClick: () -> Unit, active: Boolean = false, modifier: Modifier = Modifier) {
     val c = LocalHarmonyColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val tint = when {
+        active -> Accent.Purple.takeUnless { c.dark } ?: Accent.PurpleLight
+        hovered -> c.ink
+        else -> c.ink.copy(alpha = 0.75f)
+    }
     Row(
         modifier
-            .neumorphic(26.dp, elevation = 8.dp, pressed = active)
-            .clip(RoundedCornerShape(26.dp))
+            .neumorphic(24.dp, elevation = 8.dp, pressed = active || pressed)
+            .clip(RoundedCornerShape(24.dp))
+            .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 13.dp),
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = if (active) Accent.Purple else c.ink.copy(alpha = 0.8f), modifier = Modifier.size(19.dp))
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = if (active) Accent.Purple else c.ink.copy(alpha = 0.85f), modifier = Modifier.padding(start = 10.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp, color = tint, modifier = Modifier.padding(start = 9.dp))
     }
 }
 
@@ -222,12 +268,11 @@ fun Knob(
             ) {
                 Canvas(Modifier.fillMaxSize()) {
                     val a = Math.toRadians((KNOB_START_DEG + KNOB_SWEEP_DEG * value).toDouble())
-                    val r = this.size.minDimension / 2 - 26.dp.toPx()
+                    val r = this.size.minDimension / 2 - 16.dp.toPx()
                     val p = Offset(center.x + r * cos(a).toFloat(), center.y + r * sin(a).toFloat())
-                    // A dimple: shaded on one side, lit on the other.
-                    drawCircle(c.neuDark.copy(alpha = 0.45f), radius = 15.dp.toPx(), center = p + Offset(-1.5f, -1.5f))
-                    drawCircle(c.neuLight.copy(alpha = 0.9f), radius = 15.dp.toPx(), center = p + Offset(1.5f, 1.5f))
-                    drawCircle(c.neu, radius = 14.dp.toPx(), center = p)
+                    // The pointer: a small lit dot near the knob's edge.
+                    drawCircle(Accent.Purple.copy(alpha = 0.35f), radius = 9.dp.toPx(), center = p)
+                    drawCircle(Brush.radialGradient(listOf(Accent.PurpleLight, Accent.Purple), center = p, radius = 5.dp.toPx()), radius = 5.dp.toPx(), center = p)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(icon, contentDescription = null, tint = c.ink.copy(alpha = 0.85f), modifier = Modifier.size(30.dp))

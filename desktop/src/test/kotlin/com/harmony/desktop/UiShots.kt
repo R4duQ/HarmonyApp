@@ -159,6 +159,8 @@ class UiShots {
 
     @Test fun equalizer() = shot("equalizer", app(EqConfig(enabled = true, winampGainsDb = listOf(6f, 4f, 2f, 0f, -2f, -1f, 2f, 4f, 5f, 6f), winampPreampDb = -4f, clarity = true)), nav = "nav_equalizer")
 
+    @Test fun equalizerLight() = shot("equalizer-light", app(EqConfig(enabled = true, winampGainsDb = listOf(6f, 4f, 2f, 0f, -2f, -1f, 2f, 4f, 5f, 6f), winampPreampDb = -4f, bassDb = 3f, leveling = true), dark = false), nav = "nav_equalizer")
+
     @Test fun equalizerLive() {
         // Pink noise through a bass-and-treble curve, so the analyzer has something to show.
         val noise = File(createTempDir("noise"), "pink.wav")

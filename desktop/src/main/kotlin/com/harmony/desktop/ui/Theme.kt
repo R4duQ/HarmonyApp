@@ -1,12 +1,19 @@
 package com.harmony.desktop.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.platform.Font
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 
 /** Harmony's desktop colours, in a dark and a light version. */
 class HarmonyColors(
@@ -79,6 +86,28 @@ val LightColors = HarmonyColors(
 
 val LocalHarmonyColors = staticCompositionLocalOf { DarkColors }
 
+/** Figtree: Harmony's typeface, in the weights the app uses (bundled, OFL). */
+val Figtree = FontFamily(
+    Font("fonts/Figtree-Regular.ttf", FontWeight.Normal),
+    Font("fonts/Figtree-Medium.ttf", FontWeight.Medium),
+    Font("fonts/Figtree-SemiBold.ttf", FontWeight.SemiBold),
+    Font("fonts/Figtree-Bold.ttf", FontWeight.Bold),
+    Font("fonts/Figtree-ExtraBold.ttf", FontWeight.ExtraBold),
+)
+
+/** Every text style in Figtree, without Material's extra letter spacing. */
+private val HarmonyTypography: Typography = Typography().let { t ->
+    fun TextStyle.h() = copy(fontFamily = Figtree, letterSpacing = 0.sp)
+    Typography(
+        displayLarge = t.displayLarge.h(), displayMedium = t.displayMedium.h(), displaySmall = t.displaySmall.h(),
+        headlineLarge = t.headlineLarge.h(), headlineMedium = t.headlineMedium.h(), headlineSmall = t.headlineSmall.h(),
+        titleLarge = t.titleLarge.h(), titleMedium = t.titleMedium.h(), titleSmall = t.titleSmall.h(),
+        bodyLarge = t.bodyLarge.h().copy(fontSize = 14.sp, lineHeight = 1.4.em),
+        bodyMedium = t.bodyMedium.h(), bodySmall = t.bodySmall.h(),
+        labelLarge = t.labelLarge.h(), labelMedium = t.labelMedium.h(), labelSmall = t.labelSmall.h(),
+    )
+}
+
 @Composable
 fun HarmonyTheme(dark: Boolean, content: @Composable () -> Unit) {
     val colors = if (dark) DarkColors else LightColors
@@ -88,7 +117,7 @@ fun HarmonyTheme(dark: Boolean, content: @Composable () -> Unit) {
         lightColorScheme(primary = Accent.Purple, background = colors.background, surface = colors.surface, onSurface = colors.ink, onBackground = colors.ink)
     }
     CompositionLocalProvider(LocalHarmonyColors provides colors) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        MaterialTheme(colorScheme = scheme, typography = HarmonyTypography, content = content)
     }
 }
 

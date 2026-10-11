@@ -174,11 +174,16 @@ fun HSlider(
         val t = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
         val x = pad + (size.width - 2 * pad) * t
         val origin = if (bipolar) pad + (size.width - 2 * pad) / 2 else pad
-        drawLine(c.line, Offset(pad, mid), Offset(size.width - pad, mid), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+        val thick = 4.dp.toPx()
+        drawLine(c.ink.copy(alpha = if (c.dark) 0.12f else 0.1f), Offset(pad, mid), Offset(size.width - pad, mid), strokeWidth = thick, cap = StrokeCap.Round)
+        // The middle, for controls that go both ways.
+        if (bipolar) drawLine(c.ink.copy(alpha = 0.3f), Offset(origin, mid - 6.dp.toPx()), Offset(origin, mid + 6.dp.toPx()), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
         if (kotlin.math.abs(x - origin) > 0.5f) {
-            drawLine(Brush.horizontalGradient(colors, startX = minOf(x, origin), endX = maxOf(x, origin)), Offset(origin, mid), Offset(x, mid), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(Brush.horizontalGradient(colors, startX = minOf(x, origin), endX = maxOf(x, origin)), Offset(origin, mid), Offset(x, mid), strokeWidth = thick, cap = StrokeCap.Round)
         }
-        drawCircle(Color.White, radius = 7.dp.toPx(), center = Offset(x, mid))
-        drawCircle(colors.last(), radius = 7.dp.toPx(), center = Offset(x, mid), style = Stroke(2.5.dp.toPx()))
+        val r = 8.dp.toPx()
+        drawCircle(Color.Black.copy(alpha = 0.22f), radius = r + 1f, center = Offset(x, mid + 1.5.dp.toPx()))
+        drawCircle(Color.White, radius = r, center = Offset(x, mid))
+        drawCircle(colors.last(), radius = r - 1.dp.toPx(), center = Offset(x, mid), style = Stroke(2.dp.toPx()))
     }
 }
