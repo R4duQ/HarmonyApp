@@ -35,6 +35,8 @@ class DesktopApp(
     private val scanner: LibraryScanner,
     val covers: CoverCache,
     val plays: PlayStats = PlayStats(),
+    /** The sound outputs to choose from (Windows' own list; a fixed one in tests). */
+    private val outputs: () -> List<String> = { com.harmony.desktop.engine.AudioOutputs.list() },
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -128,6 +130,16 @@ class DesktopApp(
 
     fun setDarkTheme(dark: Boolean) = update { it.copy(darkTheme = dark) }
 
+    /** The sound outputs there are now (asks Windows: call it off the UI thread). */
+    fun outputDevices(): List<String> = outputs()
+
+    /** Plays through [name] from now on (null: Windows' default); what plays carries on there. */
+    fun setOutputDevice(name: String?) {
+        if (settings.current.outputDevice == name) return
+        update { it.copy(outputDevice = name) }
+        engine.reopenOutput()
+    }
+
     private fun update(change: (DesktopSettings) -> DesktopSettings) {
         _settings.value = settings.update(change)
     }
@@ -145,7 +157,7 @@ class DesktopApp(
 
         fun create(): DesktopApp {
             val settings = SettingsStore()
-            val engine = AudioEngine()
+            val engine = AudioEngine({ com.harmony.desktop.engine.JavaSoundSink { settings.current.outputDevice } })
             val player = PlayerController(engine, com.harmony.desktop.connect.RemoteCache())
             val connect = ConnectHost(
                 pcId = settings.current.pcId,

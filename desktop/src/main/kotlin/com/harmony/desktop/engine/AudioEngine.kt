@@ -210,6 +210,25 @@ class AudioEngine(
         }
     }
 
+    /**
+     * Lets go of the sound card and opens it again (another output was
+     * chosen): the song carries on from where it is, through the new one.
+     */
+    fun reopenOutput() {
+        val s = _state.value
+        val at = positionMs()
+        val playing = s.status == EngineStatus.PLAYING || (s.status == EngineStatus.LOADING && !paused)
+        val resume = s.source?.takeIf { s.status == EngineStatus.PLAYING || s.status == EngineStatus.PAUSED || s.status == EngineStatus.LOADING }
+        synchronized(lock) {
+            if (resume != null) generation++
+            synchronized(writeLock) {
+                sink?.close()
+                sink = null
+            }
+        }
+        if (resume != null) load(resume, at, playing, s.durationMs)
+    }
+
     /** Learned [durationMs] of [source] late (it came without one): used if it's still what plays. */
     fun setDuration(source: String, durationMs: Long) {
         if (durationMs <= 0) return

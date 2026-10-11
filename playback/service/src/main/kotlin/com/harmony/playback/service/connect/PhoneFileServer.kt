@@ -12,6 +12,9 @@ import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+/** Covers kept for the computer: the song playing and the next few, with room to spare. */
+private const val MAX_COVERS = 48
+
 /**
  * Serves the songs (and their covers) the computer is told to play, while a
  * Connect session lasts. Every URL carries this session's secret, so only
@@ -22,7 +25,10 @@ internal class PhoneFileServer(private val context: Context) {
     private var server: MiniHttpServer? = null
     private val secret = UUID.randomUUID().toString().replace("-", "")
     private val tracks = ConcurrentHashMap<String, Uri>()
-    private val covers = ConcurrentHashMap<String, ByteArray>()
+    /** The covers last shared (the song playing and what's next), the oldest let go. */
+    private val covers = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, ByteArray>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > MAX_COVERS
+    })
 
     val port: Int get() = server?.boundPort ?: -1
 
@@ -45,6 +51,13 @@ internal class PhoneFileServer(private val context: Context) {
         val base = "http://$host:$port"
         val key = Uri.encode(id)
         return "$base/track/$key?t=$secret" to (if (cover != null && cover.isNotEmpty()) "$base/art/$key?t=$secret" else null)
+    }
+
+    /** Makes only [id]'s cover fetchable (a song further down "up next"); null when it has none. */
+    fun shareCover(id: String, cover: ByteArray?, host: String): String? {
+        if (cover == null || cover.isEmpty()) return null
+        covers[id] = cover
+        return "http://$host:$port/art/${Uri.encode(id)}?t=$secret"
     }
 
     private fun handle(req: com.harmony.core.remote.HttpRequest): HttpResponse {

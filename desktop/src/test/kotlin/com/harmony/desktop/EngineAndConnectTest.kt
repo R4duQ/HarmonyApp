@@ -329,6 +329,29 @@ class EngineAndConnectTest {
         }
     }
 
+    @Test fun `another sound output takes over where the song is`() {
+        val sinks = Collections.synchronizedList(mutableListOf<CountingSink>())
+        val engine = AudioEngine({ CountingSink(realTime = true).also { sinks += it } })
+        try {
+            engine.load(quiet.absolutePath, 2_000, play = true, durationMs = 12_000)
+            waitFor(what = "playing") { engine.state.value.status == EngineStatus.PLAYING && engine.positionMs() > 2_300 }
+            val before = engine.positionMs()
+            engine.reopenOutput()
+            waitFor(what = "playing again") { engine.state.value.status == EngineStatus.PLAYING && sinks.size == 2 }
+            assertEquals(2, sinks.size)
+            assertTrue("carries on from ${before}: ${engine.positionMs()}", engine.positionMs() >= before - 100)
+            assertEquals(quiet.absolutePath, engine.state.value.source)
+
+            // Paused, it stays paused on the new output.
+            engine.pause()
+            engine.reopenOutput()
+            waitFor(what = "paused again") { engine.state.value.status == EngineStatus.PAUSED }
+            assertEquals(3, sinks.size)
+        } finally {
+            engine.stop()
+        }
+    }
+
     @Test fun `shuffle and repeat pressed on the computer go to the phone, and its new queue shows`() {
         val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
             if (req.path == "/track/7") HttpResponse.ranged(FileRangeSource(quiet), req.header("Range"), "audio/wav") else HttpResponse.text(404, "no")

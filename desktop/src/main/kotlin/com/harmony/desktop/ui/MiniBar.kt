@@ -316,7 +316,7 @@ fun UpNextMenu(song: NowPlaying, loader: ImageLoader, expanded: Boolean, onDismi
         if (song.upNext.isEmpty()) {
             DropdownMenuItem(text = { Text("Nothing after this song") }, onClick = onDismiss, enabled = false)
         }
-        song.upNext.forEach { item ->
+        song.upNext.take(10).forEach { item ->
             DropdownMenuItem(
                 text = {
                     Column {

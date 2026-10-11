@@ -480,7 +480,12 @@ class ConnectSession @Inject constructor(
             val m = it.mediaMetadata
             // The first one can be played straight on: the computer fetches it ahead of time.
             val nextUri = it.localConfiguration?.uri
-            val (nextUrl, nextArt) = if (i == 0 && autoAdvance && nextUri != null) files.share(it.mediaId, nextUri, coverFor(it), host) else ("" to null)
+            val (nextUrl, nextArt) = when {
+                i == 0 && autoAdvance && nextUri != null -> files.share(it.mediaId, nextUri, coverFor(it), host)
+                // Covers for the first few, so the computer's queue has pictures.
+                i < COVERED_UP_NEXT -> "" to files.shareCover(it.mediaId, coverFor(it), host)
+                else -> "" to null
+            }
             RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt)
         }
         return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat)
@@ -858,7 +863,9 @@ class ConnectSession @Inject constructor(
         const val GIVE_UP_AFTER_MS = 30_000L
         /** Locks kept this long into a pause. */
         const val PAUSED_HOLD_MS = 10 * 60 * 1000L
-        const val UP_NEXT = 3
+        /** What comes next, for the computer's queue (only the first can be played straight on). */
+        const val UP_NEXT = 20
+        const val COVERED_UP_NEXT = 8
         const val REFRESH_DELAY_MS = 400L
         const val VOLUME_STEPS = 25
         const val MAX_COVER_BYTES = 2_000_000
