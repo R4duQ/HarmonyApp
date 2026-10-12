@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **134**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 133), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **135**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 134), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -63,21 +63,19 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   form), leaving correct text in any language alone. Songs already in the library that show
   the problem are read again on the next scan, keeping their playlists, favourites and
   play counts.
-- **Crossfade** ends without a hitch. When the fade finishes, Harmony's main player has to
-  take the next song over from the crossfade player. It used to do that before it was
-  actually making sound, and up to ~200 ms out of step, which was heard as a short catch
-  or skip. Now it waits until the main player is audible, brings it into step within a
-  few milliseconds while it is still muted, and only then swaps them. The crossfade
-  player also uses the same ReplayGain and EQ, so loudness and tone no longer jump at
-  that moment.
-- **Crossfade starts on time and without distortion.** The next song used to start loading
-  only when the fade was due, so on large files the fade began late and short, and the
-  loading happened during the part you hear. Now it is loaded 6 seconds ahead, paused and
-  muted, and starts the moment the fade is due. The swap between the two players at the
-  end of the fade also used gains meant for two different songs; on two copies of the same
-  song they added up to 3 dB too loud, past full scale on loud recordings, which was heard
-  as a short distortion. The gains now always add up to the song's own level, and the swap
-  takes 80 ms instead of 200.
+- **Crossfade with two players, without a hitch at the end.** Harmony now has two players
+  that take turns. While a song plays, the other player loads the next one 6 seconds before
+  the fade, paused and muted, so its file is open and its first audio is ready. When the fade
+  is due it starts at once, and the two are faded against each other. When the first song
+  ends, the second player simply carries on: it is already playing the next song at full
+  volume, so nothing is reloaded, sought or realigned at that moment. Before, the main player
+  had to jump onto the song the crossfade player was playing and be brought into step with
+  it, and that last step was where a short catch could be heard. Each player has its own
+  ReplayGain, EQ and level meter, so loudness and tone stay the same, and the visualiser
+  follows whichever one is playing. Pausing, seeking, a call or a change to the queue that
+  replaces the next song calls the fade off cleanly; adding songs to the queue during a fade
+  does not. Shuffle uses one order for both players, so the next song is the same whichever
+  one plays.
 - **Equalizer: Winamp and Auto.** The Equalizer now has two tabs, Winamp and Auto, under a
   segmented switch. The old Simple and Advanced tabs are gone. If you had set them and never
   touched Winamp, your bands are carried over to Winamp's, so the sound stays the same.

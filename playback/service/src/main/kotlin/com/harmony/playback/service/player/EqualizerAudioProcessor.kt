@@ -66,10 +66,11 @@ import kotlin.math.tanh
  * references — no locks, no allocation on the audio path.
  */
 @UnstableApi
-class EqualizerAudioProcessor(
-    /** The main player's equalizer reports the tone correction to the screen; a crossfade's doesn't. */
-    private val publishesAutoEq: Boolean = false,
-) : BaseAudioProcessor() {
+class EqualizerAudioProcessor : BaseAudioProcessor() {
+    /** Only the playing player's equalizer reports the tone correction to the screen. */
+    @Volatile
+    var publishesAutoEq: Boolean = false
+
 
     private class Coeffs(val b0: Float, val b1: Float, val b2: Float, val a1: Float, val a2: Float)
 

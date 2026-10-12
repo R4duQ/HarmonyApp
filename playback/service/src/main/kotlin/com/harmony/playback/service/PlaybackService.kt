@@ -10,7 +10,6 @@ import androidx.media3.session.MediaSession
 import com.harmony.playback.service.connect.ConnectPlayer
 import com.harmony.playback.service.connect.ConnectSession
 import com.harmony.playback.service.controller.PlaybackConnection
-import com.harmony.playback.service.player.CrossfadeController
 import com.harmony.playback.service.player.HarmonyPlayer
 import com.harmony.playback.service.session.AutoDiagnostics
 import com.harmony.playback.service.session.BrowserBindingTracker
@@ -71,7 +70,6 @@ class PlaybackService : MediaLibraryService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var mediaSession: MediaLibrarySession? = null
-    private var crossfade: CrossfadeController? = null
     private var albumListening: AlbumListeningMonitor? = null
 
     /** Last snapshot actually written, so the periodic save can skip no-ops. */
@@ -81,10 +79,11 @@ class PlaybackService : MediaLibraryService() {
         AutoDiagnostics.init(this)
         val createStart = android.os.SystemClock.elapsedRealtime()
         super.onCreate()
-        // The session sees the ExoPlayer through ConnectPlayer, which answers
-        // for the computer while the music plays on one (Harmony Connect).
-        val sessionPlayer = ConnectPlayer(harmonyPlayer.exoPlayer, connect)
-        connect.attach(harmonyPlayer.exoPlayer, sessionPlayer)
+        // The session sees the phone's player through ConnectPlayer, which
+        // answers for the computer while the music plays on one (Harmony Connect).
+        val player = harmonyPlayer.player
+        val sessionPlayer = ConnectPlayer(player, connect)
+        connect.attach(player, sessionPlayer)
         val sessionBuilder = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setId(SESSION_ID)
         packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
@@ -99,15 +98,13 @@ class PlaybackService : MediaLibraryService() {
         }
         mediaSession = sessionBuilder.build()
         AutoDiagnostics.log("session ready · ${android.os.SystemClock.elapsedRealtime() - createStart} ms (injection + player + session)")
-        crossfade = CrossfadeController(this, harmonyPlayer.exoPlayer, serviceScope, harmonyPlayer::createCrossfadePlayer)
-            .also { it.start() }
         startPeriodicStateSaving()
-        albumListening = AlbumListeningMonitor(harmonyPlayer.exoPlayer, albumJourneys).also { it.start() }
+        albumListening = AlbumListeningMonitor(player, albumJourneys).also { it.start() }
         // Through the session's player, so it also pauses a computer playing over Connect.
         sleepTimer.attach(sessionPlayer, serviceScope)
-        callback.attach(harmonyPlayer, crossfade!!, sleepTimer)
+        callback.attach(harmonyPlayer, sleepTimer)
         autoEq.start(serviceScope)
-        harmonyPlayer.exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
+        player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) = autoEq.setPlaying(isPlaying)
         })
     }
@@ -146,7 +143,7 @@ class PlaybackService : MediaLibraryService() {
      * main thread (ExoPlayer requirement).
      */
     private fun snapshot(): Triple<List<Long>, Int, Long>? {
-        val player = harmonyPlayer.exoPlayer
+        val player = harmonyPlayer.player
         val ids = (0 until player.mediaItemCount).mapNotNull {
             player.getMediaItemAt(it).mediaId.toLongOrNull()
         }
@@ -186,7 +183,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = harmonyPlayer.exoPlayer
+        val player = harmonyPlayer.player
         val snap = snapshot()
         val ids = snap?.first ?: emptyList()
         val index = snap?.second ?: 0
@@ -278,7 +275,6 @@ class PlaybackService : MediaLibraryService() {
         }
         albumListening?.stop()
         autoEq.stop()
-        crossfade?.stop()
         sleepTimer.detach()
         connect.detach()
         callback.close()

@@ -32,7 +32,6 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
-import com.harmony.playback.service.player.CrossfadeController
 import com.harmony.playback.service.player.HarmonyPlayer
 import com.harmony.playback.service.timer.SleepTimer
 import javax.inject.Inject
@@ -98,12 +97,10 @@ class HarmonyMediaLibraryCallback @Inject constructor(
     }
 
     private var player: HarmonyPlayer? = null
-    private var crossfade: CrossfadeController? = null
     private var sleepTimer: SleepTimer? = null
 
-    fun attach(player: HarmonyPlayer, crossfade: CrossfadeController, sleepTimer: SleepTimer) {
+    fun attach(player: HarmonyPlayer, sleepTimer: SleepTimer) {
         this.player = player
-        this.crossfade = crossfade
         this.sleepTimer = sleepTimer
     }
 
@@ -111,7 +108,6 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         scope.cancel()
         synchronized(cache) { cache.clear() }
         player = null
-        crossfade = null
         sleepTimer = null
     }
 
@@ -193,7 +189,7 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         }
         when (customCommand.customAction) {
             CMD_SET_CROSSFADE ->
-                crossfade?.crossfadeSeconds = args.getInt(ARG_SECONDS, 0)
+                player?.let { it.player.crossfadeSeconds = args.getInt(ARG_SECONDS, 0) }
             CMD_SET_REPLAYGAIN ->
                 player?.setReplayGainMode(
                     ReplayGainMode.entries[args.getInt(ARG_MODE, 0)]

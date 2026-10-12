@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * The automatic equalizer's shared state, for the same reason [AudioLevels]
  * is a plain object: the equalizer processors live inside audio sinks, out
- * of Hilt's reach, and the crossfade player builds its own.
+ * of Hilt's reach, and each of the two players (see TwinPlayer) has its own.
  *
  * Inputs are written by the playback service (which correction applies to
  * the device playing, what the microphone hears) and read by every
