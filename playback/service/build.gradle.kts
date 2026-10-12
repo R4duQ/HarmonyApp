@@ -5,6 +5,9 @@ plugins {
 
 android {
     namespace = "com.harmony.playback.service"
+    // The player tests use Media3's plain classes (MediaItem, Timeline, events),
+    // which touch a few Android framework calls; on the JVM those return defaults.
+    testOptions.unitTests.isReturnDefaultValues = true
 }
 
 dependencies {

@@ -10,7 +10,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import com.harmony.core.media.artwork.ArtworkCache
 import com.harmony.core.remote.Connect
 import com.harmony.core.remote.ConnectClient
@@ -81,7 +80,7 @@ class ConnectSession @Inject constructor(
     private val _state = MutableStateFlow(ConnectState(computers = loadPaired().map { it.computer }))
     override val state: StateFlow<ConnectState> = _state
 
-    private var exo: ExoPlayer? = null
+    private var exo: Player? = null
     private var player: ConnectPlayer? = null
 
     private var client: ConnectClient? = null
@@ -162,9 +161,9 @@ class ConnectSession @Inject constructor(
         refreshUpNext()
     }
 
-    private fun shuffleOn(exo: ExoPlayer) = appShuffle || exo.shuffleModeEnabled
+    private fun shuffleOn(exo: Player) = appShuffle || exo.shuffleModeEnabled
 
-    private fun repeatOf(exo: ExoPlayer) = when (exo.repeatMode) {
+    private fun repeatOf(exo: Player) = when (exo.repeatMode) {
         Player.REPEAT_MODE_ALL -> RemoteRepeat.ALL
         Player.REPEAT_MODE_ONE -> RemoteRepeat.ONE
         else -> RemoteRepeat.OFF
@@ -182,7 +181,7 @@ class ConnectSession @Inject constructor(
     // ---- Wiring ------------------------------------------------------------------
 
     /** Called by the playback service once its player exists. */
-    fun attach(exo: ExoPlayer, player: ConnectPlayer) {
+    fun attach(exo: Player, player: ConnectPlayer) {
         this.exo = exo
         this.player = player
         exo.addListener(exoListener)
@@ -496,7 +495,7 @@ class ConnectSession @Inject constructor(
      * the library's. Right after a skip the player doesn't know it yet, and a
      * computer told "0" can't draw its progress bar.
      */
-    private fun knownDuration(exo: ExoPlayer): Long =
+    private fun knownDuration(exo: Player): Long =
         exo.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: exo.currentMediaItem?.mediaMetadata?.durationMs ?: 0L
 
     private fun coverFor(item: MediaItem): ByteArray? {
@@ -511,7 +510,7 @@ class ConnectSession @Inject constructor(
             ?.takeIf { it.size in 1..MAX_COVER_BYTES }
     }
 
-    private fun upNextItems(exo: ExoPlayer): List<MediaItem> {
+    private fun upNextItems(exo: Player): List<MediaItem> {
         val timeline = exo.currentTimeline
         if (timeline.isEmpty) return emptyList()
         val out = ArrayList<MediaItem>()

@@ -205,7 +205,7 @@ class ToneMemory(private val capacity: Int = 2_000) {
     }
 
     companion object {
-        /** One for the process: the main and crossfade players share what they learn. */
+        /** One for the process: the two players that take turns share what they learn. */
         val shared = ToneMemory()
     }
 }

@@ -29,6 +29,14 @@ import kotlin.math.sqrt
  */
 @UnstableApi
 class LevelMeterAudioProcessor : BaseAudioProcessor() {
+    /**
+     * Only the playing player's meter drives the visualiser. The other one,
+     * loading or fading in the next song, keeps quiet, and so does its reset
+     * when it stops.
+     */
+    @Volatile
+    var publishing: Boolean = true
+
 
     private var encoding: Int = C.ENCODING_INVALID
     private var sampleRate: Int = 0
@@ -148,15 +156,17 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
 
         smoothedLevel = smooth(smoothedLevel, target, attack = 0.55f, release = 0.12f)
         smoothedBrightness = smooth(smoothedBrightness, targetBrightness, 0.30f, 0.14f)
-        AudioLevels.publish(smoothedLevel, smoothedBrightness)
+        if (publishing) AudioLevels.publish(smoothedLevel, smoothedBrightness)
         bands?.let { meter ->
             if (meter.count > 0) {
-                val db = meter.levelsDb()
-                // −66 dBFS and below is the floor, −6 dBFS fills a bar.
-                AudioLevels.publishSpectrum(FloatArray(db.size) { i ->
-                    val v = db[i]
-                    if (v.isNaN() || v.isInfinite()) 0f else ((v + 66f) / 60f).coerceIn(0f, 1f)
-                })
+                if (publishing) {
+                    val db = meter.levelsDb()
+                    // −66 dBFS and below is the floor, −6 dBFS fills a bar.
+                    AudioLevels.publishSpectrum(FloatArray(db.size) { i ->
+                        val v = db[i]
+                        if (v.isNaN() || v.isInfinite()) 0f else ((v + 66f) / 60f).coerceIn(0f, 1f)
+                    })
+                }
                 meter.reset()
             }
             if (!AudioLevels.spectrumWanted) bands = null
@@ -180,7 +190,7 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
         resetWindow()
         scratch = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
         encoding = C.ENCODING_INVALID
-        AudioLevels.reset()
+        if (publishing) AudioLevels.reset()
     }
 
     private fun resetWindow() {
@@ -193,6 +203,6 @@ class LevelMeterAudioProcessor : BaseAudioProcessor() {
         lastSign = 0
         smoothedLevel = 0f
         smoothedBrightness = 0f
-        AudioLevels.reset()
+        if (publishing) AudioLevels.reset()
     }
 }

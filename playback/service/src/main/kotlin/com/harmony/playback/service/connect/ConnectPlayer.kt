@@ -16,22 +16,21 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The player the media session sees. Normally it is simply the phone's
- * ExoPlayer. While the music plays on a computer ([ConnectSession.isActive])
- * the ExoPlayer stays paused and keeps the queue, and this player answers
+ * player. While the music plays on a computer ([ConnectSession.isActive])
+ * the phone's player stays paused and keeps the queue, and this player answers
  * for the computer: playing or not, where in the song, and play, pause and
- * seek go to the computer. Skipping still moves the ExoPlayer's queue; the
+ * seek go to the computer. Skipping still moves the phone's queue; the
  * session sends the computer the new song.
  *
  * So the notification, the lock screen, Bluetooth buttons, Android Auto and
  * the app itself all keep working unchanged, now as a remote.
  */
 @UnstableApi
-class ConnectPlayer(private val exo: ExoPlayer, private val session: ConnectSession) : ForwardingPlayer(exo) {
+class ConnectPlayer(private val exo: Player, private val session: ConnectSession) : ForwardingPlayer(exo) {
     private val listeners = CopyOnWriteArrayList<Pair<Player.Listener, Filtering>>()
 
     private val remote: Boolean get() = session.isActive

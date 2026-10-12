@@ -8,7 +8,6 @@ import com.harmony.domain.playback.PlaybackController
 import com.harmony.playback.service.connect.ConnectSession
 import com.harmony.playback.service.controller.PlaybackConnection
 import com.harmony.playback.service.player.HarmonyPlayer
-import com.harmony.playback.service.player.ReplayGainAudioProcessor
 import dagger.Binds
 import com.harmony.core.media.artwork.ArtworkCache
 import dagger.Module
@@ -49,34 +48,10 @@ object PlaybackProvidesModule {
 
     @Provides
     @ServiceScoped
-    fun provideReplayGainProcessor(): ReplayGainAudioProcessor = ReplayGainAudioProcessor()
-
-    @Provides
-    @ServiceScoped
-    fun provideEqualizerProcessor(): com.harmony.playback.service.player.EqualizerAudioProcessor =
-        com.harmony.playback.service.player.EqualizerAudioProcessor(publishesAutoEq = true)
-
-    @Provides
-    @ServiceScoped
-    fun provideLevelMeterProcessor(): com.harmony.playback.service.player.LevelMeterAudioProcessor =
-        com.harmony.playback.service.player.LevelMeterAudioProcessor()
-
-    @Provides
-    @ServiceScoped
     fun provideHarmonyPlayer(
         @ApplicationContext context: Context,
-        replayGainProcessor: ReplayGainAudioProcessor,
-        equalizerProcessor: com.harmony.playback.service.player.EqualizerAudioProcessor,
-        levelMeterProcessor: com.harmony.playback.service.player.LevelMeterAudioProcessor,
         artworkCache: ArtworkCache,
-    ): HarmonyPlayer =
-        HarmonyPlayer(
-            context,
-            replayGainProcessor,
-            equalizerProcessor,
-            levelMeterProcessor,
-            artworkCache,
-        )
+    ): HarmonyPlayer = HarmonyPlayer(context, artworkCache)
 
 }
 

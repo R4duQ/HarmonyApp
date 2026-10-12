@@ -22,7 +22,7 @@ import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.Song
 
 /**
- * Owner of the underlying [ExoPlayer] instance and everything that must be
+ * Owner of the two [ExoPlayer]s behind [player] and everything that must be
  * configured at construction time (audio sink, renderers, attributes).
  *
  * Responsibilities:
@@ -37,8 +37,9 @@ import com.harmony.core.model.Song
  *    into the audio sink chain, fed per-track gain values when the current
  *    item changes. Applying gain in the processor (float PCM domain) avoids
  *    the precision loss and pop artifacts of hot-swapping player volume.
- *  - Crossfade: delegated to [CrossfadeController]; see that class for the
- *    honest discussion of the volume-ramp vs dual-player tradeoff.
+ *  - Crossfade: two players taking turns, see [TwinPlayer]. Each has its own
+ *    ReplayGain, EQ and level meter, so the song coming in sounds exactly as
+ *    it will once it plays alone; only the one playing reports to the screen.
  *
  * This class deliberately does NOT know about MediaSession, notifications,
  * Android Auto, or Smart Shuffle. It is a pure audio engine.
@@ -46,13 +47,21 @@ import com.harmony.core.model.Song
 @OptIn(UnstableApi::class)
 class HarmonyPlayer(
     private val context: Context,
-    private val replayGainProcessor: ReplayGainAudioProcessor,
-    private val equalizerProcessor: EqualizerAudioProcessor,
-    private val levelMeterProcessor: LevelMeterAudioProcessor,
     private val artworkCache: ArtworkCache,
 ) {
 
-    val exoPlayer: ExoPlayer
+    /** One ExoPlayer and the audio processors in its sink. */
+    private class Engine(
+        val exo: ExoPlayer,
+        val replayGain: ReplayGainAudioProcessor,
+        val equalizer: EqualizerAudioProcessor,
+        val levelMeter: LevelMeterAudioProcessor,
+    )
+
+    private val engines: List<Engine>
+
+    /** The player everything uses: the session, the queue, the settings. */
+    val player: TwinPlayer
 
     private var pitchCorrection: Boolean = true
     private var replayGainMode: ReplayGainMode = ReplayGainMode.OFF
@@ -64,36 +73,30 @@ class HarmonyPlayer(
     private var retriesForCurrentItem = 0
     private var failedItemsInARow = 0
 
-    /** The EQ as last applied, so a crossfade's second player can be given the same. */
-    private var eqSettings = com.harmony.core.model.EqSettings()
-
     init {
-        // Meter LAST: it should report what actually reaches the speaker, so
-        // it has to sit after ReplayGain's scaling and the EQ's filtering
-        // rather than measuring the raw decode.
-        val renderersFactory = renderersFactory(arrayOf(replayGainProcessor, equalizerProcessor, levelMeterProcessor))
+        engines = listOf(buildEngine(handleAudioFocus = true), buildEngine(handleAudioFocus = false))
+        player = TwinPlayer(engines[0].exo, engines[1].exo)
+        publishFrom(engines[0].exo)
+        player.onActiveChanged = ::publishFrom
 
-        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                /* handleAudioFocus = */ true,
-            )
-            .setHandleAudioBecomingNoisy(true) // pause when headphones unplugged
-            .setWakeMode(C.WAKE_MODE_LOCAL)
-            .build()
+        for (engine in engines) {
+            // Each player sets its own song's gain and EQ, the waiting one too
+            // when it loads the next song, so it is ready before it is heard.
+            engine.exo.addListener(object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    engine.replayGain.setGainDb(replayGainDbFor(engine.exo.currentMediaItem))
+                    engine.equalizer.setTrack(mediaItem?.mediaId)
+                }
+            })
+        }
 
-        exoPlayer.addListener(object : Player.Listener {
+        player.addListener(object : Player.Listener {
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-                // A MediaController changes speed directly on ExoPlayer.
+                // A MediaController changes speed directly on the player.
                 // Keep its pitch consistent without resetting that speed.
                 applyPlaybackParameters()
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                applyReplayGainForCurrentItem()
-                equalizerProcessor.setTrack(mediaItem?.mediaId)
                 // A new item gets a fresh retry budget. Retrying the SAME
                 // item calls prepare() without a transition, so the counter
                 // only resets when we genuinely move on.
@@ -108,6 +111,36 @@ class HarmonyPlayer(
 
             override fun onPlayerError(error: PlaybackException) = recoverFrom(error)
         })
+    }
+
+    private fun buildEngine(handleAudioFocus: Boolean): Engine {
+        val replayGain = ReplayGainAudioProcessor()
+        val equalizer = EqualizerAudioProcessor()
+        val levelMeter = LevelMeterAudioProcessor()
+        // Meter LAST: it should report what actually reaches the speaker, so
+        // it has to sit after ReplayGain's scaling and the EQ's filtering
+        // rather than measuring the raw decode.
+        val exo = ExoPlayer.Builder(context, renderersFactory(arrayOf(replayGain, equalizer, levelMeter)))
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                handleAudioFocus,
+            )
+            .setHandleAudioBecomingNoisy(true) // pause when headphones unplugged
+            .setWakeMode(C.WAKE_MODE_LOCAL)
+            .build()
+        return Engine(exo, replayGain, equalizer, levelMeter)
+    }
+
+    /** The visualiser and the Auto EQ readout follow the player that plays. */
+    private fun publishFrom(active: ExoPlayer) {
+        for (engine in engines) {
+            val publishes = engine.exo === active
+            engine.equalizer.publishesAutoEq = publishes
+            engine.levelMeter.publishing = publishes
+        }
     }
 
     /**
@@ -130,8 +163,8 @@ class HarmonyPlayer(
      * per-file — a queue of unreadable files should go quiet, not spin.
      */
     private fun recoverFrom(error: PlaybackException) {
-        val index = exoPlayer.currentMediaItemIndex
-        val position = exoPlayer.currentPosition.coerceAtLeast(0)
+        val index = player.currentMediaItemIndex
+        val position = player.currentPosition.coerceAtLeast(0)
         Log.e(
             TAG,
             "Playback error on item $index (${error.errorCodeName}); " +
@@ -149,17 +182,17 @@ class HarmonyPlayer(
             // Seeking is legal in STATE_IDLE; the position is applied when
             // prepare() re-acquires the source, so a transient failure
             // resumes where it stopped rather than at the top of the track.
-            exoPlayer.seekTo(index, position)
-            exoPlayer.prepare()
+            player.seekTo(index, position)
+            player.prepare()
             return
         }
 
         retriesForCurrentItem = 0
         failedItemsInARow++
-        if (exoPlayer.hasNextMediaItem()) {
+        if (player.hasNextMediaItem()) {
             Log.w(TAG, "Item $index unplayable after $MAX_RETRIES_PER_ITEM retries; skipping.")
-            exoPlayer.seekToNextMediaItem()
-            exoPlayer.prepare()
+            player.seekToNextMediaItem()
+            player.prepare()
         } else {
             Log.e(TAG, "Item $index unplayable and nothing follows it; stopping.")
         }
@@ -170,29 +203,29 @@ class HarmonyPlayer(
     fun setQueue(songs: List<Song>, startIndex: Int, playWhenReady: Boolean) {
         songsById.clear()
         songs.forEach { songsById[it.id.toString()] = it }
-        exoPlayer.setMediaItems(songs.map { it.toMediaItem() }, startIndex, C.TIME_UNSET)
-        exoPlayer.playWhenReady = playWhenReady
-        exoPlayer.prepare()
+        player.setMediaItems(songs.map { it.toMediaItem() }, startIndex, C.TIME_UNSET)
+        player.playWhenReady = playWhenReady
+        player.prepare()
         applyReplayGainForCurrentItem()
     }
 
     fun addToQueue(song: Song) {
         songsById[song.id.toString()] = song
-        exoPlayer.addMediaItem(song.toMediaItem())
+        player.addMediaItem(song.toMediaItem())
     }
 
     fun addNext(song: Song) {
         songsById[song.id.toString()] = song
-        val insertAt = (exoPlayer.currentMediaItemIndex + 1)
-            .coerceAtMost(exoPlayer.mediaItemCount)
-        exoPlayer.addMediaItem(insertAt, song.toMediaItem())
+        val insertAt = (player.currentMediaItemIndex + 1)
+            .coerceAtMost(player.mediaItemCount)
+        player.addMediaItem(insertAt, song.toMediaItem())
     }
 
     // -- Speed / pitch -------------------------------------------------------
 
     fun setSpeed(newSpeed: Float) {
         val speed = newSpeed.takeIf { it.isFinite() }?.coerceIn(0.25f, 3.0f) ?: 1f
-        exoPlayer.playbackParameters = PlaybackParameters(speed, if (pitchCorrection) 1f else speed)
+        player.playbackParameters = PlaybackParameters(speed, if (pitchCorrection) 1f else speed)
     }
 
     fun setPitchCorrection(enabled: Boolean) {
@@ -201,10 +234,10 @@ class HarmonyPlayer(
     }
 
     private fun applyPlaybackParameters() {
-        val speed = exoPlayer.playbackParameters.speed
+        val speed = player.playbackParameters.speed
         val pitch = if (pitchCorrection) 1.0f else speed
-        if (exoPlayer.playbackParameters.pitch != pitch) {
-            exoPlayer.playbackParameters = PlaybackParameters(speed, pitch)
+        if (player.playbackParameters.pitch != pitch) {
+            player.playbackParameters = PlaybackParameters(speed, pitch)
         }
     }
 
@@ -216,7 +249,7 @@ class HarmonyPlayer(
     }
 
     private fun applyReplayGainForCurrentItem() {
-        replayGainProcessor.setGainDb(replayGainDbFor(exoPlayer.currentMediaItem))
+        for (engine in engines) engine.replayGain.setGainDb(replayGainDbFor(engine.exo.currentMediaItem))
     }
 
     private fun replayGainDbFor(item: MediaItem?): Float {
@@ -233,35 +266,7 @@ class HarmonyPlayer(
     }
 
     fun setEqualizer(settings: com.harmony.core.model.EqSettings) {
-        eqSettings = settings
-        equalizerProcessor.apply(settings)
-    }
-
-    // -- Crossfade -----------------------------------------------------------
-
-    /**
-     * The second player a crossfade overlaps with this one, for [item].
-     *
-     * It gets its own ReplayGain (at [item]'s gain) and EQ (at the current
-     * settings) so it sounds exactly as this player will once it takes the
-     * song over. A plain player skipped both, and the level or tone jumped at
-     * the handover. No level meter: the visualiser follows this player.
-     */
-    fun createCrossfadePlayer(item: MediaItem): ExoPlayer {
-        val replayGain = ReplayGainAudioProcessor().apply { setGainDb(replayGainDbFor(item)) }
-        val equalizer = EqualizerAudioProcessor().also {
-            it.apply(eqSettings)
-            it.setTrack(item.mediaId)
-        }
-        return ExoPlayer.Builder(context, renderersFactory(arrayOf(replayGain, equalizer)))
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                /* handleAudioFocus = */ false,
-            )
-            .build()
+        for (engine in engines) engine.equalizer.apply(settings)
     }
 
     private fun renderersFactory(processors: Array<AudioProcessor>): DefaultRenderersFactory =
@@ -291,7 +296,7 @@ class HarmonyPlayer(
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         }
 
-    fun release() = exoPlayer.release()
+    fun release() = player.release()
 
     /**
      * These are the items the player actually holds, so this metadata is
