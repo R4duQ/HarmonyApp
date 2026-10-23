@@ -29,15 +29,11 @@ import com.harmony.core.model.Song
 import com.harmony.domain.playback.AudioLevels
 import com.harmony.domain.playback.EqLive
 import com.harmony.domain.playback.EqOutput
-import com.harmony.domain.playback.SpectrumFrame
+import com.harmony.domain.playback.SpectrumSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -56,8 +52,8 @@ import kotlinx.coroutines.launch
  *    ([CustomEqAudioProcessor]) running in a [HiResEqAudioSink], so 24-bit and
  *    hi-res files reach it whole. It also carries ReplayGain (as a level gain
  *    ahead of its limiter), Auto (a curve per song, see [EqAuto]), the
- *    output-device protection ([AudioOutputMonitor]) and the analyser behind
- *    [AudioLevels].
+ *    output-device protection ([AudioOutputMonitor]) and the analyser the
+ *    screens poll through [AudioLevels].
  *  - Crossfade: two players taking turns, see [TwinPlayer]. Each has its own
  *    engine, so the song coming in sounds exactly as it will once it plays
  *    alone; only the one playing reports to the screen.
@@ -344,7 +340,7 @@ class HarmonyPlayer(
     // -- Output routing and bit-perfect USB -------------------------------------
 
     private fun onRouteChanged(route: OutputRoute) {
-        for (engine in engines) engine.equalizer.setOutputDevice(route.type)
+        for (engine in engines) engine.equalizer.setOutputDeviceType(route.type)
         EqLive.update {
             it.copy(
                 output = when (route.type) {
@@ -384,50 +380,17 @@ class HarmonyPlayer(
     // -- Analyser ----------------------------------------------------------------
 
     /**
-     * Polls the playing engine's analyser about 60 times a second while a
-     * screen shows the level or the spectrum, on one thread (the analyser
-     * expects a single reader). Nothing runs while no one looks.
+     * Hands the screens the playing engine's analyser. They poll it once per
+     * frame on the main thread (AudioLevels.poll); the engines only feed it
+     * while a screen is watching.
      */
-    @kotlin.OptIn(ExperimentalCoroutinesApi::class)
     private fun startAnalyser() {
-        val reader = Dispatchers.Default.limitedParallelism(1)
-        scope.launch(reader) {
-            AudioLevels.wanted.collectLatest { wanted ->
-                for (engine in engines) engine.equalizer.setAnalyzerEnabled(wanted)
-                if (!wanted) return@collectLatest
-                var level = 0f
-                var brightness = 0f
-                while (isActive) {
-                    val bars = FloatArray(AudioLevels.SPECTRUM_BARS)
-                    val peaks = FloatArray(AudioLevels.SPECTRUM_BARS)
-                    val count = runCatching { activeEngine.equalizer.pollSpectrum(bars, peaks) }.getOrDefault(0)
-                    AudioLevels.publishSpectrum(SpectrumFrame(bars, peaks))
-                    val (targetLevel, targetBrightness) = loudnessOf(bars, count)
-                    level += (targetLevel - level) * if (targetLevel > level) 0.5f else 0.12f
-                    brightness += (targetBrightness - brightness) * 0.2f
-                    AudioLevels.publish(level, brightness)
-                    delay(FRAME_MS)
-                }
+        AudioLevels.source = SpectrumSource { bars, peaks -> activeEngine.equalizer.pollSpectrum(bars, peaks) }
+        scope.launch {
+            AudioLevels.watchers.collect { count ->
+                for (engine in engines) engine.equalizer.setAnalyzerEnabled(count > 0)
             }
         }
-    }
-
-    /** Loudness (0..1) and brightness (0..1, the centre of energy) of one analyser frame. */
-    private fun loudnessOf(bars: FloatArray, count: Int): Pair<Float, Float> {
-        if (count <= 0) return 0f to 0f
-        var sum = 0f
-        var energy = 0f
-        var moment = 0f
-        for (i in 0 until count) {
-            val v = bars[i]
-            sum += v
-            energy += v * v
-            moment += v * v * i
-        }
-        val mean = sum / count
-        val level = ((mean - 0.12f) / 0.6f).coerceIn(0f, 1f)
-        val centre = if (energy > 1e-6f) moment / energy / (count - 1).coerceAtLeast(1) else 0f
-        return level to centre
     }
 
     private fun renderersFactory(equalizer: CustomEqAudioProcessor): DefaultRenderersFactory =
@@ -450,9 +413,9 @@ class HarmonyPlayer(
 
     fun release() {
         scope.cancel()
+        AudioLevels.source = null
         outputMonitor.stop()
         player.release()
-        AudioLevels.reset()
         // The players are released, so their audio threads no longer touch the engines.
         for (engine in engines) engine.equalizer.release()
     }
@@ -513,7 +476,6 @@ class HarmonyPlayer(
 
     private companion object {
         const val TAG = "HarmonyPlayback"
-        const val FRAME_MS = 16L
         const val MAX_RETRIES_PER_ITEM = 1
         const val MAX_FAILED_ITEMS_IN_A_ROW = 3
     }

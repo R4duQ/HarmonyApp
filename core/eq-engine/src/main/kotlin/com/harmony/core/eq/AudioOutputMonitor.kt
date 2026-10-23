@@ -92,7 +92,7 @@ class AudioOutputMonitor(
         started = true
         audioManager.registerAudioDeviceCallback(deviceCallback, mainHandler)
         refresh()  // the callback reports devices present at registration too, but don't rely on it
-        equalizer?.setOutputDevice(mutableRoute.value.type)
+        equalizer?.setOutputDeviceType(mutableRoute.value.type)
     }
 
     @MainThread
@@ -127,7 +127,7 @@ class AudioOutputMonitor(
         }
         if (next == mutableRoute.value) return
         mutableRoute.value = next
-        equalizer?.setOutputDevice(next.type)
+        equalizer?.setOutputDeviceType(next.type)
         onRouteChanged(next)
     }
 

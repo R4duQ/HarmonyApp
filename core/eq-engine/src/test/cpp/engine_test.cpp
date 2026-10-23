@@ -109,15 +109,18 @@ void bandsHitTheirTargets() {
                 CHECK(std::fabs(measured - g) < 0.05, "band %d at %d Hz: %.2f dB for %.1f", b, sr, measured, g);
             }
         }
-        // Shelves: most of the gain at the band's own frequency, all of it beyond.
+        // Shelves (Q 0.707, corners on 31 Hz and 16 kHz): half the gain at the
+        // corner, all of it beyond.
         const Biquad low = designBand(0, sr, 12.0);
         const double lowAtBand = 20.0 * std::log10(magnitudeAt(low, sr, kBandFrequencies[0]));
-        const double lowFar = 20.0 * std::log10(magnitudeAt(low, sr, 10.0));
-        CHECK(lowAtBand > 8.0 && lowAtBand < 12.1, "low shelf at 31 Hz: %.2f", lowAtBand);
-        CHECK(std::fabs(lowFar - 12.0) < 0.5, "low shelf at 10 Hz: %.2f", lowFar);
+        const double lowFar = 20.0 * std::log10(magnitudeAt(low, sr, 5.0));
+        CHECK(std::fabs(lowAtBand - 6.0) < 0.3, "low shelf at 31 Hz: %.2f", lowAtBand);
+        CHECK(std::fabs(lowFar - 12.0) < 0.5, "low shelf at 5 Hz: %.2f", lowFar);
         const Biquad high = designBand(kNumBands - 1, sr, 12.0);
-        const double highAtBand = 20.0 * std::log10(magnitudeAt(high, sr, std::min(16000.0, sr * 0.45)));
-        CHECK(highAtBand > 7.0 && highAtBand < 12.1, "high shelf at 16 kHz (%d): %.2f", sr, highAtBand);
+        const double highAtBand = 20.0 * std::log10(magnitudeAt(high, sr, 16000.0));
+        CHECK(highAtBand > 5.0 && highAtBand < 8.0, "high shelf at 16 kHz (%d): %.2f", sr, highAtBand);
+        const double highMid = 20.0 * std::log10(magnitudeAt(high, sr, 1000.0));
+        CHECK(std::fabs(highMid) < 0.3, "high shelf leaves 1 kHz alone (%d): %.2f", sr, highMid);
     }
     // Proportional Q: narrower at higher gains.
     CHECK(proportionalQ(12.0) > proportionalQ(3.0), "Q grows with gain");

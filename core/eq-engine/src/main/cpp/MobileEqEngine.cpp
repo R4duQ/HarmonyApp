@@ -26,11 +26,9 @@ constexpr float kCoefficientSmoothingSeconds = 0.008f;
 constexpr float kGainSmoothingSeconds = 0.015f;
 constexpr float kPreampRecomputeSeconds = 0.005f;
 
-// Stage 2. Shelf corners sit half an octave inside the band, so the band's own
-// frequency gets most of the slider's gain rather than the shelf's half-way point.
+// Stage 2. Band 0 is a low shelf and band 9 a high shelf, both Q = 0.707 with
+// their corners on the band frequencies (31 Hz, 16 kHz); bands 1-8 are peaks.
 constexpr double kShelfQ = kButterworthQ;
-constexpr double kLowShelfCornerRatio = 1.5;
-constexpr double kHighShelfCornerRatio = 1.0 / 1.5;
 constexpr double kPeakQAtFlat = 1.2;
 constexpr double kPeakQGrowth = 0.8;   // Q at +-12 dB = 1.2 + 0.8
 
@@ -269,9 +267,9 @@ double proportionalQ(double gainDb) {
 
 Biquad designBand(int band, double sampleRate, double gainDb) {
     const double frequency = kBandFrequencies[band];
-    if (band == 0) return designLowShelf(sampleRate, frequency * kLowShelfCornerRatio, gainDb, kShelfQ);
+    if (band == 0) return designLowShelf(sampleRate, frequency, gainDb, kShelfQ);
     if (band == kNumBands - 1) {
-        return designHighShelf(sampleRate, frequency * kHighShelfCornerRatio, gainDb, kShelfQ);
+        return designHighShelf(sampleRate, frequency, gainDb, kShelfQ);
     }
     return designPeaking(sampleRate, frequency, gainDb, proportionalQ(gainDb));
 }

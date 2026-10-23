@@ -77,6 +77,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -1046,6 +1048,36 @@ private fun OutputLabel(state: PlayerState, output: OutputChoice, palette: Playe
     }
 }
 
+/**
+ * The music's level and brightness, read from the EQ engine's analyser once
+ * per frame into an array allocated once (see AudioLevels), with a fast-rise,
+ * slow-fall meter on top.
+ */
+@Composable
+private fun liveAudioLevel(): AudioLevel {
+    val bars = remember { FloatArray(AudioLevels.SPECTRUM_BARS) }
+    var shown by remember { mutableStateOf(AudioLevel()) }
+    DisposableEffect(Unit) {
+        AudioLevels.startWatching()
+        onDispose { AudioLevels.stopWatching() }
+    }
+    LaunchedEffect(Unit) {
+        var level = 0f
+        var brightness = 0f
+        while (true) {
+            withFrameNanos {
+                val now = AudioLevels.levelOf(bars, AudioLevels.poll(bars, null))
+                level += (now.level - level) * if (now.level > level) 0.5f else 0.12f
+                brightness += (now.brightness - brightness) * 0.2f
+                if (kotlin.math.abs(level - shown.level) > 0.004f || kotlin.math.abs(brightness - shown.brightness) > 0.004f) {
+                    shown = AudioLevel(level, brightness)
+                }
+            }
+        }
+    }
+    return shown
+}
+
 @Composable
 private fun SeekBlock(
     progress: Float,
@@ -1061,14 +1093,10 @@ private fun SeekBlock(
     // Collected here rather than inside WaveformSeekBar so the bar stays a
     // pure drawing component that can be previewed and reused without a
     // running audio chain behind it.
-    val audio by AudioLevels.current.collectAsStateWithLifecycle()
     // Only react while actually playing: paused on a loud peak would
     // otherwise leave the bars frozen mid-swell, which reads as a stuck UI.
-    val live = if (state.isPlaying) audio else AudioLevel()
-    // The meter already smooths on the audio side; this second, slower pass
-    // is against the display, absorbing the gap between the ~40ms
-    // measurement window and the frame rate so motion is continuous rather
-    // than stepped.
+    val live = if (state.isPlaying) liveAudioLevel() else AudioLevel()
+    // A second, slower pass against the display, so motion stays soft.
     val animatedLevel by animateFloatAsState(
         targetValue = live.level,
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f),

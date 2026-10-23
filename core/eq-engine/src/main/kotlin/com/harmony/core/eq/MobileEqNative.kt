@@ -26,6 +26,7 @@ internal object MobileEqNative {
     @JvmStatic external fun nativeCreate(): Long
     @JvmStatic external fun nativeDestroy(handle: Long)
     @JvmStatic external fun nativeConfigure(handle: Long, sampleRate: Int, channels: Int): Boolean
+    @JvmStatic external fun nativeSetSampleRate(handle: Long, sampleRate: Int): Boolean
     @JvmStatic external fun nativeReset(handle: Long)
     @JvmStatic external fun nativeLatencyFrames(handle: Long): Int
 

@@ -32,7 +32,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,8 +73,6 @@ import com.harmony.core.model.EqPresets
 import com.harmony.core.model.EqResponse
 import com.harmony.core.model.EqSettings
 import com.harmony.domain.playback.AudioLevels
-import com.harmony.domain.playback.SpectrumFrame
-import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -134,10 +135,9 @@ fun WinampEqPanel(
     nowPlaying: NowPlayingInfo?,
     actions: WinampEqActions,
     modifier: Modifier = Modifier,
-    spectrum: StateFlow<SpectrumFrame> = AudioLevels.spectrum,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MainWindow(nowPlaying, spectrum, Modifier.fillMaxWidth().testTag(WinampTags.MAIN))
+        MainWindow(nowPlaying, Modifier.fillMaxWidth().testTag(WinampTags.MAIN))
         EqWindow(gains, preampDb, on, autoOn, autoNote, actions, Modifier.fillMaxWidth())
     }
 }
@@ -233,7 +233,7 @@ private fun Stripes(modifier: Modifier) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun MainWindow(nowPlaying: NowPlayingInfo?, spectrum: StateFlow<SpectrumFrame>, modifier: Modifier) {
+private fun MainWindow(nowPlaying: NowPlayingInfo?, modifier: Modifier) {
     Column(modifier.skinWindow()) {
         TitleBar("WINAMP")
         Spacer(Modifier.height(10.dp))
@@ -276,7 +276,7 @@ private fun MainWindow(nowPlaying: NowPlayingInfo?, spectrum: StateFlow<Spectrum
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Analyzer(spectrum, nowPlaying?.playing == true, Modifier.weight(1f).fillMaxHeight().testTag(WinampTags.ANALYZER))
+            Analyzer(nowPlaying?.playing == true, Modifier.weight(1f).fillMaxHeight().testTag(WinampTags.ANALYZER))
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -401,11 +401,33 @@ private fun Marquee(text: String, modifier: Modifier) {
 /**
  * The spectrum analyser: the engine's logarithmic bars from 20 Hz to 20 kHz,
  * coloured green to red by height, each with a peak cap that hangs a moment
- * and then falls. The engine applies the ballistics; this only draws.
+ * and then falls.
+ *
+ * It polls the engine once per frame (60 fps) into two arrays allocated once;
+ * the FFT, the bars and their ballistics are computed in C++, so this only
+ * draws what it is handed.
  */
 @Composable
-private fun Analyzer(spectrum: StateFlow<SpectrumFrame>, playing: Boolean, modifier: Modifier) {
-    val frame by spectrum.collectAsState()
+private fun Analyzer(playing: Boolean, modifier: Modifier) {
+    val bars = remember { FloatArray(AudioLevels.SPECTRUM_BARS) }
+    val peaks = remember { FloatArray(AudioLevels.SPECTRUM_BARS) }
+    // Bumped each frame; reading it in the draw block redraws without recomposing.
+    var frame by remember { mutableLongStateOf(0L) }
+    DisposableEffect(Unit) {
+        AudioLevels.startWatching()
+        onDispose { AudioLevels.stopWatching() }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            withFrameNanos { now ->
+                if (AudioLevels.poll(bars, peaks) == 0) {
+                    bars.fill(0f)
+                    peaks.fill(0f)
+                }
+                frame = now
+            }
+        }
+    }
     Canvas(
         modifier
             .clip(RoundedCornerShape(8.dp))
@@ -413,21 +435,22 @@ private fun Analyzer(spectrum: StateFlow<SpectrumFrame>, playing: Boolean, modif
             .border(1.dp, Skin.BevelDark, RoundedCornerShape(8.dp))
             .semantics { contentDescription = "Spectrum analyser" },
     ) {
-        val bars = frame.bars.size.coerceAtLeast(1)
+        frame // redraw every frame
+        val count = bars.size
         val pad = 6.dp.toPx()
         val gap = 1.5.dp.toPx()
-        val w = (size.width - 2 * pad - gap * (bars - 1)) / bars
+        val w = (size.width - 2 * pad - gap * (count - 1)) / count
         val usable = size.height - 2 * pad
         // Dim cells under the bars, like the LCD's unlit segments.
         val segment = 3.dp.toPx()
-        for (i in 0 until bars) {
+        for (i in 0 until count) {
             val x = pad + i * (w + gap)
             var y = size.height - pad - segment
             while (y > pad) {
                 drawRect(Skin.LcdDim.copy(alpha = 0.45f), Offset(x, y), Size(w, segment - 1f))
                 y -= segment
             }
-            val level = if (playing) frame.bars[i].coerceIn(0f, 1f) else 0f
+            val level = if (playing) bars[i].coerceIn(0f, 1f) else 0f
             val h = level * usable
             if (h > 0.5f) {
                 drawRect(
@@ -436,7 +459,7 @@ private fun Analyzer(spectrum: StateFlow<SpectrumFrame>, playing: Boolean, modif
                     Size(w, h),
                 )
             }
-            val peak = if (playing) frame.peaks.getOrElse(i) { 0f }.coerceIn(0f, 1f) else 0f
+            val peak = if (playing) peaks[i].coerceIn(0f, 1f) else 0f
             val peakY = size.height - pad - peak * usable
             drawRect(Color(0xFFD8D8E8), Offset(x, (peakY - 2.dp.toPx()).coerceAtLeast(pad)), Size(w, 1.5.dp.toPx()))
         }

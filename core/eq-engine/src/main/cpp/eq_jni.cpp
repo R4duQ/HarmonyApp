@@ -71,6 +71,13 @@ jboolean nativeConfigure(JNIEnv*, jclass, jlong handle, jint sampleRate, jint ch
     return engineOf(handle)->configure(sampleRate, channels) ? JNI_TRUE : JNI_FALSE;
 }
 
+// A new sample rate at the same channel count: every coefficient, time
+// constant, lookahead length and FFT bin map is recomputed for it.
+jboolean nativeSetSampleRate(JNIEnv*, jclass, jlong handle, jint sampleRate) {
+    auto* engine = engineOf(handle);
+    return engine->configure(sampleRate, engine->channels()) ? JNI_TRUE : JNI_FALSE;
+}
+
 void nativeReset(JNIEnv*, jclass, jlong handle) { engineOf(handle)->reset(); }
 
 jint nativeLatencyFrames(JNIEnv*, jclass, jlong handle) { return engineOf(handle)->latencyFrames(); }
@@ -191,6 +198,7 @@ const JNINativeMethod kMethods[] = {
     HARMONY_JNI_METHOD(nativeCreate, "()J"),
     HARMONY_JNI_METHOD(nativeDestroy, "(J)V"),
     HARMONY_JNI_METHOD(nativeConfigure, "(JII)Z"),
+    HARMONY_JNI_METHOD(nativeSetSampleRate, "(JI)Z"),
     HARMONY_JNI_METHOD(nativeReset, "(J)V"),
     HARMONY_JNI_METHOD(nativeLatencyFrames, "(J)I"),
     HARMONY_JNI_METHOD(nativeProcess, "(JLjava/nio/ByteBuffer;IIILjava/nio/ByteBuffer;I)I"),

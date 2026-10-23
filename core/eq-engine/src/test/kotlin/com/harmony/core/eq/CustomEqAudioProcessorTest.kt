@@ -103,7 +103,7 @@ class CustomEqAudioProcessorTest {
     fun `flat EQ keeps the signal where it was`() {
         processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
         processor.flush()
-        processor.setOutputDevice(OutputDeviceType.USB_DAC_HIRES)
+        processor.setOutputDeviceType(OutputDeviceType.USB_DAC_HIRES)
         val frames = 9_600
         val input = pcm16Sine(frames, 2, 48_000, 1000.0, 0.25)
         val reference = FloatArray(frames) { input.getShort(it * 4) / 32768f }

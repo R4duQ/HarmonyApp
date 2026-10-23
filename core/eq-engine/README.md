@@ -28,7 +28,7 @@ input ─▶ device high-pass ─▶ auto-preamp ─▶ 10 biquads (RBJ, DF2T) �
 | Bluetooth | 24 Hz | −0.3 dB | −0.15 dBFS |
 | USB DAC | 10 Hz | – | −0.05 dBFS |
 
-- **Bands:** 31 Hz shelf, 62 Hz to 8 kHz peaks with proportional Q (1.2 at 0 dB to 2.0 at ±12 dB), and a 16 kHz shelf.
+- **Bands:** a low shelf at 31 Hz and a high shelf at 16 kHz (Q 0.707, corners on the band frequencies), and peaks from 62 Hz to 8 kHz with proportional Q (1.2 at 0 dB to 2.0 at ±12 dB).
 - **Auto-preamp:** −0.65 × the peak of the *whole* response curve, evaluated at 74 frequencies. Two neighbouring +8 dB bands peak above +8 dB between them, so the peak of the curve is what matters, not the loudest slider.
 - **De-zippering:** coefficients and the preamp glide every sample, with one-pole smoothing (8 ms and 15 ms).
 - **Denormals:** flush-to-zero is set per process call (FPCR.FZ on ARM, MXCSR FTZ|DAZ on x86) and restored afterwards.

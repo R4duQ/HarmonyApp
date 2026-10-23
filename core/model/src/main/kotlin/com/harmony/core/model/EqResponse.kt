@@ -60,8 +60,8 @@ object EqResponse {
     private fun design(band: Int, gainDb: Double): Biquad {
         val f = EqSettings.BAND_CENTERS_HZ[band].toDouble()
         return when (band) {
-            0 -> shelf(f * 1.5, gainDb, low = true)
-            EqSettings.BAND_COUNT - 1 -> shelf(f / 1.5, gainDb, low = false)
+            0 -> shelf(f, gainDb, low = true)
+            EqSettings.BAND_COUNT - 1 -> shelf(f, gainDb, low = false)
             else -> peaking(f, gainDb, 1.2 + 0.8 * min(abs(gainDb), 12.0) / 12.0)
         }
     }

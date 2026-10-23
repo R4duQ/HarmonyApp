@@ -88,7 +88,7 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     fun setLevelGainDb(gainDb: Float) = MobileEqNative.nativeSetLevelGain(checkedHandle(), gainDb)
 
     /** Where the sound goes; [AudioOutputMonitor] calls this on every routing change. */
-    fun setOutputDevice(device: OutputDeviceType) =
+    fun setOutputDeviceType(device: OutputDeviceType) =
         MobileEqNative.nativeSetOutputDevice(checkedHandle(), device.engineCode)
 
     /** Stop feeding the spectrum analyzer while nothing shows it. */
@@ -135,14 +135,22 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
 
     override fun onFlush() {
         // A flush follows every configure() (it activates the new format) and
-        // every seek. A new rate rebuilds every coefficient, time constant,
-        // lookahead and FFT bin map in the engine (the native equivalent of a
-        // setSampleRate); the same format only clears the filter state.
+        // every seek, so this is where configure()'s new format reaches the
+        // engine: a new rate goes through nativeSetSampleRate, which rebuilds
+        // every coefficient, time constant, lookahead and FFT bin map; a new
+        // channel count reconfigures it; the same format only clears state.
         if (!isActive) return
         val format = inputAudioFormat
         formatCode = engineFormatOf(format.encoding)
-        if (format.sampleRate != configuredRate || format.channelCount != configuredChannels) {
+        if (format.channelCount != configuredChannels) {
             check(MobileEqNative.nativeConfigure(checkedHandle(), format.sampleRate, format.channelCount)) {
+                "MobileEqEngine rejected $format"
+            }
+            configuredRate = format.sampleRate
+            configuredChannels = format.channelCount
+        } else if (format.sampleRate != configuredRate) {
+            // A USB DAC moving to 96 or 192 kHz, or the next file at its own rate.
+            check(MobileEqNative.nativeSetSampleRate(checkedHandle(), format.sampleRate)) {
                 "MobileEqEngine rejected $format"
             }
             configuredRate = format.sampleRate
