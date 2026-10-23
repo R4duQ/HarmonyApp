@@ -1,6 +1,5 @@
-package com.harmony.playback.service.player
+package com.harmony.desktop.dsp
 
-import com.harmony.core.model.WinampEqDesign
 
 /**
  * The Winamp equalizer running on samples: ten band-passes in parallel on

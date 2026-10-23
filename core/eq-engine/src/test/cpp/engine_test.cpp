@@ -147,6 +147,23 @@ void autoPreampCompensates() {
     CHECK(engine->targetPreampDb() <= 0.f, "preamp for cuts: %.2f", engine->targetPreampDb());
 }
 
+void levelGainAddsToThePreamp() {
+    auto engine = engineAt(48000, 2, OutputDevice::kWiredHeadphones);
+    std::vector<float> nothing(512 * 2, 0.f);
+    engine->setLevelGainDb(-7.5f);
+    run(*engine, nothing);
+    CHECK(std::fabs(engine->targetPreampDb() - (-7.5f)) < 1e-3f, "level -7.5: %.2f", engine->targetPreampDb());
+    engine->setEqEnabled(false);  // levelling stays with the EQ off
+    run(*engine, nothing);
+    CHECK(std::fabs(engine->targetPreampDb() - (-7.5f)) < 1e-3f, "level with EQ off: %.2f", engine->targetPreampDb());
+    engine->setLevelGainDb(40.f);  // clamped
+    run(*engine, nothing);
+    CHECK(std::fabs(engine->targetPreampDb() - 15.f) < 1e-3f, "level clamp: %.2f", engine->targetPreampDb());
+    engine->setLevelGainDb(NAN);
+    run(*engine, nothing);
+    CHECK(std::fabs(engine->targetPreampDb()) < 1e-3f, "NaN level: %.2f", engine->targetPreampDb());
+}
+
 void neverClips() {
     std::mt19937 random(7);
     std::uniform_real_distribution<float> noise(-1.f, 1.f);
@@ -453,6 +470,7 @@ int main() {
     flatResponseIsTransparent();
     bandsHitTheirTargets();
     autoPreampCompensates();
+    levelGainAddsToThePreamp();
     neverClips();
     outputStaysAlignedAndComplete();
     slidersDoNotClick();

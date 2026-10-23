@@ -32,7 +32,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,9 +66,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.harmony.core.model.EqPresets
+import com.harmony.core.model.EqResponse
 import com.harmony.core.model.EqSettings
-import com.harmony.core.model.WinampEqDesign
 import com.harmony.domain.playback.AudioLevels
+import com.harmony.domain.playback.SpectrumFrame
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.abs
 import kotlin.math.pow
@@ -113,34 +115,32 @@ internal object WinampTags {
  *
  *  - the main window: the song scrolling across a green LCD, its bitrate,
  *    sample rate and stereo lights, and the spectrum analyser with falling
- *    peaks (measured live from what reaches the speaker);
- *  - the equalizer: ON, AUTO, PRESETS, the black display with the filters'
+ *    peaks, straight from the EQ engine's FFT at 60 frames a second;
+ *  - the equalizer: ON, AUTO, PRESETS, the black display with the engine's
  *    real response, the preamp and ten sliders whose LED ladders light from
  *    green through yellow to red as they rise.
  *
- * Stateless: the screen owns the settings and passes them in.
+ * Stateless: the screen owns the settings and passes them in. [gains] are the
+ * ones the sliders show: the listener's own, or with Auto on, the song's.
  */
 @Composable
 fun WinampEqPanel(
-    eq: EqSettings,
+    gains: List<Float>,
+    preampDb: Float,
+    on: Boolean,
     autoOn: Boolean,
+    /** What Auto is playing this song with, under the buttons; null hides the line. */
+    autoNote: String?,
     nowPlaying: NowPlayingInfo?,
     actions: WinampEqActions,
     modifier: Modifier = Modifier,
-    spectrum: StateFlow<FloatArray> = AudioLevels.spectrum,
+    spectrum: StateFlow<SpectrumFrame> = AudioLevels.spectrum,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         MainWindow(nowPlaying, spectrum, Modifier.fillMaxWidth().testTag(WinampTags.MAIN))
-        EqWindow(eq, eq.enabled, autoOn, actions, Modifier.fillMaxWidth())
+        EqWindow(gains, preampDb, on, autoOn, autoNote, actions, Modifier.fillMaxWidth())
     }
 }
-
-/** The name of the Winamp preset these settings match, if any. */
-internal fun currentPreset(eq: EqSettings): String? = WinampEqDesign.PRESETS.firstOrNull { (_, preset) ->
-    val (preamp, gains) = preset
-    abs(preamp - eq.winampPreampDb) < 0.05f &&
-        gains.indices.all { abs(gains[it] - eq.winampGainsDb.getOrElse(it) { 0f }) < 0.05f }
-}?.first
 
 private object Skin {
     val PanelTop = Color(0xFF3E3E58)
@@ -233,7 +233,7 @@ private fun Stripes(modifier: Modifier) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun MainWindow(nowPlaying: NowPlayingInfo?, spectrum: StateFlow<FloatArray>, modifier: Modifier) {
+private fun MainWindow(nowPlaying: NowPlayingInfo?, spectrum: StateFlow<SpectrumFrame>, modifier: Modifier) {
     Column(modifier.skinWindow()) {
         TitleBar("WINAMP")
         Spacer(Modifier.height(10.dp))
@@ -282,7 +282,7 @@ private fun MainWindow(nowPlaying: NowPlayingInfo?, spectrum: StateFlow<FloatArr
         Row(verticalAlignment = Alignment.CenterVertically) {
             Marquee(
                 nowPlaying?.let { "${it.artist} - ${it.title} (${lcdTime(it.durationMs)})" }
-                    ?: "Harmony · Winamp equalizer · pick a song and move the sliders",
+                    ?: "Harmony · equalizer · pick a song and move the sliders",
                 Modifier.weight(1f).height(24.dp),
             )
             Spacer(Modifier.width(6.dp))
@@ -399,34 +399,13 @@ private fun Marquee(text: String, modifier: Modifier) {
 }
 
 /**
- * Winamp's spectrum analyser: twenty bars (two per octave band, the second
- * eased towards the next band), coloured green to red by height, each with
- * a peak cap that hangs a moment and then falls.
+ * The spectrum analyser: the engine's logarithmic bars from 20 Hz to 20 kHz,
+ * coloured green to red by height, each with a peak cap that hangs a moment
+ * and then falls. The engine applies the ballistics; this only draws.
  */
 @Composable
-private fun Analyzer(spectrum: StateFlow<FloatArray>, playing: Boolean, modifier: Modifier) {
-    val bars = 20
-    var heights by remember { mutableStateOf(FloatArray(bars)) }
-    var peaks by remember { mutableStateOf(FloatArray(bars)) }
-    val playingNow by rememberUpdatedState(playing)
-    LaunchedEffect(spectrum) {
-        var last = System.nanoTime()
-        spectrum.collect { bands ->
-            val now = System.nanoTime()
-            val dt = ((now - last) / 1e9f).coerceIn(0f, 0.2f)
-            last = now
-            val next = FloatArray(bars) { i ->
-                val b = i / 2
-                val v = bands.getOrElse(b) { 0f }
-                val target = if (i % 2 == 0) v else (v + bands.getOrElse(b + 1) { v }) / 2f
-                if (playingNow) target else 0f
-            }
-            val h = heights
-            val p = peaks
-            heights = FloatArray(bars) { i -> if (next[i] > h[i]) next[i] else (h[i] - dt * 1.6f).coerceAtLeast(next[i]) }
-            peaks = FloatArray(bars) { i -> if (next[i] >= p[i]) next[i] else (p[i] - dt * 0.55f).coerceAtLeast(0f) }
-        }
-    }
+private fun Analyzer(spectrum: StateFlow<SpectrumFrame>, playing: Boolean, modifier: Modifier) {
+    val frame by spectrum.collectAsState()
     Canvas(
         modifier
             .clip(RoundedCornerShape(8.dp))
@@ -434,8 +413,9 @@ private fun Analyzer(spectrum: StateFlow<FloatArray>, playing: Boolean, modifier
             .border(1.dp, Skin.BevelDark, RoundedCornerShape(8.dp))
             .semantics { contentDescription = "Spectrum analyser" },
     ) {
+        val bars = frame.bars.size.coerceAtLeast(1)
         val pad = 6.dp.toPx()
-        val gap = 2.dp.toPx()
+        val gap = 1.5.dp.toPx()
         val w = (size.width - 2 * pad - gap * (bars - 1)) / bars
         val usable = size.height - 2 * pad
         // Dim cells under the bars, like the LCD's unlit segments.
@@ -447,7 +427,8 @@ private fun Analyzer(spectrum: StateFlow<FloatArray>, playing: Boolean, modifier
                 drawRect(Skin.LcdDim.copy(alpha = 0.45f), Offset(x, y), Size(w, segment - 1f))
                 y -= segment
             }
-            val h = heights[i] * usable
+            val level = if (playing) frame.bars[i].coerceIn(0f, 1f) else 0f
+            val h = level * usable
             if (h > 0.5f) {
                 drawRect(
                     Brush.verticalGradient(listOf(Skin.Red, Skin.Yellow, Skin.Green), startY = pad, endY = size.height - pad),
@@ -455,7 +436,8 @@ private fun Analyzer(spectrum: StateFlow<FloatArray>, playing: Boolean, modifier
                     Size(w, h),
                 )
             }
-            val peakY = size.height - pad - peaks[i] * usable
+            val peak = if (playing) frame.peaks.getOrElse(i) { 0f }.coerceIn(0f, 1f) else 0f
+            val peakY = size.height - pad - peak * usable
             drawRect(Color(0xFFD8D8E8), Offset(x, (peakY - 2.dp.toPx()).coerceAtLeast(pad)), Size(w, 1.5.dp.toPx()))
         }
     }
@@ -471,21 +453,41 @@ private fun lcdTime(ms: Long): String {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun EqWindow(eq: EqSettings, on: Boolean, autoOn: Boolean, actions: WinampEqActions, modifier: Modifier) {
+private fun EqWindow(
+    gains: List<Float>,
+    preampDb: Float,
+    on: Boolean,
+    autoOn: Boolean,
+    autoNote: String?,
+    actions: WinampEqActions,
+    modifier: Modifier,
+) {
     Column(modifier.skinWindow()) {
-        TitleBar("WINAMP EQUALIZER")
+        TitleBar("EQUALIZER")
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            LedButton("ON", on, actions.onToggle, Modifier.testTag(WinampTags.ON), if (on) "Winamp equalizer on" else "Winamp equalizer off")
-            LedButton("AUTO", autoOn, actions.onAuto, Modifier.testTag(WinampTags.AUTO), if (autoOn) "Auto tone on" else "Auto tone off")
+            LedButton("ON", on, actions.onToggle, Modifier.testTag(WinampTags.ON), if (on) "Equalizer on" else "Equalizer off")
+            LedButton("AUTO", autoOn, actions.onAuto, Modifier.testTag(WinampTags.AUTO), if (autoOn) "Auto on" else "Auto off")
             Spacer(Modifier.weight(1f))
-            PresetsButton(currentPreset(eq), actions.onPreset)
+            PresetsButton(EqPresets.matching(gains), actions.onPreset)
             SkinButton("RESET", onClick = actions.onReset)
+        }
+        if (autoNote != null) {
+            Text(
+                "▸ $autoNote",
+                fontSize = 10.sp,
+                lineHeight = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Skin.Lcd,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp, start = 2.dp),
+            )
         }
         Spacer(Modifier.height(10.dp))
         ResponseDisplay(
-            gains = eq.winampGainsDb,
-            preampDb = eq.winampPreampDb,
+            gains = gains,
+            preampDb = preampDb,
             lit = on,
             modifier = Modifier.fillMaxWidth().height(96.dp),
         )
@@ -493,7 +495,7 @@ private fun EqWindow(eq: EqSettings, on: Boolean, autoOn: Boolean, actions: Wina
         Row(Modifier.fillMaxWidth().height(224.dp)) {
             DbScale(Modifier.width(28.dp).fillMaxHeight())
             WinampSlider(
-                value = eq.winampPreampDb,
+                value = preampDb,
                 label = "PREAMP",
                 lit = on,
                 onChange = actions.onPreamp,
@@ -501,9 +503,9 @@ private fun EqWindow(eq: EqSettings, on: Boolean, autoOn: Boolean, actions: Wina
             )
             // The gap Winamp left between the preamp and the bands.
             Box(Modifier.padding(horizontal = 3.dp).width(1.dp).fillMaxHeight().background(Skin.BevelDark.copy(alpha = 0.8f)))
-            WinampEqDesign.LABELS.forEachIndexed { i, label ->
+            EqSettings.BAND_LABELS.forEachIndexed { i, label ->
                 WinampSlider(
-                    value = eq.winampGainsDb.getOrElse(i) { 0f },
+                    value = gains.getOrElse(i) { 0f },
                     label = label,
                     lit = on,
                     onChange = { actions.onBand(i, it) },
@@ -540,7 +542,7 @@ private fun PresetsButton(current: String?, onPreset: (String) -> Unit) {
             trailing = "▾",
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            WinampEqDesign.PRESETS.forEach { (name, _) ->
+            EqPresets.ALL.forEach { (name, _) ->
                 DropdownMenuItem(
                     text = { Text(if (name == current) "✓  $name" else name) },
                     onClick = { open = false; onPreset(name) },
@@ -587,29 +589,31 @@ private fun levelColor(t: Float): Color {
 }
 
 /**
- * The black display: the filters' real response from 20 Hz to 20 kHz with
- * a glow under it, the preamp line, dB marks, and a dot on each band.
+ * The black display: the engine's response from 20 Hz to 20 kHz with a glow
+ * under it, the preamp line (the engine's own headroom plus the listener's
+ * preamp), dB marks, and a dot on each band.
  */
 @Composable
 private fun ResponseDisplay(gains: List<Float>, preampDb: Float, lit: Boolean, modifier: Modifier) {
     val frequencies = remember { FloatArray(CURVE_POINTS) { i -> 20f * 1000f.pow(i / (CURVE_POINTS - 1f)) } }
-    val curve = remember(gains, preampDb) { WinampEqDesign.responseDb(gains, preampDb, frequencies) }
-    val bandDots = remember(gains, preampDb) { WinampEqDesign.responseDb(gains, preampDb, WinampEqDesign.FREQUENCIES_HZ) }
+    val curve = remember(gains) { EqResponse.bandsDb(gains, frequencies) }
+    val bandDots = remember(gains) { EqResponse.bandsDb(gains, BAND_HZ) }
+    val totalPreamp = remember(gains, preampDb) { EqResponse.autoPreampDb(gains) + preampDb }
     val shape = RoundedCornerShape(8.dp)
     Box(modifier.clip(shape).background(Skin.Display).border(BorderStroke(1.dp, Skin.BevelDark), shape)) {
         Canvas(Modifier.fillMaxSize()) {
             val mid = size.height / 2f
             val span = size.height * 0.42f
-            fun yFor(db: Float) = mid - (db / WinampEqDesign.MAX_DB).coerceIn(-1.15f, 1.15f) * span
+            fun yFor(db: Float) = mid - (db / MAX_DB).coerceIn(-1.15f, 1.15f) * span
             fun xFor(f: Float) = size.width * (kotlin.math.log10(f / 20f) / 3f)
-            // Grid: 0 dB, ±10 dB, and the bands.
+            // Grid: 0 dB, ±6 dB, and the bands.
             drawLine(Skin.Grid, Offset(0f, mid), Offset(size.width, mid), strokeWidth = 1.5f)
-            for (db in listOf(-10f, 10f)) drawLine(Skin.Grid.copy(alpha = 0.6f), Offset(0f, yFor(db)), Offset(size.width, yFor(db)), strokeWidth = 1f)
-            WinampEqDesign.FREQUENCIES_HZ.forEach { f ->
+            for (db in listOf(-6f, 6f)) drawLine(Skin.Grid.copy(alpha = 0.6f), Offset(0f, yFor(db)), Offset(size.width, yFor(db)), strokeWidth = 1f)
+            BAND_HZ.forEach { f ->
                 drawLine(Skin.Grid.copy(alpha = 0.6f), Offset(xFor(f), 0f), Offset(xFor(f), size.height), strokeWidth = 1f)
             }
             // Preamp level.
-            drawLine(Skin.Yellow.copy(alpha = if (lit) 0.45f else 0.2f), Offset(0f, yFor(preampDb)), Offset(size.width, yFor(preampDb)), strokeWidth = 1.5f)
+            drawLine(Skin.Yellow.copy(alpha = if (lit) 0.45f else 0.2f), Offset(0f, yFor(totalPreamp)), Offset(size.width, yFor(totalPreamp)), strokeWidth = 1.5f)
             val path = Path()
             curve.forEachIndexed { i, db ->
                 val x = size.width * i / (CURVE_POINTS - 1f)
@@ -634,18 +638,18 @@ private fun ResponseDisplay(gains: List<Float>, preampDb: Float, lit: Boolean, m
             // Glow, then the line.
             drawPath(path, brush, alpha = 0.25f * alpha, style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round))
             drawPath(path, brush, alpha = alpha, style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round))
-            WinampEqDesign.FREQUENCIES_HZ.forEachIndexed { i, f ->
+            BAND_HZ.forEachIndexed { i, f ->
                 val y = yFor(bandDots[i])
                 drawCircle(Color.Black, radius = 3.6.dp.toPx(), center = Offset(xFor(f), y))
-                drawCircle(levelColor(gains.getOrElse(i) { 0f } / WinampEqDesign.MAX_DB).copy(alpha = alpha), radius = 2.6.dp.toPx(), center = Offset(xFor(f), y))
+                drawCircle(levelColor(gains.getOrElse(i) { 0f } / MAX_DB).copy(alpha = alpha), radius = 2.6.dp.toPx(), center = Offset(xFor(f), y))
             }
         }
         Text(
-            "+20", fontSize = 8.sp, lineHeight = 9.sp, fontFamily = FontFamily.Monospace, color = Skin.GridText,
+            "+12", fontSize = 8.sp, lineHeight = 9.sp, fontFamily = FontFamily.Monospace, color = Skin.GridText,
             modifier = Modifier.align(Alignment.TopStart).padding(start = 4.dp, top = 2.dp),
         )
         Text(
-            "-20", fontSize = 8.sp, lineHeight = 9.sp, fontFamily = FontFamily.Monospace, color = Skin.GridText,
+            "-12", fontSize = 8.sp, lineHeight = 9.sp, fontFamily = FontFamily.Monospace, color = Skin.GridText,
             modifier = Modifier.align(Alignment.BottomStart).padding(start = 4.dp, bottom = 2.dp),
         )
     }
@@ -655,14 +659,14 @@ private fun ResponseDisplay(gains: List<Float>, preampDb: Float, lit: Boolean, m
 private fun DbScale(modifier: Modifier) {
     // Lined up with the slider travel: value text + gap + half a thumb above, label + gap + half a thumb below.
     Column(modifier.padding(top = 15.5.dp, bottom = 16.5.dp), verticalArrangement = Arrangement.SpaceBetween) {
-        listOf("+20", "+10", "0", "-10", "-20").forEach {
+        listOf("+12", "+6", "0", "-6", "-12").forEach {
             Text(it, fontSize = 9.sp, lineHeight = 11.sp, fontFamily = FontFamily.Monospace, color = Skin.Dim)
         }
     }
 }
 
 /**
- * One Winamp slider, -20..+20 dB. Drag, or tap a spot to jump there;
+ * One Winamp slider, -12..+12 dB. Drag, or tap a spot to jump there;
  * double-tap puts it back to 0. The groove is a ladder of LED cells that
  * light from the centre to the setting, green near 0 and red at the top.
  */
@@ -674,7 +678,7 @@ private fun WinampSlider(
     onChange: (Float) -> Unit,
     modifier: Modifier,
 ) {
-    val max = WinampEqDesign.MAX_DB
+    val max = MAX_DB
     // The gesture handlers outlive recompositions; read the latest callback through this.
     val change by rememberUpdatedState(onChange)
     Column(modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -790,13 +794,13 @@ private suspend fun PointerInputScope.sliderGestures(onChange: (Float) -> Unit) 
     }
 }
 
-/** Slider value for a touch at [y], to the nearest 0.4 dB (Winamp's own step was about 0.6). */
+/** Slider value for a touch at [y], to the nearest 0.5 dB. */
 private fun valueAt(y: Float, height: Float, pad: Float): Float {
     val usable = (height - 2 * pad).coerceAtLeast(1f)
     val frac = 1f - ((y - pad) / usable).coerceIn(0f, 1f)
-    val db = frac * 2 * WinampEqDesign.MAX_DB - WinampEqDesign.MAX_DB
-    return ((db / 0.4f).roundToInt() * 0.4f).let { if (abs(it) < 0.2f) 0f else it }
-        .coerceIn(-WinampEqDesign.MAX_DB, WinampEqDesign.MAX_DB)
+    val db = frac * 2 * MAX_DB - MAX_DB
+    return ((db / 0.5f).roundToInt() * 0.5f).let { if (abs(it) < 0.25f) 0f else it }
+        .coerceIn(-MAX_DB, MAX_DB)
 }
 
 private fun fmtWinamp(v: Float): String = when {
@@ -811,3 +815,5 @@ private val CHAR_WIDTH = 7.25.dp
 /** How close a second tap has to land to count as a double-tap rather than a quick move. */
 private val DOUBLE_TAP_REACH = 32.dp
 private const val CURVE_POINTS = 120
+private const val MAX_DB = EqSettings.MAX_GAIN_DB
+private val BAND_HZ = EqSettings.BAND_CENTERS_HZ.toFloatArray()

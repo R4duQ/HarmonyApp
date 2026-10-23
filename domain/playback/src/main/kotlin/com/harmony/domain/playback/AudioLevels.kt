@@ -1,15 +1,17 @@
 package com.harmony.domain.playback
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * A snapshot of what the audio chain is currently pushing to the speaker.
  *
- * @param level 0..1 loudness, from RMS of the last measured window.
- * @param brightness 0..1 rough "how high is the content", from zero-crossing
- *   rate. Not a spectrum — see [AudioLevels] for why that's the right trade.
+ * @param level 0..1 loudness.
+ * @param brightness 0..1, how high the content sits (the spectrum's centre of energy).
  */
 data class AudioLevel(
     val level: Float = 0f,
@@ -17,31 +19,42 @@ data class AudioLevel(
 )
 
 /**
- * Process-wide publisher for the live audio level, written by the playback
- * chain and read by the player UI.
+ * One frame of the equalizer engine's spectrum analyser: [bars] logarithmic
+ * bars from 20 Hz to 20 kHz, 0..1 each, and their falling peak dots, with the
+ * engine's ballistics already applied.
+ */
+class SpectrumFrame(val bars: FloatArray, val peaks: FloatArray) {
+    companion object {
+        val EMPTY = SpectrumFrame(FloatArray(AudioLevels.SPECTRUM_BARS), FloatArray(AudioLevels.SPECTRUM_BARS))
+    }
+}
+
+/**
+ * Process-wide publisher for what the music sounds like right now, written by
+ * the playback service and read by the player UI.
  *
- * A plain object rather than an injected singleton because the producer is
- * an AudioProcessor constructed by DefaultAudioSink's builder, well outside
- * Hilt's reach, and the consumer is a Composable in a different module. A
- * shared object is the only thing both ends can name without threading a
- * dependency through the audio sink.
+ * A plain object rather than an injected singleton because the consumers are
+ * Composables in other modules and the producer lives in the playback
+ * service; a shared object is the one thing both ends can name.
  *
- * Two things this deliberately does NOT do:
- *
- * It doesn't run an FFT. A real spectrum on the audio thread means a
- * transform per buffer, and the seek bar renders ~40 bars — nowhere near
- * enough resolution to justify it. RMS plus zero-crossing rate gives
- * "loud/quiet" and "dark/bright" for a handful of adds and comparisons per
- * sample, which is what the animation actually consumes.
- *
- * It doesn't emit per buffer. The audio thread produces buffers far faster
- * than the display refreshes, and pushing every one into a StateFlow would
- * allocate and wake collectors hundreds of times a second for frames nobody
- * draws. [publish] is throttled by the producer instead.
+ * The producer is the native EQ engine's analyser (core:eq-engine): a 2048-point
+ * FFT read at the playback rate, so the bars move with what is heard rather
+ * than with what the decoder is working on. The service polls it about 60
+ * times a second, and only while something here is collected (see [wanted]).
  */
 object AudioLevels {
     private val _current = MutableStateFlow(AudioLevel())
     val current: StateFlow<AudioLevel> = _current.asStateFlow()
+
+    private val _spectrum = MutableStateFlow(SpectrumFrame.EMPTY)
+
+    /** The analyser, about 60 frames a second while collected. */
+    val spectrum: StateFlow<SpectrumFrame> = _spectrum.asStateFlow()
+
+    /** True while a screen shows the level or the spectrum: the service only measures then. */
+    val wanted: Flow<Boolean> =
+        combine(_current.subscriptionCount, _spectrum.subscriptionCount) { a, b -> a > 0 || b > 0 }
+            .distinctUntilChanged()
 
     fun publish(level: Float, brightness: Float) {
         _current.value = AudioLevel(
@@ -50,28 +63,15 @@ object AudioLevels {
         )
     }
 
-    private val _spectrum = MutableStateFlow(FloatArray(SPECTRUM_BANDS))
-
-    /**
-     * Loudness in the equalizer's ten octave bands (31 Hz … 16 kHz), each
-     * 0..1, for the equalizer's analyser. Unlike [current] this costs real
-     * work on the audio thread (ten band filters), so the producer only
-     * measures while someone is collecting it: see [spectrumWanted].
-     */
-    val spectrum: StateFlow<FloatArray> = _spectrum.asStateFlow()
-
-    /** True while a screen is showing the analyser. */
-    val spectrumWanted: Boolean get() = _spectrum.subscriptionCount.value > 0
-
-    fun publishSpectrum(bands: FloatArray) {
-        _spectrum.value = bands
+    fun publishSpectrum(frame: SpectrumFrame) {
+        _spectrum.value = frame
     }
 
     /** Called when playback stops so the bars settle instead of freezing mid-peak. */
     fun reset() {
         _current.value = AudioLevel()
-        _spectrum.value = FloatArray(SPECTRUM_BANDS)
+        _spectrum.value = SpectrumFrame.EMPTY
     }
 
-    const val SPECTRUM_BANDS = 10
+    const val SPECTRUM_BARS = 32
 }

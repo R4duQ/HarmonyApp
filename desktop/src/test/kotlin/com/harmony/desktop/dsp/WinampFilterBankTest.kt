@@ -1,6 +1,5 @@
-package com.harmony.playback.service.player
+package com.harmony.desktop.dsp
 
-import com.harmony.core.model.WinampEqDesign
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import kotlin.math.PI

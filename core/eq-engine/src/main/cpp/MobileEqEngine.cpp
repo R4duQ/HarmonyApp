@@ -18,7 +18,9 @@ constexpr double kButterworthQ = 0.70710678118654752;
 // Stage 1.
 constexpr float kPreampCompensation = 0.65f;   // share of the boost peak taken back by the preamp
 constexpr float kBluetoothPadDb = -0.3f;       // room for lossy codecs' inter-sample peaks
-constexpr float kMaxUserPreampDb = 6.f;
+constexpr float kMaxUserPreampDb = 12.f;
+constexpr float kMaxLevelGainDb = 15.f;     // ReplayGain lifts quiet records up to this
+constexpr float kMinLevelGainDb = -30.f;
 constexpr float kMinUserPreampDb = -24.f;
 constexpr float kCoefficientSmoothingSeconds = 0.008f;
 constexpr float kGainSmoothingSeconds = 0.015f;
@@ -480,7 +482,9 @@ void MobileEqEngine::recomputePreamp(const float* gainsDb) {
     float user = userPreampDb_.load(std::memory_order_relaxed);
     if (!std::isfinite(user)) user = 0.f;
     user = std::clamp(user, kMinUserPreampDb, kMaxUserPreampDb);
-    const float total = compensation + devicePadDb_ + user;
+    float level = levelGainDb_.load(std::memory_order_relaxed);
+    level = std::isfinite(level) ? std::clamp(level, kMinLevelGainDb, kMaxLevelGainDb) : 0.f;
+    const float total = compensation + devicePadDb_ + user + level;
     targetPreampDb_.store(total, std::memory_order_relaxed);
     preampTargetLinear_ = dbToLinear(total);
     std::copy(gainsDb, gainsDb + kNumBands, preampSourceDb_);
@@ -794,6 +798,11 @@ void MobileEqEngine::setAutoTargetGainsDb(const float* gainsDb) {
 
 void MobileEqEngine::setUserPreampDb(float preampDb) {
     userPreampDb_.store(std::isfinite(preampDb) ? preampDb : 0.f, std::memory_order_relaxed);
+    controlGeneration_.fetch_add(1, std::memory_order_release);
+}
+
+void MobileEqEngine::setLevelGainDb(float gainDb) {
+    levelGainDb_.store(std::isfinite(gainDb) ? gainDb : 0.f, std::memory_order_relaxed);
     controlGeneration_.fetch_add(1, std::memory_order_release);
 }
 

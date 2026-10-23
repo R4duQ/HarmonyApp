@@ -53,7 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.harmony.core.model.WinampEqDesign
+import com.harmony.desktop.dsp.WinampEqDesign
 import com.harmony.desktop.DesktopApp
 import com.harmony.desktop.engine.EqConfig
 import com.harmony.desktop.engine.SpectrumTap

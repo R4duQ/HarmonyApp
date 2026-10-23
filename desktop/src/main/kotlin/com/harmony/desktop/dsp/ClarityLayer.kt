@@ -1,11 +1,5 @@
-package com.harmony.playback.service.player
+package com.harmony.desktop.dsp
 
-import com.harmony.core.model.ClarityBands
-import com.harmony.core.model.ClarityFilterBank
-import com.harmony.core.model.ClarityModel
-import com.harmony.core.model.ClarityReadout
-import com.harmony.core.model.ClaritySettings
-import com.harmony.core.model.RealFft
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.pow

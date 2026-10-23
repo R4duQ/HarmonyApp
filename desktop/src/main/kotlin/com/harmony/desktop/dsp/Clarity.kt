@@ -1,4 +1,6 @@
-package com.harmony.core.model
+package com.harmony.desktop.dsp
+
+import com.harmony.core.model.EqSettings
 
 import kotlin.math.PI
 import kotlin.math.abs

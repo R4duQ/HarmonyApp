@@ -181,6 +181,11 @@ public:
     void setAutoTargetGainsDb(const float* gainsDb);
     /** Extra user preamp, on top of the automatic compensation. */
     void setUserPreampDb(float preampDb);
+    /**
+     * Loudness levelling (ReplayGain), -30..+15 dB, on top of the preamps. It
+     * runs even with the EQ off; the limiter catches what a lift pushes over.
+     */
+    void setLevelGainDb(float gainDb);
     void setOutputDevice(OutputDevice device);
     /** Stops feeding the analyzer (saves the copy while nothing is on screen). */
     void setAnalyzerEnabled(bool enabled);
@@ -237,6 +242,7 @@ private:
     std::atomic<bool> eqEnabled_{true};
     std::atomic<bool> autoMode_{false};
     std::atomic<float> userPreampDb_{0.f};
+    std::atomic<float> levelGainDb_{0.f};
     std::atomic<int32_t> device_{static_cast<int32_t>(OutputDevice::kPhoneSpeaker)};
     std::atomic<bool> analyzerEnabled_{true};
     std::atomic<int32_t> barCount_{32};

@@ -144,6 +144,10 @@ void nativeSetUserPreamp(JNIEnv*, jclass, jlong handle, jfloat preampDb) {
     engineOf(handle)->setUserPreampDb(preampDb);
 }
 
+void nativeSetLevelGain(JNIEnv*, jclass, jlong handle, jfloat gainDb) {
+    engineOf(handle)->setLevelGainDb(gainDb);
+}
+
 void nativeSetOutputDevice(JNIEnv* env, jclass, jlong handle, jint device) {
     if (device < 0 || device > static_cast<jint>(OutputDevice::kUsbDacHiRes)) {
         throwIllegalArgument(env, "unknown output device");
@@ -197,6 +201,7 @@ const JNINativeMethod kMethods[] = {
     HARMONY_JNI_METHOD(nativeSetEqEnabled, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetAutoMode, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetUserPreamp, "(JF)V"),
+    HARMONY_JNI_METHOD(nativeSetLevelGain, "(JF)V"),
     HARMONY_JNI_METHOD(nativeSetOutputDevice, "(JI)V"),
     HARMONY_JNI_METHOD(nativeSetAnalyzerEnabled, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetSpectrumBarCount, "(JI)V"),

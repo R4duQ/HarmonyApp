@@ -58,7 +58,6 @@ class PlaybackService : MediaLibraryService() {
     @Inject lateinit var settingsRepository: com.harmony.core.datastore.SettingsRepository
     @Inject lateinit var albumJourneys: com.harmony.domain.library.repository.AlbumJourneyRepository
     @Inject lateinit var audioOutput: com.harmony.playback.service.player.AudioOutputMonitor
-    @Inject lateinit var autoEq: com.harmony.playback.service.autoeq.AutoEqCoordinator
     @Inject lateinit var connect: ConnectSession
 
     // Lazy: only touched when the app is swiped away, and the service must
@@ -103,10 +102,11 @@ class PlaybackService : MediaLibraryService() {
         // Through the session's player, so it also pauses a computer playing over Connect.
         sleepTimer.attach(sessionPlayer, serviceScope)
         callback.attach(harmonyPlayer, sleepTimer)
-        autoEq.start(serviceScope)
-        player.addListener(object : androidx.media3.common.Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) = autoEq.setPlaying(isPlaying)
-        })
+        // Auto's saved song curves go straight to the engines; the rest of the
+        // equalizer arrives through the session (see SettingsApplier).
+        serviceScope.launch {
+            settingsRepository.eqSongCurves.collect { harmonyPlayer.setEqSongCurves(it) }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
@@ -274,7 +274,6 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         albumListening?.stop()
-        autoEq.stop()
         sleepTimer.detach()
         connect.detach()
         callback.close()
@@ -282,6 +281,8 @@ class PlaybackService : MediaLibraryService() {
             player.release()
             release()
         }
+        // The native EQ engines, the output monitor and the analyser.
+        harmonyPlayer.release()
         mediaSession = null
         serviceScope.cancel()
         super.onDestroy()

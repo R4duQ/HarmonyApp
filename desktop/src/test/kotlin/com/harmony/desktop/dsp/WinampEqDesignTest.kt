@@ -1,4 +1,4 @@
-package com.harmony.core.model
+package com.harmony.desktop.dsp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

@@ -78,8 +78,14 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
         MobileEqNative.nativeSetAutoTargetGains(checkedHandle(), gainsDb)
     }
 
-    /** A manual preamp on top of the automatic compensation, -24..+6 dB. */
+    /** A manual preamp on top of the automatic compensation, -24..+12 dB. */
     fun setPreampDb(preampDb: Float) = MobileEqNative.nativeSetUserPreamp(checkedHandle(), preampDb)
+
+    /**
+     * Loudness levelling for the track (ReplayGain), -30..+15 dB. Applies with
+     * the EQ off too; the limiter keeps a lift from clipping.
+     */
+    fun setLevelGainDb(gainDb: Float) = MobileEqNative.nativeSetLevelGain(checkedHandle(), gainDb)
 
     /** Where the sound goes; [AudioOutputMonitor] calls this on every routing change. */
     fun setOutputDevice(device: OutputDeviceType) =

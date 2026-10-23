@@ -52,6 +52,7 @@ lifecycle.addObserver(monitor)
 equalizer.setBandGains(floatArrayOf(6f, 4f, 2f, 0f, 0f, 0f, 1f, 2f, 3f, 4f))
 equalizer.setAutoMode(true)
 equalizer.setAutoTargetGains(curveForTheTrack)   // morphs over 400 ms
+equalizer.setLevelGainDb(replayGainDb)            // loudness levelling, ahead of the limiter
 
 // UI, every frame (Choreographer / withFrameNanos). Allocate the arrays once.
 val bars = FloatArray(64); val peaks = FloatArray(64)
@@ -60,6 +61,15 @@ val count = equalizer.pollSpectrum(bars, peaks)    // 0..1, ballistics applied
 // On player release:
 equalizer.release()
 ```
+
+## In Harmony
+
+`playback/service`'s `HarmonyPlayer` builds one engine per player (two, for the
+crossfade) inside a `HiResEqAudioSink`. It feeds them the settings, ReplayGain
+as the level gain, and each song's Auto curve (`core/model`'s `EqAuto`: the
+curve saved for the song, else its genre's preset, else the listener's). It
+follows the output with `AudioOutputMonitor` and polls the playing engine's
+analyser for the screens (`AudioLevels`).
 
 ## Where this departs from the brief, and why
 

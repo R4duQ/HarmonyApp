@@ -1,8 +1,5 @@
-package com.harmony.playback.service.player
+package com.harmony.desktop.dsp
 
-import com.harmony.core.model.ClarityBands
-import com.harmony.core.model.ClaritySettings
-import com.harmony.core.model.PinkNoise
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -49,6 +49,7 @@ internal object MobileEqNative {
     @JvmStatic external fun nativeSetEqEnabled(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetAutoMode(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetUserPreamp(handle: Long, preampDb: Float)
+    @JvmStatic external fun nativeSetLevelGain(handle: Long, gainDb: Float)
     @JvmStatic external fun nativeSetOutputDevice(handle: Long, device: Int)
     @JvmStatic external fun nativeSetAnalyzerEnabled(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetSpectrumBarCount(handle: Long, bars: Int)

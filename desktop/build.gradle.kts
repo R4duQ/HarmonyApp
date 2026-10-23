@@ -12,16 +12,6 @@ group = "com.harmony"
 val desktopVersion = (findProperty("desktopVersion") as String?) ?: "1.0.0"
 version = desktopVersion
 
-// The equalizer's filters are Android-free Kotlin that lives with the phone's
-// audio chain; copy them in rather than moving them out of :playback:service.
-val sharedDsp = layout.buildDirectory.dir("shared-dsp")
-val syncSharedDsp by tasks.registering(Sync::class) {
-    from("../playback/service/src/main/kotlin/com/harmony/playback/service/player") {
-        include("WinampFilterBank.kt", "ClarityLayer.kt")
-    }
-    into(sharedDsp.map { it.dir("com/harmony/playback/service/player") })
-}
-
 // Built with whichever JDK runs Gradle (17 in CI, which also packages the installer); bytecode for 17.
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -35,12 +25,9 @@ kotlin {
             "src/main/kotlin",
             "../core/model/src/main/kotlin",
             "../core/remote/src/main/kotlin",
-            sharedDsp,
         )
     }
 }
-
-tasks.named("compileKotlin") { dependsOn(syncSharedDsp) }
 
 dependencies {
     implementation(compose.desktop.currentOs)
