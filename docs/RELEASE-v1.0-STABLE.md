@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **137**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 136), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **138**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 137), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -112,10 +112,13 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   - *Knows where it plays*: phone speaker, wired, Bluetooth or USB DAC. It filters out what that output
     can't play (below 90 Hz on the phone speaker, 24 Hz on Bluetooth, which also gets a little extra
     room for its codec, 18 Hz wired and 10 Hz on a DAC).
-  - *AUTO*: like Winamp's, it loads each song's own curve as the song starts and blends it in over
-    400 ms: the curve you shaped for that song (move a slider while Auto plays it and the song keeps
-    it), otherwise the preset for its genre (rock, pop, hip-hop, dance, classical, jazz…). Heavy kicks
-    pull the deepest bass boost back by up to 4 dB so it doesn't turn muddy.
+  - *AUTO*: it listens. The engine hears each song in the ten bands and compares its tone with a
+    well-balanced record, then evens part of the difference out on top of your own curve: a boomy
+    song loses some bass, a dull one gets some air, a harsh one is softened (at most +5/−6 dB). It
+    fades in over the song's first 8 seconds and blends every change in over 400 ms, so nothing
+    jumps. A song it heard before is right from the first second. The Equalizer shows what it hears
+    and the biggest changes it makes. Heavy kicks pull the deepest bass boost back by up to 4 dB so
+    it doesn't turn muddy.
   - *Spectrum*: the analyser in the Winamp window now comes from the engine's own FFT at 60 frames a
     second, timed to what you hear. The Now Playing visualiser uses it too.
   - *Bit-perfect USB* (Android 14 and newer, with a USB DAC): a switch to send the file to the DAC

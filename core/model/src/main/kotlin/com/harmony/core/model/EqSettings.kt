@@ -15,8 +15,9 @@ data class EqSettings(
     /** A preamp on top of the engine's automatic headroom, -12..+12 dB. */
     val preampDb: Float = 0f,
     /**
-     * Winamp's AUTO: every song gets its own curve (see [EqAuto]), morphed in
-     * over 400 ms as it starts, and the sub-bass boost backs off on heavy kicks.
+     * AUTO: the engine listens to each song and adds a correction for what it
+     * hears to [bandGainsDb] (see [EqAuto]); the sub-bass boost also backs off
+     * on heavy kicks.
      */
     val auto: Boolean = false,
     /**
@@ -78,78 +79,32 @@ object EqPresets {
     }?.first
 }
 
-/** Where Auto took a song's curve from. */
-enum class EqAutoSource {
-    /** The listener shaped the curve while this song played with Auto on. */
-    SONG,
-
-    /** The preset for the song's genre. */
-    GENRE,
-
-    /** Nothing known about the song: the listener's own curve. */
-    MANUAL,
-}
-
-/** The curve Auto plays a song with, and why. */
+/** What Auto is playing the current song with, for the screen. */
 data class EqAutoCurve(
+    /** The curve playing now: the listener's own plus [correctionDb]. */
     val gainsDb: List<Float>,
-    val source: EqAutoSource,
-    /** The preset's name for [EqAutoSource.GENRE]. */
-    val preset: String? = null,
+    /** What listening to the song adds, dB per band. */
+    val correctionDb: List<Float>,
+    /** Seconds of the song Auto has heard (silence doesn't count). */
+    val heardSeconds: Float,
+    /** The song was heard before, so its correction applied from the first second. */
+    val remembered: Boolean,
 )
 
 /**
- * Winamp's AUTO button loaded the preset saved for each file. Harmony's does
- * the same, and when nothing was saved, picks the preset for the song's genre:
- *
- *  1. the curve saved for the song (moving a slider while Auto plays it saves one);
- *  2. the genre's preset;
- *  3. the listener's own curve.
+ * Auto listens: the native engine hears each song in the equalizer's octave
+ * bands, compares its tone with a typical well-mastered record and evens part
+ * of the difference out (a boomy song loses some bass, a dull one gets some
+ * air), fading in over the song's first [SETTLE_SECONDS] and morphing to each
+ * new curve over 400 ms. A song heard before starts with what was learned
+ * about it.
  */
 object EqAuto {
-    /** How many songs keep a curve of their own; the oldest go first. */
-    const val MAX_SONG_CURVES = 500
+    /** Heard this long, a song's correction applies in full. */
+    const val SETTLE_SECONDS = 8f
 
-    fun curveFor(
-        songId: Long?,
-        genre: String?,
-        songCurves: Map<Long, List<Float>>,
-        manual: List<Float>,
-    ): EqAutoCurve {
-        songId?.let(songCurves::get)?.let { return EqAutoCurve(EqSettings.sanitize(it), EqAutoSource.SONG) }
-        presetForGenre(genre)?.let { name ->
-            EqPresets.named(name)?.let { return EqAutoCurve(it, EqAutoSource.GENRE, name) }
-        }
-        return EqAutoCurve(EqSettings.sanitize(manual), EqAutoSource.MANUAL)
-    }
-
-    /** The preset for a genre tag ("Alternative Rock", "Hip Hop/Rap", "Electronic; House"...), or null. */
-    fun presetForGenre(genre: String?): String? {
-        val g = genre?.lowercase()?.trim().orEmpty()
-        if (g.isEmpty()) return null
-        return GENRES.firstOrNull { (words, _) -> words.any { it in g } }?.second
-    }
-
-    // Checked in order: the more specific words first ("drum and bass" before "bass",
-    // "hip hop" before "pop", "soft rock" before "rock").
-    private val GENRES: List<Pair<List<String>, String>> = listOf(
-        listOf("spoken", "podcast", "audiobook", "speech", "comedy", "a cappella", "acapella") to "Vocal",
-        listOf("hip hop", "hip-hop", "hiphop", "rap", "trap", "r&b", "rnb", "grime", "drill") to "Hip-Hop",
-        listOf("classical", "orchestra", "symphon", "opera", "baroque", "chamber", "soundtrack", "score") to "Classical",
-        listOf("techno", "trance", "electronic", "electro", "dubstep", "drum and bass", "drum & bass", "dnb", "idm", "synthwave") to "Techno",
-        listOf("reggae", "dub", "dancehall") to "Reggae",
-        listOf("house", "dance", "disco", "edm", "eurodance") to "Dance",
-        listOf("soft rock", "yacht") to "Soft Rock",
-        listOf("rock", "metal", "punk", "grunge", "indie", "alternative", "emo", "hardcore") to "Rock",
-        listOf("ska") to "Ska",
-        listOf("jazz", "blues", "soul", "funk", "swing", "bossa") to "Jazz",
-        listOf("acoustic", "folk", "country", "singer-songwriter", "bluegrass") to "Acoustic",
-        listOf("ambient", "chill", "lounge", "new age", "lo-fi", "lofi", "easy listening") to "Soft",
-        listOf("latin", "reggaeton", "salsa", "party", "manele") to "Party",
-        listOf("live") to "Live",
-        listOf("vocal", "chanson", "gospel", "choir") to "Vocal",
-        listOf("pop") to "Pop",
-    )
+    /** A song heard at least this long is remembered for next time. */
+    const val REMEMBER_AFTER_SECONDS = 20f
 
     /**
      * Turns the old Winamp equalizer's sliders (60 Hz … 16 kHz, ±20 dB) into

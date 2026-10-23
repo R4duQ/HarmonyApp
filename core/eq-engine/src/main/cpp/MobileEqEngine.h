@@ -177,8 +177,19 @@ public:
     void setEqEnabled(bool enabled);
     /** Winamp-style Auto: the curve follows [setAutoTargetGainsDb] and the sub-bass ducks on kicks. */
     void setAutoMode(bool enabled);
-    /** The curve Auto morphs to, over 400 ms (call it when the track changes). */
+    /**
+     * The listener's own curve under Auto. Auto plays it plus what it works
+     * out by listening to the song (see startTrack), morphing to every new
+     * target over 400 ms.
+     */
     void setAutoTargetGainsDb(const float* gainsDb);
+    /**
+     * A new song starts: Auto listens to it afresh. [knownLevelsDb] (kNumBands
+     * values, or null) is what songLevelsDb() reported for this song when it
+     * was heard before; its correction then applies at once instead of
+     * fading in as the song is heard.
+     */
+    void startTrack(const float* knownLevelsDb);
     /** Extra user preamp, on top of the automatic compensation. */
     void setUserPreampDb(float preampDb);
     /**
@@ -213,6 +224,22 @@ public:
     float bassDuckDb() const { return bassDuckDb_.load(std::memory_order_relaxed); }
     /** Ceiling of the limiter for the current device, in dBFS. */
     float ceilingDb() const;
+    /**
+     * The current song's octave-band levels as Auto has heard them so far (dB,
+     * NaN where nothing yet), for the caller to remember; returns the seconds
+     * of music heard (silence and fades don't count).
+     */
+    float songLevelsDb(float* out) const;
+    /** What Auto adds to the listener's curve from listening, dB per band. */
+    void listenCorrectionDb(float* out) const;
+    /** The curve Auto plays right now (the morph included, before ducking), dB per band. */
+    void autoCurveDb(float* out) const;
+    /**
+     * Auto's tone correction for a song with octave-band [levelsDb]: how far it
+     * sits from a typical well-mastered record, partly evened out. Pure.
+     */
+    static void toneCorrectionDb(const float* levelsDb, float* outDb);
+
     /** Gain (dB) band [band] is currently designed at, ducking included. */
     float designedBandGainDb(int band) const { return designedDb_[band]; }
 
@@ -232,6 +259,9 @@ private:
     int processBlock(float* io, int frames);
     float limitFrame(float* frame, float* out);
     void pushAnalyzer(const float* io, int frames);
+    void finishListenBlock();
+    void updateListenCurve();
+    void beginTrack();
     void rebuildBarMap(int sampleRate, int bars);
 
     // Shared controls.
@@ -249,6 +279,14 @@ private:
     std::atomic<int32_t> analyzerSampleRate_{48000};
     std::atomic<float> targetPreampDb_{0.f};
     std::atomic<float> bassDuckDb_{0.f};
+    // Auto listening: requests in, readings out.
+    std::atomic<uint32_t> trackGeneration_{0};
+    std::atomic<bool> knownValid_{false};
+    std::atomic<float> knownLevelDb_[kNumBands];
+    std::atomic<float> songLevelOutDb_[kNumBands];
+    std::atomic<float> listenOutDb_[kNumBands];
+    std::atomic<float> autoCurveOutDb_[kNumBands];
+    std::atomic<float> heardSecondsOut_{0.f};
 
     // Audio-thread state.
     int sampleRate_ = 48000;
@@ -284,6 +322,23 @@ private:
     float envAttack_ = 0.f;
     float envRelease_ = 0.f;
     float duckDb_ = 0.f;
+
+    // Auto listening: octave band-passes on the input, averaged over the song.
+    bool listening_ = false;
+    Biquad listenFilter_[kNumBands];
+    double listenState_[kNumBands][2] = {};
+    double listenBlockPower_[kNumBands] = {};
+    double songPower_[kNumBands] = {};
+    int listenBlockFrames_ = 4800;
+    int listenFrameInBlock_ = 0;
+    int songBlocks_ = 0;
+    int blocksSinceCurve_ = 0;
+    bool hasKnown_ = false;
+    float knownLevels_[kNumBands] = {};
+    float listenDb_[kNumBands] = {};
+    uint32_t listenVersion_ = 0;
+    uint32_t seenListenVersion_ = 0;
+    uint32_t seenTrackGeneration_ = 0;
 
     // Saturator and limiter.
     float saturatorKnee_ = 0.f;

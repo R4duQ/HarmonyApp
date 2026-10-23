@@ -5,6 +5,7 @@
 
 #include "MobileEqEngine.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -287,20 +288,106 @@ void autoDucksHeavySubBass() {
     auto quiet = sine(sr, 2, 50.0, 0.1f, 1.0);
     engine->process(quiet.data(), SampleFormat::kFloat, sr, quiet.data());
     CHECK(engine->bassDuckDb() < 0.01f, "ducking on quiet bass: %.2f", engine->bassDuckDb());
-    CHECK(std::fabs(engine->designedBandGainDb(1) - 8.f) < 0.01f, "62 Hz band at %.2f", engine->designedBandGainDb(1));
+    // Auto also listens to the song; the curve it plays is in autoCurveDb, ducking comes off that.
+    float curve[kNumBands];
+    engine->autoCurveDb(curve);
+    CHECK(std::fabs(engine->designedBandGainDb(1) - curve[1]) < 0.01f, "62 Hz band at %.2f (curve %.2f)",
+          engine->designedBandGainDb(1), curve[1]);
     // A heavy 50 Hz line near -1 dBFS: ducks by about 3.3 dB, never more than 4.
     auto loud = sine(sr, 2, 50.0, 0.9f, 0.5);
     engine->process(loud.data(), SampleFormat::kFloat, sr / 2, loud.data());
     const float duck = engine->bassDuckDb();
     CHECK(duck > 2.5f && duck <= 4.f, "ducking on heavy bass: %.2f", duck);
-    CHECK(std::fabs(engine->designedBandGainDb(0) - (8.f - duck)) < 0.02f, "31 Hz band at %.2f",
-          engine->designedBandGainDb(0));
-    CHECK(std::fabs(engine->designedBandGainDb(2)) < 0.01f, "125 Hz untouched: %.2f", engine->designedBandGainDb(2));
+    engine->autoCurveDb(curve);
+    CHECK(curve[0] > 2.f, "the 31 Hz boost to duck: %.2f", curve[0]);
+    CHECK(std::fabs(engine->designedBandGainDb(0) - (curve[0] - std::min(duck, curve[0]))) < 0.02f,
+          "31 Hz band at %.2f (curve %.2f)", engine->designedBandGainDb(0), curve[0]);
+    CHECK(std::fabs(engine->designedBandGainDb(2) - curve[2]) < 0.01f, "125 Hz not ducked: %.2f (curve %.2f)",
+          engine->designedBandGainDb(2), curve[2]);
     // Ducking needs Auto.
     engine->setAutoMode(false);
     auto again = sine(sr, 2, 50.0, 0.9f, 1.0);
     engine->process(again.data(), SampleFormat::kFloat, sr, again.data());
     CHECK(engine->bassDuckDb() < 0.05f, "ducking without Auto: %.2f", engine->bassDuckDb());
+}
+
+/** A "song" of noise, the same in every channel. */
+std::vector<float> noiseSong(int sr, int channels, double seconds, unsigned seed) {
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> white(0.f, 0.05f);
+    const size_t frames = static_cast<size_t>(seconds * sr);
+    std::vector<float> out(frames * channels);
+    for (size_t i = 0; i < frames; ++i) {
+        const float v = white(rng);
+        for (int c = 0; c < channels; ++c) out[i * channels + c] = v;
+    }
+    return out;
+}
+
+void feed(MobileEqEngine& engine, std::vector<float>& audio, int channels) {
+    const size_t total = audio.size() / channels;
+    for (size_t at = 0; at < total; at += 4800) {
+        const int frames = static_cast<int>(std::min<size_t>(4800, total - at));
+        engine.process(audio.data() + at * channels, SampleFormat::kFloat, frames, audio.data() + at * channels);
+    }
+}
+
+void autoListensToTheSong() {
+    // The rule: a song that leans away from a typical record is partly evened out.
+    float reference[kNumBands] = {-7.f, 0.f, 0.f, -2.f, -4.f, -7.f, -10.f, -13.f, -16.f, -24.f};
+    float out[kNumBands];
+    MobileEqEngine::toneCorrectionDb(reference, out);
+    for (int b = 0; b < kNumBands; ++b) CHECK(std::fabs(out[b]) < 1e-4f, "reference band %d: %.3f", b, out[b]);
+    float boomyAndDull[kNumBands];
+    for (int b = 0; b < kNumBands; ++b) boomyAndDull[b] = reference[b] + (b <= 2 ? 6.f : 0.f) + (b >= 7 ? -8.f : 0.f) - 40.f;
+    MobileEqEngine::toneCorrectionDb(boomyAndDull, out);
+    CHECK(out[1] < -1.5f && out[2] < -1.f, "boomy bass cut: %.2f %.2f", out[1], out[2]);
+    CHECK(out[7] > 1.f && out[8] > 2.f, "dull top lifted: %.2f %.2f", out[7], out[8]);
+    for (int b = 0; b < kNumBands; ++b) CHECK(out[b] >= -6.f && out[b] <= 5.f, "band %d within limits: %.2f", b, out[b]);
+    float missingTop[kNumBands];
+    std::copy(reference, reference + kNumBands, missingTop);
+    missingTop[9] = -60.f;  // an MP3's cut-off top: absent, not thin
+    MobileEqEngine::toneCorrectionDb(missingTop, out);
+    CHECK(out[9] <= 0.01f, "absent top not boosted: %.2f", out[9]);
+
+    // In the engine: it hears the song in octave bands and plays the correction for what it heard.
+    const int sr = 48000;
+    auto engine = engineAt(sr, 2, OutputDevice::kPhoneSpeaker);  // listens before the speaker's high-pass
+    float flat[kNumBands] = {};
+    engine->setAutoTargetGainsDb(flat);
+    engine->setAutoMode(true);
+    engine->startTrack(nullptr);
+    auto song = noiseSong(sr, 2, 12.0, 7);
+    feed(*engine, song, 2);
+    float levels[kNumBands], correction[kNumBands], curve[kNumBands], expected[kNumBands];
+    const float heard = engine->songLevelsDb(levels);
+    engine->listenCorrectionDb(correction);
+    engine->autoCurveDb(curve);
+    CHECK(heard > 11.f && heard < 12.5f, "heard %.1f s", heard);
+    // White noise: about 3 dB more per octave, the 31 Hz band included (the high-pass comes after).
+    CHECK(levels[9] - levels[1] > 15.f && levels[9] - levels[1] < 30.f, "white noise rises: %.1f dB", levels[9] - levels[1]);
+    MobileEqEngine::toneCorrectionDb(levels, expected);
+    for (int b = 0; b < kNumBands; ++b) {
+        CHECK(std::fabs(correction[b] - expected[b]) < 0.05f, "band %d correction %.2f for %.2f", b, correction[b], expected[b]);
+        CHECK(std::fabs(curve[b] - std::clamp(flat[b] + correction[b], -12.f, 12.f)) < 0.05f, "band %d plays %.2f", b, curve[b]);
+    }
+    CHECK(correction[9] < -3.f, "too bright a top is taken down: %.2f", correction[9]);
+
+    // A new song starts from nothing, and silence teaches nothing.
+    engine->startTrack(nullptr);
+    std::vector<float> silence(sr * 2 * 2, 0.f);
+    feed(*engine, silence, 2);
+    float fresh[kNumBands];
+    engine->listenCorrectionDb(fresh);
+    for (int b = 0; b < kNumBands; ++b) CHECK(std::fabs(fresh[b]) < 0.01f, "new song band %d: %.2f", b, fresh[b]);
+    CHECK(engine->songLevelsDb(levels) == 0.f, "silence heard as music");
+    // A song heard before gets its correction at once.
+    engine->startTrack(boomyAndDull);
+    std::vector<float> moment(4800 * 2, 0.f);
+    feed(*engine, moment, 2);
+    float known[kNumBands];
+    engine->listenCorrectionDb(known);
+    CHECK(known[2] < -1.f && known[8] > 2.f, "remembered song corrected at once: %.2f / %.2f", known[2], known[8]);
 }
 
 void convertsEveryFormat() {
@@ -480,6 +567,7 @@ int main() {
     deviceHighPass();
     autoMorphsOver400ms();
     autoDucksHeavySubBass();
+    autoListensToTheSong();
     convertsEveryFormat();
     sampleRateChangesReconfigure();
     spectrumFindsTheTone();

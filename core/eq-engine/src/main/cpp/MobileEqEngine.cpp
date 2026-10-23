@@ -42,6 +42,23 @@ constexpr float kEnvelopeAttackSeconds = 0.003f;
 constexpr float kEnvelopeReleaseSeconds = 0.15f;
 constexpr float kDuckReleaseSeconds = 0.12f;
 
+// Stage 3, listening: Auto hears each song in octave bands and evens its tone
+// out towards a typical well-mastered record.
+// Octave-band levels of the average modern commercial recording, relative to
+// its loudest octave: real records lean down about 3 dB per octave above the
+// low mids and fall faster at the top.
+constexpr float kToneReferenceDb[kNumBands] = {-7.f, 0.f, 0.f, -2.f, -4.f, -7.f, -10.f, -13.f, -16.f, -24.f};
+constexpr float kToneStrength = 0.5f;      // share of the difference evened out
+constexpr float kToneMaxBoostDb = 5.f;
+constexpr float kToneMaxShelfBoostDb = 4.f;
+constexpr float kToneMaxCutDb = 6.f;
+constexpr float kToneAbsentDb = 18.f;      // this far under: absent (an MP3's cut-off top), not thin
+constexpr float kListenSettleSeconds = 8.f;  // heard this long, the correction applies in full
+constexpr double kListenBlockSeconds = 0.1;
+constexpr int kListenCurveEveryBlocks = 5;   // the correction is worked out twice a second
+constexpr double kListenSilencePower = 1e-6; // a block below about -60 dBFS is silence or a fade
+constexpr double kOctaveQ = 1.41421356237;
+
 // Stage 4.
 constexpr float kSaturatorKneeDb = -1.8f;
 constexpr float kCeilingDb = -0.15f;
@@ -242,6 +259,13 @@ Biquad designHighPass(double sampleRate, double frequency, double q) {
                       1.0 + alpha, -2.0 * cosW, 1.0 - alpha);
 }
 
+// Band-pass with 0 dB at the centre (RBJ, constant peak gain).
+Biquad designBandPass(double sampleRate, double frequency, double q) {
+    const double w0 = 2.0 * kPi * nyquistSafe(sampleRate, frequency) / sampleRate;
+    const double alpha = std::sin(w0) / (2.0 * q);
+    return normalised(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * std::cos(w0), 1.0 - alpha);
+}
+
 Biquad designLowPass(double sampleRate, double frequency, double q) {
     const double w0 = 2.0 * kPi * nyquistSafe(sampleRate, frequency) / sampleRate;
     const double cosW = std::cos(w0);
@@ -357,6 +381,10 @@ MobileEqEngine::MobileEqEngine() {
     for (int b = 0; b < kNumBands; ++b) {
         userGainDb_[b].store(0.f, std::memory_order_relaxed);
         autoTargetDb_[b].store(0.f, std::memory_order_relaxed);
+        knownLevelDb_[b].store(0.f, std::memory_order_relaxed);
+        songLevelOutDb_[b].store(NAN, std::memory_order_relaxed);
+        listenOutDb_[b].store(0.f, std::memory_order_relaxed);
+        autoCurveOutDb_[b].store(0.f, std::memory_order_relaxed);
     }
     // Periodic Hann: the right window for spectral analysis of a stream.
     for (int n = 0; n < kFftSize; ++n) {
@@ -389,6 +417,11 @@ bool MobileEqEngine::configure(int sampleRate, int channels) {
     autoRampFrames_ = std::max(1, static_cast<int>(std::lround(kAutoMorphSeconds * sampleRate)));
     subBassLowPass_ = designLowPass(sampleRate, kSubBassCutoffHz, kButterworthQ);
     saturatorKnee_ = dbToLinear(kSaturatorKneeDb);
+    listenBlockFrames_ = std::max(1, static_cast<int>(std::lround(kListenBlockSeconds * sampleRate)));
+    for (int b = 0; b < kNumBands; ++b) listenFilter_[b] = designBandPass(sampleRate, kBandFrequencies[b], kOctaveQ);
+    std::memset(listenState_, 0, sizeof(listenState_));
+    std::fill(listenBlockPower_, listenBlockPower_ + kNumBands, 0.0);
+    listenFrameInBlock_ = 0;
 
     // Every coefficient depends on the rate: redesign all of them now, at full
     // precision, and start from them directly (the state is cleared anyway).
@@ -419,6 +452,8 @@ void MobileEqEngine::reset() {
     subBassState_[0] = subBassState_[1] = 0.0;
     subBassEnvelope_ = 0.f;
     duckDb_ = 0.f;
+    // A seek keeps what Auto learned about the song; only the filters restart.
+    std::memset(listenState_, 0, sizeof(listenState_));
     bassDuckDb_.store(0.f, std::memory_order_relaxed);
     highPass_.current = highPass_.target;
     highPass_.settling = false;
@@ -507,18 +542,27 @@ void MobileEqEngine::updateControls() {
     const bool eqOn = eqEnabled_.load(std::memory_order_relaxed);
     const bool autoOn = eqOn && autoMode_.load(std::memory_order_relaxed);
 
+    const uint32_t track = trackGeneration_.load(std::memory_order_acquire);
+    if (track != seenTrackGeneration_) {
+        seenTrackGeneration_ = track;
+        beginTrack();
+    }
+    listening_ = autoOn;
+
     float desired[kNumBands];
     if (autoOn) {
         const uint32_t autoGeneration = autoGeneration_.load(std::memory_order_acquire);
-        if (autoGeneration != seenAutoGeneration_ || !autoWasOn_) {
-            // Morph from whatever is heard right now to the new curve.
+        if (autoGeneration != seenAutoGeneration_ || listenVersion_ != seenListenVersion_ || !autoWasOn_) {
+            // Morph from whatever is heard right now to the new curve: the
+            // listener's own plus what listening to the song asks for.
             for (int b = 0; b < kNumBands; ++b) {
                 autoFromDb_[b] = autoWasOn_ ? autoNowDb_[b]
                                             : clampGainDb(userGainDb_[b].load(std::memory_order_relaxed));
-                autoToDb_[b] = clampGainDb(autoTargetDb_[b].load(std::memory_order_relaxed));
+                autoToDb_[b] = clampGainDb(autoTargetDb_[b].load(std::memory_order_relaxed) + listenDb_[b]);
             }
             autoRampPos_ = 0;
             seenAutoGeneration_ = autoGeneration;
+            seenListenVersion_ = listenVersion_;
         }
         const float t = std::min(1.f, static_cast<float>(autoRampPos_) / static_cast<float>(autoRampFrames_));
         // Smoothstep: no corner at either end of the 400 ms morph.
@@ -534,6 +578,7 @@ void MobileEqEngine::updateControls() {
         }
     }
     autoWasOn_ = autoOn;
+    for (int b = 0; b < kNumBands; ++b) autoCurveOutDb_[b].store(desired[b], std::memory_order_relaxed);
 
     // Stage 3: dynamic bass. When the track already carries sub-bass peaks
     // above -6 dBFS, take back up to 4 dB of the 31/62 Hz boost while they hit.
@@ -647,6 +692,17 @@ int MobileEqEngine::processBlock(float* io, int frames) {
 
         const float* in = io + static_cast<size_t>(i) * channels;
         double mono = 0.0;
+        if (listening_) {
+            // Auto hears the song as it comes in, before the high-pass and the EQ.
+            double raw = 0.0;
+            for (int c = 0; c < channels; ++c) raw += in[c];
+            raw /= channels;
+            for (int b = 0; b < kNumBands; ++b) {
+                const double y = runBiquad(listenFilter_[b], listenState_[b], raw);
+                listenBlockPower_[b] += y * y;
+            }
+            if (++listenFrameInBlock_ >= listenBlockFrames_) finishListenBlock();
+        }
         for (int c = 0; c < channels; ++c) {
             double y = runBiquad(highPass_.current, hpState_[c], in[c]);
             mono += y;
@@ -689,6 +745,124 @@ int MobileEqEngine::processBlock(float* io, int frames) {
         highPass_.settling = false;
     }
     return written;
+}
+
+// ---- Auto listening ----------------------------------------------------------------
+
+void MobileEqEngine::toneCorrectionDb(const float* levelsDb, float* outDb) {
+    float diff[kNumBands];
+    for (int b = 0; b < kNumBands; ++b) diff[b] = levelsDb[b] - kToneReferenceDb[b];
+    // Line the song and the reference up on the bands every song has (125 Hz to 4 kHz).
+    float middle[6];
+    int count = 0;
+    for (int b = 2; b <= 7; ++b) {
+        if (std::isfinite(diff[b])) middle[count++] = diff[b];
+    }
+    if (count == 0) {
+        std::fill(outDb, outDb + kNumBands, 0.f);
+        return;
+    }
+    for (int i = 1; i < count; ++i) {  // insertion sort: six values at most
+        const float v = middle[i];
+        int j = i - 1;
+        while (j >= 0 && middle[j] > v) {
+            middle[j + 1] = middle[j];
+            --j;
+        }
+        middle[j + 1] = v;
+    }
+    const float offset = count % 2 == 1 ? middle[count / 2] : 0.5f * (middle[count / 2 - 1] + middle[count / 2]);
+    float raw[kNumBands];
+    for (int b = 0; b < kNumBands; ++b) {
+        const float d = diff[b] - offset;
+        raw[b] = (!std::isfinite(d) || d < -kToneAbsentDb) ? 0.f : -kToneStrength * d;
+    }
+    // 1-2-1 across neighbours, so no band fights the next one.
+    for (int b = 0; b < kNumBands; ++b) {
+        const float left = raw[std::max(0, b - 1)];
+        const float right = raw[std::min(kNumBands - 1, b + 1)];
+        const float maxBoost = (b == 0 || b == kNumBands - 1) ? kToneMaxShelfBoostDb : kToneMaxBoostDb;
+        outDb[b] = std::clamp(0.25f * left + 0.5f * raw[b] + 0.25f * right, -kToneMaxCutDb, maxBoost);
+    }
+}
+
+void MobileEqEngine::startTrack(const float* knownLevelsDb) {
+    const bool known = knownLevelsDb != nullptr;
+    if (known) {
+        for (int b = 0; b < kNumBands; ++b) knownLevelDb_[b].store(knownLevelsDb[b], std::memory_order_relaxed);
+    }
+    knownValid_.store(known, std::memory_order_relaxed);
+    trackGeneration_.fetch_add(1, std::memory_order_release);
+}
+
+void MobileEqEngine::beginTrack() {
+    // The last song's ringing in the band filters isn't this song's sound.
+    std::memset(listenState_, 0, sizeof(listenState_));
+    std::fill(songPower_, songPower_ + kNumBands, 0.0);
+    std::fill(listenBlockPower_, listenBlockPower_ + kNumBands, 0.0);
+    songBlocks_ = 0;
+    listenFrameInBlock_ = 0;
+    blocksSinceCurve_ = 0;
+    hasKnown_ = knownValid_.load(std::memory_order_relaxed);
+    for (int b = 0; b < kNumBands; ++b) knownLevels_[b] = knownLevelDb_[b].load(std::memory_order_relaxed);
+    updateListenCurve();
+}
+
+void MobileEqEngine::finishListenBlock() {
+    const double frames = listenFrameInBlock_;
+    double total = 0.0;
+    for (double p : listenBlockPower_) total += p;
+    if (total / frames > kListenSilencePower) {
+        for (int b = 0; b < kNumBands; ++b) songPower_[b] += listenBlockPower_[b] / frames;
+        ++songBlocks_;
+    }
+    std::fill(listenBlockPower_, listenBlockPower_ + kNumBands, 0.0);
+    listenFrameInBlock_ = 0;
+    if (++blocksSinceCurve_ >= kListenCurveEveryBlocks) {
+        blocksSinceCurve_ = 0;
+        updateListenCurve();
+    }
+}
+
+void MobileEqEngine::updateListenCurve() {
+    const float heard = static_cast<float>(songBlocks_ * kListenBlockSeconds);
+    float levels[kNumBands];
+    for (int b = 0; b < kNumBands; ++b) {
+        const double power = songBlocks_ > 0 ? songPower_[b] / songBlocks_ : 0.0;
+        levels[b] = power > 0.0 ? static_cast<float>(10.0 * std::log10(power)) : NAN;
+        songLevelOutDb_[b].store(levels[b], std::memory_order_relaxed);
+    }
+    heardSecondsOut_.store(heard, std::memory_order_relaxed);
+
+    float correction[kNumBands] = {};
+    float weight = 0.f;
+    if (heard >= kListenSettleSeconds || (!hasKnown_ && songBlocks_ > 0)) {
+        // What this song sounds like, faded in over its first seconds so it doesn't change colour as it starts.
+        toneCorrectionDb(levels, correction);
+        weight = std::min(1.f, heard / kListenSettleSeconds);
+    } else if (hasKnown_) {
+        // Heard before: what was learned then, at once.
+        toneCorrectionDb(knownLevels_, correction);
+        weight = 1.f;
+    }
+    for (int b = 0; b < kNumBands; ++b) {
+        listenDb_[b] = correction[b] * weight;
+        listenOutDb_[b].store(listenDb_[b], std::memory_order_relaxed);
+    }
+    ++listenVersion_;
+}
+
+float MobileEqEngine::songLevelsDb(float* out) const {
+    for (int b = 0; b < kNumBands; ++b) out[b] = songLevelOutDb_[b].load(std::memory_order_relaxed);
+    return heardSecondsOut_.load(std::memory_order_relaxed);
+}
+
+void MobileEqEngine::listenCorrectionDb(float* out) const {
+    for (int b = 0; b < kNumBands; ++b) out[b] = listenOutDb_[b].load(std::memory_order_relaxed);
+}
+
+void MobileEqEngine::autoCurveDb(float* out) const {
+    for (int b = 0; b < kNumBands; ++b) out[b] = autoCurveOutDb_[b].load(std::memory_order_relaxed);
 }
 
 void MobileEqEngine::pushAnalyzer(const float* io, int frames) {

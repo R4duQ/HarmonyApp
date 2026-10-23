@@ -69,10 +69,30 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     /** EQ on, or flat. The high-pass, saturator and limiter protect the output either way. */
     fun setEqEnabled(enabled: Boolean) = MobileEqNative.nativeSetEqEnabled(checkedHandle(), enabled)
 
-    /** Winamp-style Auto: follow [setAutoTargetGains], morphing over 400 ms, with dynamic bass. */
+    /**
+     * Winamp-style Auto: the engine listens to each song in octave bands and
+     * plays [setAutoTargetGains] plus the correction for what it hears,
+     * morphing to every new target over 400 ms, with dynamic bass.
+     */
     fun setAutoMode(enabled: Boolean) = MobileEqNative.nativeSetAutoMode(checkedHandle(), enabled)
 
-    /** The curve Auto morphs to (call it as each track starts). */
+    /**
+     * A new song starts (call it on each track change): Auto listens to it
+     * afresh. Pass what [songLevels] reported for this song when it was heard
+     * before, and its correction applies at once.
+     */
+    fun startTrack(knownLevelsDb: FloatArray?) = MobileEqNative.nativeStartTrack(checkedHandle(), knownLevelsDb)
+
+    /** The song's octave-band levels as heard so far (dB, NaN where none) into [out]; returns the seconds heard. */
+    fun songLevels(out: FloatArray): Float = MobileEqNative.nativeSongLevels(checkedHandle(), out)
+
+    /** What listening adds to the listener's curve, dB per band, into [out]. */
+    fun listenCorrection(out: FloatArray) = MobileEqNative.nativeListenCorrection(checkedHandle(), out)
+
+    /** The curve Auto plays right now, dB per band, into [out]. */
+    fun autoCurve(out: FloatArray) = MobileEqNative.nativeAutoCurve(checkedHandle(), out)
+
+    /** The listener's curve under Auto; listening adds its correction on top. */
     fun setAutoTargetGains(gainsDb: FloatArray) {
         require(gainsDb.size >= BAND_COUNT) { "Expected $BAND_COUNT gains" }
         MobileEqNative.nativeSetAutoTargetGains(checkedHandle(), gainsDb)

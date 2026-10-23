@@ -102,11 +102,6 @@ class PlaybackService : MediaLibraryService() {
         // Through the session's player, so it also pauses a computer playing over Connect.
         sleepTimer.attach(sessionPlayer, serviceScope)
         callback.attach(harmonyPlayer, sleepTimer)
-        // Auto's saved song curves go straight to the engines; the rest of the
-        // equalizer arrives through the session (see SettingsApplier).
-        serviceScope.launch {
-            settingsRepository.eqSongCurves.collect { harmonyPlayer.setEqSongCurves(it) }
-        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =

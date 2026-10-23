@@ -49,6 +49,10 @@ internal object MobileEqNative {
     @JvmStatic external fun nativeSetAutoTargetGains(handle: Long, gainsDb: FloatArray)
     @JvmStatic external fun nativeSetEqEnabled(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetAutoMode(handle: Long, enabled: Boolean)
+    @JvmStatic external fun nativeStartTrack(handle: Long, knownLevelsDb: FloatArray?)
+    @JvmStatic external fun nativeSongLevels(handle: Long, out: FloatArray): Float
+    @JvmStatic external fun nativeListenCorrection(handle: Long, out: FloatArray)
+    @JvmStatic external fun nativeAutoCurve(handle: Long, out: FloatArray)
     @JvmStatic external fun nativeSetUserPreamp(handle: Long, preampDb: Float)
     @JvmStatic external fun nativeSetLevelGain(handle: Long, gainDb: Float)
     @JvmStatic external fun nativeSetOutputDevice(handle: Long, device: Int)

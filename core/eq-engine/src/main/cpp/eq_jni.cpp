@@ -139,6 +139,45 @@ void nativeSetAutoTargetGains(JNIEnv* env, jclass, jlong handle, jfloatArray gai
     if (readBands(env, gainsDb, gains)) engineOf(handle)->setAutoTargetGainsDb(gains);
 }
 
+void nativeStartTrack(JNIEnv* env, jclass, jlong handle, jfloatArray knownLevelsDb) {
+    if (knownLevelsDb == nullptr) {
+        engineOf(handle)->startTrack(nullptr);
+        return;
+    }
+    float levels[harmony::eq::kNumBands];
+    if (readBands(env, knownLevelsDb, levels)) engineOf(handle)->startTrack(levels);
+}
+
+bool writableBands(JNIEnv* env, jfloatArray array) {
+    if (array == nullptr || env->GetArrayLength(array) < harmony::eq::kNumBands) {
+        throwIllegalArgument(env, "expected room for 10 bands");
+        return false;
+    }
+    return true;
+}
+
+jfloat nativeSongLevels(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    if (!writableBands(env, out)) return 0.f;
+    float levels[harmony::eq::kNumBands];
+    const float heard = engineOf(handle)->songLevelsDb(levels);
+    env->SetFloatArrayRegion(out, 0, harmony::eq::kNumBands, levels);
+    return heard;
+}
+
+void nativeListenCorrection(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    if (!writableBands(env, out)) return;
+    float values[harmony::eq::kNumBands];
+    engineOf(handle)->listenCorrectionDb(values);
+    env->SetFloatArrayRegion(out, 0, harmony::eq::kNumBands, values);
+}
+
+void nativeAutoCurve(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    if (!writableBands(env, out)) return;
+    float values[harmony::eq::kNumBands];
+    engineOf(handle)->autoCurveDb(values);
+    env->SetFloatArrayRegion(out, 0, harmony::eq::kNumBands, values);
+}
+
 void nativeSetEqEnabled(JNIEnv*, jclass, jlong handle, jboolean enabled) {
     engineOf(handle)->setEqEnabled(enabled == JNI_TRUE);
 }
@@ -208,6 +247,10 @@ const JNINativeMethod kMethods[] = {
     HARMONY_JNI_METHOD(nativeSetAutoTargetGains, "(J[F)V"),
     HARMONY_JNI_METHOD(nativeSetEqEnabled, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetAutoMode, "(JZ)V"),
+    HARMONY_JNI_METHOD(nativeStartTrack, "(J[F)V"),
+    HARMONY_JNI_METHOD(nativeSongLevels, "(J[F)F"),
+    HARMONY_JNI_METHOD(nativeListenCorrection, "(J[F)V"),
+    HARMONY_JNI_METHOD(nativeAutoCurve, "(J[F)V"),
     HARMONY_JNI_METHOD(nativeSetUserPreamp, "(JF)V"),
     HARMONY_JNI_METHOD(nativeSetLevelGain, "(JF)V"),
     HARMONY_JNI_METHOD(nativeSetOutputDevice, "(JI)V"),

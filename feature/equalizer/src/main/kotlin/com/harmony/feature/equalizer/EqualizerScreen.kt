@@ -51,7 +51,7 @@ import androidx.lifecycle.viewModelScope
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.EqAutoCurve
-import com.harmony.core.model.EqAutoSource
+import com.harmony.core.model.EqAuto
 import com.harmony.core.model.EqPresets
 import com.harmony.core.model.EqResponse
 import com.harmony.core.ui.component.EditorialCircleButton
@@ -74,12 +74,12 @@ import kotlin.math.abs
 
 /**
  * All writes go to the DataStore only; SettingsApplier pushes the change into
- * the live audio chain (and the playback service reads Auto's song curves
- * itself). The screen therefore reflects reality even if the change was made
- * elsewhere, and EQ state survives process death for free.
+ * the live audio chain. The screen therefore reflects reality even if the
+ * change was made elsewhere, and EQ state survives process death for free.
  *
- * With Auto on, the sliders show and edit the song playing: whatever is set
- * then is remembered for that song, the way Winamp's AUTO kept a preset per file.
+ * With Auto on, the sliders show what plays: the listener's curve plus what
+ * Auto adds after listening to the song. Moving one moves the listener's
+ * curve underneath, so the slider lands where it was put.
  */
 @HiltViewModel
 class EqualizerViewModel @Inject constructor(
@@ -120,8 +120,15 @@ class EqualizerViewModel @Inject constructor(
     /** The AUTO button; switching it on switches the equalizer on too. */
     fun toggleAuto() = update { it.copy(auto = !it.auto, enabled = it.enabled || !it.auto) }
 
-    fun setBand(index: Int, gainDb: Float) = edit { gains ->
-        gains.toMutableList().also { it[index] = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB) }
+    fun setBand(index: Int, gainDb: Float) = update { current ->
+        val shown = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB)
+        // Under Auto the slider shows the listener's curve plus Auto's correction.
+        val correction = status.value.autoCurve?.takeIf { current.enabled && current.auto }
+            ?.correctionDb?.getOrNull(index) ?: 0f
+        current.copy(
+            enabled = true,
+            bandGainsDb = EqSettings.sanitize(current.bandGainsDb.toMutableList().also { it[index] = shown - correction }),
+        )
     }
 
     fun setPreamp(gainDb: Float) = update {
@@ -130,59 +137,41 @@ class EqualizerViewModel @Inject constructor(
 
     fun applyPreset(name: String) {
         val preset = EqPresets.named(name) ?: return
-        edit { preset }
+        update { it.copy(enabled = true, bandGainsDb = preset) }
     }
 
-    /** RESET: flat; with Auto on, the song goes back to what Auto would pick for it. */
-    fun reset() {
-        val song = autoSong()
-        if (song != null) {
-            viewModelScope.launch { settings.setEqSongCurve(song, null) }
-        } else {
-            update { it.copy(bandGainsDb = EqSettings.FLAT, preampDb = 0f) }
-        }
-    }
-
-    fun forgetSongCurve() {
-        val song = status.value.songId ?: return
-        viewModelScope.launch { settings.setEqSongCurve(song, null) }
-    }
+    /** RESET: the listener's curve flat and the preamp at 0; Auto keeps listening. */
+    fun reset() = update { it.copy(bandGainsDb = EqSettings.FLAT, preampDb = 0f) }
 
     fun setBitPerfect(on: Boolean) = update { it.copy(bitPerfectUsb = on) }
-
-    /** The song whose own curve the sliders edit, or null when they edit the listener's curve. */
-    private fun autoSong(): Long? {
-        val e = eq.value
-        val s = status.value
-        return s.songId.takeIf { e.enabled && e.auto && s.autoCurve != null }
-    }
-
-    /** Changes the curve the sliders show: the song's with Auto on, the listener's otherwise. */
-    private fun edit(transform: (List<Float>) -> List<Float>) {
-        val song = autoSong()
-        if (song != null) {
-            val base = status.value.autoCurve?.gainsDb ?: eq.value.bandGainsDb
-            viewModelScope.launch { settings.setEqSongCurve(song, transform(base)) }
-        } else {
-            update { it.copy(enabled = true, bandGainsDb = EqSettings.sanitize(transform(it.bandGainsDb))) }
-        }
-    }
 
     private fun update(transform: (EqSettings) -> EqSettings) {
         viewModelScope.launch { settings.setEq(transform(eq.value)) }
     }
 }
 
-/** The curve the sliders show, and what Auto is doing with it. */
-private fun shownGains(eq: EqSettings, status: EqStatus): List<Float> =
-    status.autoCurve?.takeIf { eq.enabled && eq.auto }?.gainsDb ?: eq.bandGainsDb
+/** The curve the sliders show: with Auto on, the listener's curve plus what Auto adds. */
+private fun shownGains(eq: EqSettings, status: EqStatus): List<Float> {
+    val correction = status.autoCurve?.takeIf { eq.enabled && eq.auto }?.correctionDb ?: return eq.bandGainsDb
+    return EqSettings.sanitize(eq.bandGainsDb.mapIndexed { i, g -> g + correction.getOrElse(i) { 0f } })
+}
 
 private fun autoNote(eq: EqSettings, curve: EqAutoCurve?): String? = when {
     !(eq.enabled && eq.auto) -> null
-    curve == null -> "AUTO · waiting for a song"
-    curve.source == EqAutoSource.SONG -> "AUTO · this song's own curve"
-    curve.source == EqAutoSource.GENRE -> "AUTO · ${curve.preset} (from the genre)"
-    else -> "AUTO · your curve (no genre to go by)"
+    curve == null -> "AUTO · listens when a song plays"
+    curve.remembered && curve.heardSeconds < EqAuto.SETTLE_SECONDS -> "AUTO · tuned to this song from last time"
+    curve.heardSeconds < EqAuto.SETTLE_SECONDS -> "AUTO · listening… ${curve.heardSeconds.toInt()} s"
+    else -> "AUTO · tuned to what it hears"
+}
+
+/** The two biggest changes Auto makes, "−3.0 dB at 125 Hz · +2.1 dB at 8 kHz". */
+private fun biggestChanges(correction: List<Float>): String {
+    val top = correction.indices.sortedByDescending { abs(correction[it]) }.take(2).filter { abs(correction[it]) >= 0.3f }
+    if (top.isEmpty()) return "Nothing to change: it already sounds balanced"
+    return top.sorted().joinToString(" · ") { i ->
+        val label = EqSettings.BAND_LABELS[i].let { if (it.endsWith("K")) it.dropLast(1) + " kHz" else "$it Hz" }
+        "${fmtDb(correction[i])} at $label"
+    }
 }
 
 // =====================================================================
@@ -283,7 +272,7 @@ fun EqualizerScreen(
                     when {
                         status.bitPerfect -> "Bit-perfect — the DAC gets the file untouched"
                         !eq.enabled -> "Off — flat, with clean-output protection"
-                        eq.auto -> "On — Auto picks each song's curve"
+                        eq.auto -> "On — Auto tunes each song to what it hears"
                         else -> "On — your curve"
                     },
                     fontSize = 12.sp,
@@ -313,9 +302,9 @@ fun EqualizerScreen(
             Spacer(Modifier.height(18.dp))
             AutoCard(eq, status, viewModel, palette)
             Spacer(Modifier.height(18.dp))
-            SectionTitle("Presets", if (eq.enabled && eq.auto) "applied to this song" else "${EqPresets.ALL.size} curves", palette)
+            SectionTitle("Presets", if (eq.enabled && eq.auto) "your curve, under Auto" else "${EqPresets.ALL.size} curves", palette)
             Spacer(Modifier.height(10.dp))
-            PresetGallery(gains, actions.onPreset)
+            PresetGallery(eq.bandGainsDb, actions.onPreset)
             Spacer(Modifier.height(18.dp))
             SectionTitle("Clean output", status.output.label, palette)
             Spacer(Modifier.height(10.dp))
@@ -340,7 +329,7 @@ fun EqualizerScreen(
 
 private val WinampGold = Color(0xFFE2B451)
 
-/** What AUTO does and where this song's curve came from. */
+/** What AUTO hears in the song playing and what it changes. */
 @Composable
 private fun AutoCard(eq: EqSettings, status: EqStatus, viewModel: EqualizerViewModel, palette: EditorialPalette) {
     val on = eq.enabled && eq.auto
@@ -359,10 +348,12 @@ private fun AutoCard(eq: EqSettings, status: EqStatus, viewModel: EqualizerViewM
                 Text(
                     when {
                         !on -> "Off — every song plays with your curve"
-                        curve == null -> "On — starts with the next song"
-                        curve.source == EqAutoSource.SONG -> "This song has its own curve"
-                        curve.source == EqAutoSource.GENRE -> "${curve.preset}, picked from the song's genre"
-                        else -> "No genre to go by: your curve"
+                        curve == null -> "On — listens as soon as a song plays"
+                        curve.remembered && curve.heardSeconds < EqAuto.SETTLE_SECONDS ->
+                            "Heard before: tuned from the first second"
+                        curve.heardSeconds < EqAuto.SETTLE_SECONDS ->
+                            "Listening… ${curve.heardSeconds.toInt()} of ${EqAuto.SETTLE_SECONDS.toInt()} s"
+                        else -> "Tuned to this song"
                     },
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -371,28 +362,27 @@ private fun AutoCard(eq: EqSettings, status: EqStatus, viewModel: EqualizerViewM
             }
             EditorialSwitch(on, { viewModel.toggleAuto() }, palette)
         }
+        if (on && curve != null) {
+            Text(
+                biggestChanges(curve.correctionDb),
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.ink,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+        }
         Text(
-            "Each song gets its own curve as it starts, blended in over 400 ms: the one you shaped for it, or " +
-                "the preset for its genre. Move a slider while Auto plays a song and that song keeps it. " +
-                "Heavy kicks pull the deepest bass boost back by up to 4 dB so it never turns muddy.",
+            "Auto listens to each song in the ten bands and compares its tone with a well-balanced record: " +
+                "a boomy song loses some bass, a dull one gets some air, a harsh one is softened. It fades in " +
+                "over the song's first seconds and blends every change in over 400 ms, on top of your own " +
+                "curve. A song it heard before is right from the first second. Heavy kicks pull the deepest " +
+                "bass boost back by up to 4 dB so it never turns muddy.",
             fontSize = 12.sp,
             lineHeight = 17.sp,
             color = palette.muted,
             modifier = Modifier.padding(top = 10.dp),
         )
-        if (on && curve?.source == EqAutoSource.SONG) {
-            Text(
-                "Forget this song's curve",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = palette.accent,
-                modifier = Modifier
-                    .padding(top = 10.dp)
-                    .clip(RoundedCornerShape(50))
-                    .clickable(role = Role.Button, onClick = viewModel::forgetSongCurve)
-                    .padding(vertical = 6.dp),
-            )
-        }
     }
 }
 

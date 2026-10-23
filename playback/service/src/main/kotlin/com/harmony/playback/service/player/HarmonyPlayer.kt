@@ -23,6 +23,7 @@ import com.harmony.core.eq.OutputRoute
 import com.harmony.core.media.artwork.ArtworkCache
 import com.harmony.core.media.artwork.ArtworkProvider
 import com.harmony.core.model.EqAuto
+import com.harmony.core.model.EqAutoCurve
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.Song
@@ -34,7 +35,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Owner of the two [ExoPlayer]s behind [player] and everything that must be
@@ -51,7 +54,7 @@ import kotlinx.coroutines.launch
  *  - The equalizer: the native float engine from core:eq-engine
  *    ([CustomEqAudioProcessor]) running in a [HiResEqAudioSink], so 24-bit and
  *    hi-res files reach it whole. It also carries ReplayGain (as a level gain
- *    ahead of its limiter), Auto (a curve per song, see [EqAuto]), the
+ *    ahead of its limiter), Auto (it listens to each song, see [EqAuto]), the
  *    output-device protection ([AudioOutputMonitor]) and the analyser the
  *    screens poll through [AudioLevels].
  *  - Crossfade: two players taking turns, see [TwinPlayer]. Each has its own
@@ -71,7 +74,11 @@ class HarmonyPlayer(
     private class Engine(
         val exo: ExoPlayer,
         val equalizer: CustomEqAudioProcessor,
-    )
+    ) {
+        /** The song Auto is listening to on this engine, and whether it was heard before. */
+        var songId: String? = null
+        var remembered = false
+    }
 
     private val engines: List<Engine>
 
@@ -81,9 +88,17 @@ class HarmonyPlayer(
     private var pitchCorrection: Boolean = true
     private var replayGainMode: ReplayGainMode = ReplayGainMode.OFF
     private var eq = EqSettings()
-    private var songCurves: Map<Long, List<Float>> = emptyMap()
 
-    /** Song metadata for the current queue, keyed by mediaId, for RG and Auto lookups. */
+    /**
+     * What Auto heard of each recently played song (octave-band levels), so a
+     * song played again is corrected from its first second. Shared by both
+     * engines; main thread only.
+     */
+    private val toneMemory = object : LinkedHashMap<String, FloatArray>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FloatArray>?) = size > TONE_MEMORY_SONGS
+    }
+
+    /** Song metadata for the current queue, keyed by mediaId, for RG lookup. */
     private val songsById = mutableMapOf<String, Song>()
 
     /** Error-recovery budgets. Touched only on the player's application thread. */
@@ -98,17 +113,15 @@ class HarmonyPlayer(
     init {
         engines = listOf(buildEngine(handleAudioFocus = true), buildEngine(handleAudioFocus = false))
         player = TwinPlayer(engines[0].exo, engines[1].exo)
-        player.onActiveChanged = { publishEqStatus() }
 
         for (engine in engines) {
-            // Each player sets its own song's level and Auto curve, the
-            // waiting one too when it loads the next song, so it is ready
-            // before it is heard.
+            // Each player sets its own song's level and starts Auto listening
+            // to it, the waiting one too when it loads the next song, so it is
+            // ready before it is heard.
             engine.exo.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     engine.equalizer.setLevelGainDb(replayGainDbFor(engine.exo.currentMediaItem))
-                    applyAutoCurve(engine)
-                    if (engine.exo === player.active) publishEqStatus()
+                    startAutoTrack(engine, mediaItem?.mediaId)
                 }
             })
         }
@@ -121,6 +134,7 @@ class HarmonyPlayer(
         outputMonitor.start()
         onRouteChanged(outputMonitor.route.value)
         startAnalyser()
+        startEqStatus()
 
         player.addListener(object : Player.Listener {
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
@@ -233,8 +247,6 @@ class HarmonyPlayer(
         player.playWhenReady = playWhenReady
         player.prepare()
         applyReplayGainForCurrentItem()
-        for (engine in engines) applyAutoCurve(engine)
-        publishEqStatus()
     }
 
     fun addToQueue(song: Song) {
@@ -301,40 +313,59 @@ class HarmonyPlayer(
         val gains = EqSettings.sanitize(settings.bandGainsDb).toFloatArray()
         for (engine in engines) {
             engine.equalizer.setBandGains(gains)
+            // Under Auto the listener's curve stays the base; listening adds to it.
+            engine.equalizer.setAutoTargetGains(gains)
             engine.equalizer.setPreampDb(settings.preampDb)
             engine.equalizer.setEqEnabled(settings.enabled)
             engine.equalizer.setAutoMode(settings.enabled && settings.auto)
-            // Auto falls back to the listener's curve, so that one may have moved too.
-            if (settings.auto != before.auto || settings.bandGainsDb != before.bandGainsDb) applyAutoCurve(engine)
         }
         if (settings.bitPerfectUsb != before.bitPerfectUsb) applyBitPerfect()
-        publishEqStatus()
     }
 
-    /** The curves Auto saved for single songs; see [EqAuto]. */
-    fun setEqSongCurves(curves: Map<Long, List<Float>>) {
-        if (curves == songCurves) return
-        songCurves = curves
-        for (engine in engines) applyAutoCurve(engine)
-        publishEqStatus()
+    /**
+     * [engine] moved to song [id]: remember what Auto heard of the last one,
+     * and have it listen to this one, from what it learned before if it has
+     * heard it.
+     */
+    private fun startAutoTrack(engine: Engine, id: String?) {
+        val levels = FloatArray(EqSettings.BAND_COUNT)
+        val heard = engine.equalizer.songLevels(levels)
+        val previous = engine.songId
+        if (previous != null && heard >= EqAuto.REMEMBER_AFTER_SECONDS && levels.any { it.isFinite() }) {
+            toneMemory[previous] = levels
+        }
+        val known = id?.let(toneMemory::get)
+        engine.songId = id
+        engine.remembered = known != null
+        engine.equalizer.startTrack(known)
     }
 
-    private fun autoCurveFor(item: MediaItem?) = item?.let {
-        val song = songsById[it.mediaId]
-        val genre = song?.genre ?: it.mediaMetadata.genre?.toString()
-        EqAuto.curveFor(it.mediaId.toLongOrNull(), genre, songCurves, eq.bandGainsDb)
-    }
-
-    /** Hands [engine] the curve for its song; with Auto on it morphs there over 400 ms. */
-    private fun applyAutoCurve(engine: Engine) {
-        val curve = autoCurveFor(engine.exo.currentMediaItem) ?: return
-        engine.equalizer.setAutoTargetGains(curve.gainsDb.toFloatArray())
-    }
-
-    private fun publishEqStatus() {
-        val item = player.active.currentMediaItem
-        val curve = if (eq.enabled && eq.auto) autoCurveFor(item) else null
-        EqLive.update { it.copy(songId = item?.mediaId?.toLongOrNull(), autoCurve = curve) }
+    /** Shows the screen what Auto plays for the song playing, a few times a second. */
+    private fun startEqStatus() {
+        scope.launch {
+            val curve = FloatArray(EqSettings.BAND_COUNT)
+            val correction = FloatArray(EqSettings.BAND_COUNT)
+            val levels = FloatArray(EqSettings.BAND_COUNT)
+            while (true) {
+                val engine = activeEngine
+                val songId = player.active.currentMediaItem?.mediaId?.toLongOrNull()
+                val auto = if (eq.enabled && eq.auto && songId != null) {
+                    engine.equalizer.autoCurve(curve)
+                    engine.equalizer.listenCorrection(correction)
+                    val heard = engine.equalizer.songLevels(levels)
+                    EqAutoCurve(
+                        gainsDb = curve.map { (it * 10f).roundToInt() / 10f },
+                        correctionDb = correction.map { (it * 10f).roundToInt() / 10f },
+                        heardSeconds = heard.toInt().toFloat(),
+                        remembered = engine.remembered,
+                    )
+                } else {
+                    null
+                }
+                EqLive.update { it.copy(songId = songId, autoCurve = auto) }
+                delay(STATUS_EVERY_MS)
+            }
+        }
     }
 
     // -- Output routing and bit-perfect USB -------------------------------------
@@ -451,7 +482,6 @@ class HarmonyPlayer(
                 .setArtist(artist)
                 .setAlbumTitle(album)
                 .setAlbumArtist(albumArtist)
-                .setGenre(genre)
                 .setArtworkUri(outOfProcessArtworkUri(this))
                 .setArtworkData(
                     artworkUri?.let { artworkCache.bytes(id, userArtwork = it.endsWith("-user.img")) },
@@ -476,6 +506,8 @@ class HarmonyPlayer(
 
     private companion object {
         const val TAG = "HarmonyPlayback"
+        const val STATUS_EVERY_MS = 250L
+        const val TONE_MEMORY_SONGS = 2_000
         const val MAX_RETRIES_PER_ITEM = 1
         const val MAX_FAILED_ITEMS_IN_A_ROW = 3
     }

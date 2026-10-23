@@ -200,8 +200,6 @@ object BrowseTree {
                 .setTitle(song.title)
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
-                // Auto picks the song's curve from it (EqAuto).
-                .setGenre(song.genre)
                 .setSubtitle(song.artist)
                 // Its length, known before the player has read the file (Connect sends it on).
                 .setDurationMs(song.durationMs.takeIf { it > 0 })

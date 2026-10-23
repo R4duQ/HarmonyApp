@@ -122,7 +122,7 @@ internal object WinampTags {
  *    green through yellow to red as they rise.
  *
  * Stateless: the screen owns the settings and passes them in. [gains] are the
- * ones the sliders show: the listener's own, or with Auto on, the song's.
+ * ones the sliders show: the listener's own, or with Auto on, what plays.
  */
 @Composable
 fun WinampEqPanel(

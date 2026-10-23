@@ -1,51 +1,10 @@
 package com.harmony.core.model
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EqAutoTest {
-    private val manual = listOf(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f)
-
-    @Test
-    fun songCurveWinsOverGenre() {
-        val saved = List(10) { -3f }
-        val curve = EqAuto.curveFor(7L, "Rock", mapOf(7L to saved), manual)
-        assertEquals(EqAutoSource.SONG, curve.source)
-        assertEquals(saved, curve.gainsDb)
-    }
-
-    @Test
-    fun genrePicksItsPreset() {
-        val curve = EqAuto.curveFor(7L, "Alternative Rock", emptyMap(), manual)
-        assertEquals(EqAutoSource.GENRE, curve.source)
-        assertEquals("Rock", curve.preset)
-        assertEquals(EqPresets.named("Rock"), curve.gainsDb)
-    }
-
-    @Test
-    fun unknownGenreKeepsTheListenersCurve() {
-        val curve = EqAuto.curveFor(7L, "Gregorian Throat Singing Fusion", emptyMap(), manual)
-        assertEquals(EqAutoSource.MANUAL, curve.source)
-        assertEquals(manual, curve.gainsDb)
-        assertEquals(EqAutoSource.MANUAL, EqAuto.curveFor(null, null, emptyMap(), manual).source)
-    }
-
-    @Test
-    fun specificGenresBeatTheWordsInsideThem() {
-        assertEquals("Hip-Hop", EqAuto.presetForGenre("Hip Hop/Rap"))
-        assertEquals("Techno", EqAuto.presetForGenre("Dubstep"))
-        assertEquals("Techno", EqAuto.presetForGenre("Drum and Bass"))
-        assertEquals("Reggae", EqAuto.presetForGenre("Dancehall"))
-        assertEquals("Dance", EqAuto.presetForGenre("Deep House"))
-        assertEquals("Soft Rock", EqAuto.presetForGenre("Soft Rock"))
-        assertEquals("Rock", EqAuto.presetForGenre("Indie Pop"))
-        assertEquals("Pop", EqAuto.presetForGenre("K-Pop"))
-        assertEquals("Classical", EqAuto.presetForGenre("Soundtrack"))
-        assertNull(EqAuto.presetForGenre("  "))
-    }
-
     @Test
     fun everyPresetFitsTheEngine() {
         for ((name, gains) in EqPresets.ALL) {

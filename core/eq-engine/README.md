@@ -30,6 +30,7 @@ input ─▶ device high-pass ─▶ auto-preamp ─▶ 10 biquads (RBJ, DF2T) �
 
 - **Bands:** a low shelf at 31 Hz and a high shelf at 16 kHz (Q 0.707, corners on the band frequencies), and peaks from 62 Hz to 8 kHz with proportional Q (1.2 at 0 dB to 2.0 at ±12 dB).
 - **Auto-preamp:** −0.65 × the peak of the *whole* response curve, evaluated at 74 frequencies. Two neighbouring +8 dB bands peak above +8 dB between them, so the peak of the curve is what matters, not the loudest slider.
+- **Auto listens:** octave band-passes on the input (before the high-pass, so a phone speaker's 90 Hz cut doesn't read as a song short of bass) average each song's tone over 100 ms blocks, skipping silence. Twice a second the song is compared with a typical well-mastered record and half the difference is evened out (at most +5/−6 dB, smoothed across neighbouring bands, missing bands such as an MP3's cut-off top left alone), fading in over 8 s and added to the listener's curve. Every new target morphs in over 400 ms.
 - **De-zippering:** coefficients and the preamp glide every sample, with one-pole smoothing (8 ms and 15 ms).
 - **Denormals:** flush-to-zero is set per process call (FPCR.FZ on ARM, MXCSR FTZ|DAZ on x86) and restored afterwards.
 
@@ -51,7 +52,8 @@ lifecycle.addObserver(monitor)
 
 equalizer.setBandGains(floatArrayOf(6f, 4f, 2f, 0f, 0f, 0f, 1f, 2f, 3f, 4f))
 equalizer.setAutoMode(true)
-equalizer.setAutoTargetGains(curveForTheTrack)   // morphs over 400 ms
+equalizer.setAutoTargetGains(listenersCurve)      // Auto adds what it hears on top
+equalizer.startTrack(knownLevels)                 // on every track change (null for a new song)
 equalizer.setLevelGainDb(replayGainDb)            // loudness levelling, ahead of the limiter
 
 // UI, every frame (Choreographer / withFrameNanos). Allocate the arrays once.
@@ -65,11 +67,11 @@ equalizer.release()
 ## In Harmony
 
 `playback/service`'s `HarmonyPlayer` builds one engine per player (two, for the
-crossfade) inside a `HiResEqAudioSink`. It feeds them the settings, ReplayGain
-as the level gain, and each song's Auto curve (`core/model`'s `EqAuto`: the
-curve saved for the song, else its genre's preset, else the listener's). It
-follows the output with `AudioOutputMonitor` and polls the playing engine's
-analyser for the screens (`AudioLevels`).
+crossfade) inside a `HiResEqAudioSink`. It feeds them the settings and ReplayGain
+as the level gain, starts Auto listening at every track change (with what it
+heard of the song before, if it was played recently), and follows the output
+with `AudioOutputMonitor`. The screens poll the playing engine's analyser once
+per frame through `AudioLevels`.
 
 ## Where this departs from the brief, and why
 
