@@ -21,6 +21,8 @@ dependencies {
     implementation(projects.core.datastore)
     // Harmony Connect: playing on a computer running Harmony for Windows.
     implementation(projects.core.remote)
+    // The equalizer: the native float engine, its hi-res sink and output routing.
+    implementation(projects.core.eqEngine)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)

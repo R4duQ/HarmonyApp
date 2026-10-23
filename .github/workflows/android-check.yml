@@ -96,12 +96,22 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
+      - name: EQ engine host tests (C++) and host JNI library
+        run: |
+          set -euo pipefail
+          cmake -S core/eq-engine/src/test/cpp -B build/eq-engine-host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/eq-engine-host --parallel
+          ./build/eq-engine-host/eq_engine_test
+          echo "HARMONY_EQ_HOST_LIB_DIR=$PWD/build/eq-engine-host" >> "$GITHUB_ENV"
+
       - name: Playback and download tests
         run: >-
           ./gradlew
           :playback:service:testReleaseUnitTest
           :feature:downloads:testStableReleaseUnitTest
           :feature:downloads:testMornyeReleaseUnitTest
+          :core:eq-engine:testReleaseUnitTest
+          :core:model:test
           --no-daemon
           --stacktrace
 
@@ -113,6 +123,7 @@ jobs:
           path: |
             playback/service/build/reports/tests/
             feature/downloads/build/reports/tests/
+            core/eq-engine/build/reports/tests/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -121,6 +132,7 @@ jobs:
           ./gradlew
           :app:assembleStableRelease
           :app:assembleMornyeRelease
+          :core:eq-engine:assembleRelease
           -PharmonyAbi=arm64-v8a
           --no-daemon
           --stacktrace

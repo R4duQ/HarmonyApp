@@ -1,6 +1,6 @@
 package com.harmony.desktop
 
-import com.harmony.core.model.ClaritySettings
+import com.harmony.desktop.dsp.ClaritySettings
 import com.harmony.desktop.engine.EqConfig
 import org.json.JSONArray
 import org.json.JSONObject

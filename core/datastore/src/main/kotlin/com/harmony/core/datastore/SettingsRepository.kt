@@ -9,15 +9,11 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.harmony.core.model.AutoEqSettings
-import com.harmony.core.model.ClaritySettings
+import com.harmony.core.model.EqAuto
 import com.harmony.core.model.EqSettings
-import com.harmony.core.model.EqStyle
 import com.harmony.core.model.OutputForm
 import com.harmony.core.model.OutputForms
 import com.harmony.core.model.ReplayGainMode
-import com.harmony.core.model.RoomCorrection
-import com.harmony.core.model.WinampEqDesign
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -51,11 +47,6 @@ data class UserSettings(
     val userEqPresets: Map<String, List<Float>> = emptyMap(),
     /** Name of a SoulseekFormatPreference entry; kept as a String so :core:datastore stays feature-agnostic. */
     val soulseekFormatPreference: String = "FLAC_ONLY",
-    val autoEq: AutoEqSettings = AutoEqSettings(),
-    /** Speaker/room corrections measured with the microphone, keyed by AutoEqDesign.outputKey. */
-    val roomCorrections: Map<String, RoomCorrection> = emptyMap(),
-    /** How Clarity is set; whether it runs is [AutoEqSettings.clarity]. */
-    val clarity: ClaritySettings = ClaritySettings(),
 )
 
 /**
@@ -78,11 +69,15 @@ class SettingsRepository @Inject constructor(
         val REPLAYGAIN = stringPreferencesKey("replaygain_mode")
         val EQ_ENABLED = booleanPreferencesKey("eq_enabled")
         val EQ_BANDS = stringPreferencesKey("eq_bands_csv_v1")
-        val EQ_BASS = floatPreferencesKey("eq_bass")
-        val EQ_TREBLE = floatPreferencesKey("eq_treble")
         val EQ_STYLE = stringPreferencesKey("eq_style")
         val EQ_WINAMP_BANDS = stringPreferencesKey("eq_winamp_bands_csv_v1")
-        val EQ_WINAMP_PREAMP = floatPreferencesKey("eq_winamp_preamp")
+
+        // The native engine's equalizer (31 Hz … 16 kHz, ±12 dB).
+        val EQ_BANDS_V2 = stringPreferencesKey("eq_bands_v2")
+        val EQ_PREAMP_V2 = floatPreferencesKey("eq_preamp_v2")
+        val EQ_AUTO = booleanPreferencesKey("eq_auto")
+        val EQ_BIT_PERFECT_USB = booleanPreferencesKey("eq_bit_perfect_usb")
+        val EQ_SONG_CURVES = stringPreferencesKey("eq_song_curves_v1") // one "songId<tab>csv" per line, oldest first
         val ENERGY = floatPreferencesKey("energy_slider") // -1 sentinel = off
         val SOULSEEK_FORMAT = stringPreferencesKey("soulseek_format_preference")
         val SMART_SHUFFLE_STYLE = stringPreferencesKey("smart_shuffle_style_v2")
@@ -91,16 +86,7 @@ class SettingsRepository @Inject constructor(
         val SMART_SHUFFLE_VARIETY = floatPreferencesKey("smart_shuffle_variety_v2")
         val EQ_USER_PRESETS = stringPreferencesKey("eq_user_presets_v1") // "name=csv;name=csv"
         val OUTPUT_FORMS = stringPreferencesKey("output_forms_v1") // one "FORM<tab>device name" per line
-        val AUTO_EQ_TONE = booleanPreferencesKey("auto_eq_tone")
-        val AUTO_EQ_ROOM = booleanPreferencesKey("auto_eq_room")
-        val AUTO_EQ_NOISE = booleanPreferencesKey("auto_eq_noise")
-        val AUTO_EQ_CLARITY = booleanPreferencesKey("auto_eq_clarity")
-        val CLARITY_RECOVER = floatPreferencesKey("clarity_recover")
-        val CLARITY_TAME = floatPreferencesKey("clarity_tame")
-        val CLARITY_BIAS = floatPreferencesKey("clarity_bias")
-        val CLARITY_BRIGHTEN = floatPreferencesKey("clarity_brighten")
-        val CLARITY_BOOST = floatPreferencesKey("clarity_boost_db")
-        val ROOM_CORRECTIONS = stringPreferencesKey("room_corrections_v1") // one "key<tab>label<tab>millis<tab>csv" per line
+        val AUTO_EQ_TONE = booleanPreferencesKey("auto_eq_tone") // the old Auto; carried into EQ_AUTO
         val LAST_QUEUE_IDS = stringPreferencesKey("last_queue_song_ids") // csv of Longs
         val LAST_QUEUE_INDEX = intPreferencesKey("last_queue_index")
         val LAST_POSITION_MS = longPreferencesKey("last_position_ms")
@@ -125,93 +111,54 @@ class SettingsRepository @Inject constructor(
             smartShuffleDiscovery = (p[Keys.SMART_SHUFFLE_DISCOVERY] ?: 0.45f).coerceIn(0f, 1f),
             smartShuffleVariety = (p[Keys.SMART_SHUFFLE_VARIETY] ?: 0.45f).coerceIn(0f, 1f),
             userEqPresets = decodePresets(p[Keys.EQ_USER_PRESETS]),
-            autoEq = AutoEqSettings(
-                tone = p[Keys.AUTO_EQ_TONE] ?: false,
-                room = p[Keys.AUTO_EQ_ROOM] ?: false,
-                noise = p[Keys.AUTO_EQ_NOISE] ?: false,
-                clarity = p[Keys.AUTO_EQ_CLARITY] ?: false,
-            ),
-            roomCorrections = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]),
-            clarity = ClaritySettings().let { d ->
-                ClaritySettings(
-                    recover = p[Keys.CLARITY_RECOVER] ?: d.recover,
-                    tame = p[Keys.CLARITY_TAME] ?: d.tame,
-                    bias = p[Keys.CLARITY_BIAS] ?: d.bias,
-                    brighten = p[Keys.CLARITY_BRIGHTEN] ?: d.brighten,
-                    boostDb = p[Keys.CLARITY_BOOST] ?: d.boostDb,
-                ).clamped()
-            },
         )
     }
 
     /**
-     * The Winamp equalizer is the only manual one now. A listener who had set
-     * the old Simple/Advanced bands and never touched Winamp gets those bands
-     * carried over (WinampEqDesign.fromOctaveBands), so the sound they chose
-     * stays; the first Winamp change saves Winamp's own values from then on.
+     * The equalizer as the native engine runs it. Listeners coming from the
+     * old Winamp equalizer keep their curve, moved onto the new bands
+     * (EqAuto.fromWinampBands), and the old Auto's switch; the preamp starts
+     * at 0 because the engine now makes its own headroom.
      */
     private fun readEq(p: Preferences): EqSettings {
-        val octave = p[Keys.EQ_BANDS]?.split(',')
-            ?.mapNotNull { it.toFloatOrNull() }
-            ?.takeIf { it.size == EqSettings.BAND_COUNT }
-            ?: List(EqSettings.BAND_COUNT) { 0f }
-        val winamp = p[Keys.EQ_WINAMP_BANDS]?.split(',')
-            ?.mapNotNull { it.toFloatOrNull() }
-            ?.takeIf { it.size == EqSettings.BAND_COUNT }
-        val oldStyle = p[Keys.EQ_STYLE]?.let { name -> EqStyle.entries.firstOrNull { it.name == name } } ?: EqStyle.HARMONY
-        val carried = winamp == null && oldStyle == EqStyle.HARMONY && octave.any { it != 0f }
+        val bands = csv(p[Keys.EQ_BANDS_V2])
+            ?: csv(p[Keys.EQ_WINAMP_BANDS])?.let(EqAuto::fromWinampBands)
+            ?: csv(p[Keys.EQ_BANDS])?.takeIf { p[Keys.EQ_STYLE] == null || p[Keys.EQ_STYLE] == "HARMONY" }
         return EqSettings(
             enabled = p[Keys.EQ_ENABLED] ?: false,
-            bandGainsDb = octave,
-            style = EqStyle.WINAMP,
-            winampGainsDb = winamp ?: if (carried) WinampEqDesign.fromOctaveBands(octave) else List(EqSettings.BAND_COUNT) { 0f },
-            winampPreampDb = p[Keys.EQ_WINAMP_PREAMP] ?: 0f,
+            bandGainsDb = EqSettings.sanitize(bands),
+            preampDb = (p[Keys.EQ_PREAMP_V2]?.takeIf { it.isFinite() } ?: 0f)
+                .coerceIn(-EqSettings.MAX_PREAMP_DB, EqSettings.MAX_PREAMP_DB),
+            auto = p[Keys.EQ_AUTO] ?: p[Keys.AUTO_EQ_TONE] ?: false,
+            bitPerfectUsb = p[Keys.EQ_BIT_PERFECT_USB] ?: false,
         )
     }
 
-    suspend fun setAutoEq(auto: AutoEqSettings) = edit {
-        it[Keys.AUTO_EQ_TONE] = auto.tone
-        it[Keys.AUTO_EQ_ROOM] = auto.room
-        it[Keys.AUTO_EQ_NOISE] = auto.noise
-        it[Keys.AUTO_EQ_CLARITY] = auto.clarity
+    private fun csv(raw: String?): List<Float>? =
+        raw?.split(',')?.mapNotNull { it.trim().toFloatOrNull() }?.takeIf { it.size == EqSettings.BAND_COUNT }
+
+    /** The curves Auto saved for single songs (see EqAuto), by song id. */
+    val eqSongCurves: Flow<Map<Long, List<Float>>> = context.store.data.map { decodeSongCurves(it[Keys.EQ_SONG_CURVES]) }
+
+    /** Saves [gains] as [songId]'s own Auto curve; null forgets it. Keeps the newest EqAuto.MAX_SONG_CURVES. */
+    suspend fun setEqSongCurve(songId: Long, gains: List<Float>?) = edit { p ->
+        val all = LinkedHashMap(decodeSongCurves(p[Keys.EQ_SONG_CURVES]))
+        all.remove(songId)
+        if (gains != null) all[songId] = EqSettings.sanitize(gains)
+        while (all.size > EqAuto.MAX_SONG_CURVES) all.remove(all.keys.first())
+        p[Keys.EQ_SONG_CURVES] = all.entries.joinToString("\n") { (id, g) -> "$id\t${g.joinToString(",")}" }
     }
 
-    suspend fun setClarity(clarity: ClaritySettings) = edit {
-        val c = clarity.clamped()
-        it[Keys.CLARITY_RECOVER] = c.recover
-        it[Keys.CLARITY_TAME] = c.tame
-        it[Keys.CLARITY_BIAS] = c.bias
-        it[Keys.CLARITY_BRIGHTEN] = c.brighten
-        it[Keys.CLARITY_BOOST] = c.boostDb
-    }
-
-    /** Files [correction] under [key] (AutoEqDesign.outputKey), replacing an older measurement. */
-    suspend fun saveRoomCorrection(key: String, correction: RoomCorrection) = edit { p ->
-        val all = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]).toMutableMap()
-        all[key] = correction
-        p[Keys.ROOM_CORRECTIONS] = encodeRoomCorrections(all)
-    }
-
-    suspend fun deleteRoomCorrection(key: String) = edit { p ->
-        val all = decodeRoomCorrections(p[Keys.ROOM_CORRECTIONS]) - key
-        p[Keys.ROOM_CORRECTIONS] = encodeRoomCorrections(all)
-    }
-
-    private fun clean(text: String) = text.replace('\t', ' ').replace('\n', ' ')
-
-    private fun encodeRoomCorrections(all: Map<String, RoomCorrection>): String =
-        all.entries.joinToString("\n") { (key, c) ->
-            listOf(clean(key), clean(c.label), c.measuredAtMs.toString(), c.gainsDb.joinToString(",")).joinToString("\t")
+    private fun decodeSongCurves(raw: String?): Map<Long, List<Float>> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        val out = LinkedHashMap<Long, List<Float>>()
+        for (line in raw.lines()) {
+            val id = line.substringBefore('\t').toLongOrNull() ?: continue
+            val gains = csv(line.substringAfter('\t', "")) ?: continue
+            out[id] = EqSettings.sanitize(gains)
         }
-
-    private fun decodeRoomCorrections(raw: String?): Map<String, RoomCorrection> =
-        raw?.lines()?.mapNotNull { line ->
-            val parts = line.split('\t')
-            if (parts.size != 4) return@mapNotNull null
-            val gains = parts[3].split(',').mapNotNull { it.toFloatOrNull() }
-            if (gains.size != EqSettings.BAND_COUNT) return@mapNotNull null
-            parts[0] to RoomCorrection(gains, parts[2].toLongOrNull() ?: 0L, parts[1])
-        }?.toMap() ?: emptyMap()
+        return out
+    }
 
     /** The kind of device the listener picked for each output, keyed by [OutputForms.key]. */
     val outputForms: Flow<Map<String, OutputForm>> = context.store.data.map { decodeForms(it[Keys.OUTPUT_FORMS]) }
@@ -311,12 +258,11 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setEq(eq: EqSettings) = edit {
         it[Keys.EQ_ENABLED] = eq.enabled
-        it[Keys.EQ_BANDS] = eq.bandGainsDb.joinToString(",")
-        it[Keys.EQ_BASS] = eq.bassBoostDb
-        it[Keys.EQ_TREBLE] = eq.trebleBoostDb
-        it[Keys.EQ_STYLE] = eq.style.name
-        it[Keys.EQ_WINAMP_BANDS] = eq.winampGainsDb.joinToString(",")
-        it[Keys.EQ_WINAMP_PREAMP] = eq.winampPreampDb
+        it[Keys.EQ_BANDS_V2] = EqSettings.sanitize(eq.bandGainsDb).joinToString(",")
+        it[Keys.EQ_PREAMP_V2] = eq.preampDb.takeIf { v -> v.isFinite() }
+            ?.coerceIn(-EqSettings.MAX_PREAMP_DB, EqSettings.MAX_PREAMP_DB) ?: 0f
+        it[Keys.EQ_AUTO] = eq.auto
+        it[Keys.EQ_BIT_PERFECT_USB] = eq.bitPerfectUsb
     }
 
     private suspend inline fun edit(

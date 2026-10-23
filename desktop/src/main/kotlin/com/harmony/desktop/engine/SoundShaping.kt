@@ -1,6 +1,6 @@
 package com.harmony.desktop.engine
 
-import com.harmony.core.model.RealFft
+import com.harmony.desktop.dsp.RealFft
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos

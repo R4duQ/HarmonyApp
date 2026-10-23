@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **136**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 135), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **137**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 136), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -94,54 +94,33 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   volume, so nothing is reloaded, sought or realigned at that moment. Before, the main player
   had to jump onto the song the crossfade player was playing and be brought into step with
   it, and that last step was where a short catch could be heard. Each player has its own
-  ReplayGain, EQ and level meter, so loudness and tone stay the same, and the visualiser
+  EQ engine (with ReplayGain in it), so loudness and tone stay the same, and the visualiser
   follows whichever one is playing. Pausing, seeking, a call or a change to the queue that
   replaces the next song calls the fade off cleanly; adding songs to the queue during a fade
   does not. Shuffle uses one order for both players, so the next song is the same whichever
   one plays.
-- **Equalizer: Winamp and Auto.** The Equalizer now has two tabs, Winamp and Auto, under a
-  segmented switch. The old Simple and Advanced tabs are gone. If you had set them and never
-  touched Winamp, your bands are carried over to Winamp's, so the sound stays the same.
-- **Winamp equalizer.** Plays music through Winamp's own equalizer: ten one-octave bands at 60,
-  170, 310 and 600 Hz and 1, 3, 6, 12, 14 and 16 kHz, ±20 dB each, plus a preamp. It uses the same
-  filters as the eq-xmms reconstruction of Winamp's equalizer, which XMMS and VLC also use, so bands
-  overlap and add up the way they did in Winamp. The tab is drawn as two Winamp 2 windows:
-  - *Main window*: the song scrolls across a green LCD, with its length, bitrate, sample rate,
-    stereo light and the device it's playing on, next to a live spectrum analyser with falling
-    peaks. The analyser measures what actually reaches the speaker, and only while you look at it.
-  - *Equalizer window*: ON, AUTO (switches on Auto's song-by-song tone), PRESETS and RESET; a black
-    display with the real response curve, its glow and a dot on each band; the preamp and ten
-    sliders whose LED ladders light green to red. Tap a slider to jump, drag it, double-tap it to
-    centre.
-  - *Presets*: all 18 Winamp presets as cards, each with its own curve. The one in use glows gold.
-  - *Signal*: the preamp, the biggest boost and cut, and the output.
-- **Automatic equalizer.** The Auto tab adjusts the sound on its own, on top of Winamp, in four
-  parts that can each be switched on alone. A glowing header shows what it's doing: the total curve
-  over the live spectrum, and a ring for each part. Each part has its own card, colour and curve:
-  - *Clarity*: a model of human hearing listens to the music about 90 times a second, in 24 bands
-    spaced the way the ear resolves pitch. It works out which sounds are covered up by louder ones
-    nearby (the masking threshold) and which push forward, and moves 24 filters to match as the music
-    plays: it brings out what is covered up but still there, and holds back resonances, sudden
-    harshness and boom. Deep-buried sounds and what you couldn't hear anyway, like the empty top of a
-    lossy file, are left alone, so hiss isn't brought up. The level is matched by loudness, so Clarity
-    doesn't win by being louder. Five controls: *Recover*, *Tame*, *Bias* (leans towards one or the
-    other), *Brighten* (darker or brighter around 1 kHz) and *Boost* (output level), plus six starting
-    points (Gentle, Balanced, Detail, Smooth, Warm, Airy). A live view shows what the model hears, the
-    masking line, and what it brings out in cyan and holds back in pink. Clarity listens to the music
-    inside the app and doesn't use the microphone.
-  - *Song by song*: Harmony listens to each song as it plays and evens out its tone towards a
-    typical well-mastered record, at most a few dB (a little body for thin recordings, a little less
-    edge for harsh ones). It fades in over the first seconds, and a song played again starts with its
-    correction right away.
-  - *Speaker & room*: Measure plays about 8 seconds of pink noise through the speaker and listens with
-    the microphone, then takes out what the speaker and the room add or swallow. Each speaker keeps
-    its own measurement and is used again whenever it plays. Deep bass is never boosted, so a small
-    speaker isn't pushed into distortion.
-  - *Noise around you*: on headphones, the microphone listens to your surroundings while music plays
-    and lifts what the noise covers up (bass on a bus, the middle in a crowd), rising in about 2 s and
-    falling back in about 6 s. A gauge shows how loud it is around you, from a quiet room to a bus.
-    A notification shows while this is on; nothing is recorded or sent. The equalizer also now switches on and off at once,
-  instead of at the next seek or song.
+- **New equalizer engine.** The equalizer now runs on Harmony's own engine, written in C++ and
+  working in 32-bit float at the file's own sample rate (44.1 to 384 kHz), so 24-bit and hi-res files
+  reach it whole instead of being cut to 16 bits first. The old equalizer and the old Auto (song tone,
+  speaker & room measurement, noise around you, Clarity) are gone, and so is the microphone service
+  they used. Your curve is carried over to the new bands.
+  - *Ten bands*: 31 Hz to 16 kHz, ±12 dB each, a shelf at each end and peaks between them that narrow
+    as they rise so neighbours don't pile up, plus a preamp.
+  - *Never clips*: the engine takes back 65 % of the loudest point of your curve as headroom, moves every
+    change smoothly so dragging a slider never clicks, then a soft saturator and a 2 ms look-ahead
+    limiter keep peaks under −0.15 dBFS.
+  - *Knows where it plays*: phone speaker, wired, Bluetooth or USB DAC. It filters out what that output
+    can't play (below 90 Hz on the phone speaker, 24 Hz on Bluetooth, which also gets a little extra
+    room for its codec, 18 Hz wired and 10 Hz on a DAC).
+  - *AUTO*: like Winamp's, it loads each song's own curve as the song starts and blends it in over
+    400 ms: the curve you shaped for that song (move a slider while Auto plays it and the song keeps
+    it), otherwise the preset for its genre (rock, pop, hip-hop, dance, classical, jazz…). Heavy kicks
+    pull the deepest bass boost back by up to 4 dB so it doesn't turn muddy.
+  - *Spectrum*: the analyser in the Winamp window now comes from the engine's own FFT at 60 frames a
+    second, timed to what you hear. The Now Playing visualiser uses it too.
+  - *Bit-perfect USB* (Android 14 and newer, with a USB DAC): a switch to send the file to the DAC
+    untouched instead of equalizing it.
+  - ReplayGain now runs inside the engine, ahead of its limiter, so lifting a quiet record can't clip.
 - **New mini player.** The bar above the navigation is now a card with the record half out of
   it, turning while the music plays, coasting to a stop on pause and spinning on to the next
   song. It shows where the music is playing (AirPods, phone speaker, car…), the song, a

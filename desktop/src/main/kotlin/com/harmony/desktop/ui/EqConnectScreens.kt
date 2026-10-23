@@ -60,9 +60,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.harmony.core.model.ClarityPreset
-import com.harmony.core.model.ClaritySettings
-import com.harmony.core.model.WinampEqDesign
+import com.harmony.desktop.dsp.ClarityPreset
+import com.harmony.desktop.dsp.ClaritySettings
+import com.harmony.desktop.dsp.WinampEqDesign
 import com.harmony.desktop.DesktopApp
 import com.harmony.desktop.engine.EngineStatus
 import kotlin.math.roundToInt

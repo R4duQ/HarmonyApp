@@ -8,8 +8,6 @@ on:
       - 'desktop/**'
       - 'core/model/**'
       - 'core/remote/**'
-      - 'playback/service/src/main/kotlin/com/harmony/playback/service/player/WinampFilterBank.kt'
-      - 'playback/service/src/main/kotlin/com/harmony/playback/service/player/ClarityLayer.kt'
       - '.github/workflows/desktop.yml'
       - 'docs/DESKTOP-v1.0.md'
       - 'desktop/msix/**'

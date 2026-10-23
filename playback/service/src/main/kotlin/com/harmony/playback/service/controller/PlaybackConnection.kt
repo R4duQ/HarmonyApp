@@ -532,11 +532,9 @@ class PlaybackConnection @Inject constructor(
             Bundle().apply {
                 putBoolean(HarmonyMediaLibraryCallback.ARG_ENABLED, settings.enabled)
                 putFloatArray(HarmonyMediaLibraryCallback.ARG_EQ_BANDS, settings.bandGainsDb.toFloatArray())
-                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_BASS, settings.bassBoostDb)
-                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_TREBLE, settings.trebleBoostDb)
-                putString(HarmonyMediaLibraryCallback.ARG_EQ_STYLE, settings.style.name)
-                putFloatArray(HarmonyMediaLibraryCallback.ARG_EQ_WINAMP_BANDS, settings.winampGainsDb.toFloatArray())
-                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_WINAMP_PREAMP, settings.winampPreampDb)
+                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_PREAMP, settings.preampDb)
+                putBoolean(HarmonyMediaLibraryCallback.ARG_EQ_AUTO, settings.auto)
+                putBoolean(HarmonyMediaLibraryCallback.ARG_EQ_BIT_PERFECT, settings.bitPerfectUsb)
             },
         )
     }
@@ -587,6 +585,8 @@ class PlaybackConnection @Inject constructor(
                 .setTitle(song.title)
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
+                // Auto picks the song's curve from it (EqAuto).
+                .setGenre(song.genre)
                 // Its length, known before the player has read the file (Connect sends it on).
                 .setDurationMs(song.durationMs.takeIf { it > 0 })
                 // A content:// URI, not the raw file:// path: these items

@@ -1,9 +1,9 @@
 package com.harmony.desktop.engine
 
-import com.harmony.core.model.ClaritySettings
-import com.harmony.core.model.WinampEqDesign
-import com.harmony.playback.service.player.ClarityLayer
-import com.harmony.playback.service.player.WinampFilterBank
+import com.harmony.desktop.dsp.ClaritySettings
+import com.harmony.desktop.dsp.WinampEqDesign
+import com.harmony.desktop.dsp.ClarityLayer
+import com.harmony.desktop.dsp.WinampFilterBank
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

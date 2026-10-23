@@ -6,7 +6,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,17 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,12 +36,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,21 +49,23 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.harmony.core.datastore.SettingsRepository
-import com.harmony.core.model.AutoEqSettings
 import com.harmony.core.model.EqSettings
-import com.harmony.core.model.EqStyle
-import com.harmony.core.model.WinampEqDesign
+import com.harmony.core.model.EqAutoCurve
+import com.harmony.core.model.EqAutoSource
+import com.harmony.core.model.EqPresets
+import com.harmony.core.model.EqResponse
 import com.harmony.core.ui.component.EditorialCircleButton
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.component.EditorialSwitch
 import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import com.harmony.core.ui.component.bluePalette
+import com.harmony.domain.playback.EqLive
+import com.harmony.domain.playback.EqStatus
 import com.harmony.domain.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -81,11 +74,12 @@ import kotlin.math.abs
 
 /**
  * All writes go to the DataStore only; SettingsApplier pushes the change into
- * the live audio chain. The screen therefore reflects reality even if the
- * change was made elsewhere, and EQ state survives process death for free.
+ * the live audio chain (and the playback service reads Auto's song curves
+ * itself). The screen therefore reflects reality even if the change was made
+ * elsewhere, and EQ state survives process death for free.
  *
- * Winamp is the manual equalizer; Auto (its own ViewModel) adds its
- * corrections on top.
+ * With Auto on, the sliders show and edit the song playing: whatever is set
+ * then is remembered for that song, the way Winamp's AUTO kept a preset per file.
  */
 @HiltViewModel
 class EqualizerViewModel @Inject constructor(
@@ -94,10 +88,10 @@ class EqualizerViewModel @Inject constructor(
 ) : ViewModel() {
 
     val eq: StateFlow<EqSettings> = settings.settings.map { it.eq }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EqSettings(style = EqStyle.WINAMP))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EqSettings())
 
-    val autoEq: StateFlow<AutoEqSettings> = settings.settings.map { it.autoEq }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AutoEqSettings())
+    /** What the engine is doing: the song's Auto curve, the output, bit-perfect. */
+    val status: StateFlow<EqStatus> = EqLive.status
 
     /** What Winamp's main window shows: the song, its format, whether it's playing, and where. */
     val nowPlaying: StateFlow<NowPlayingInfo?> = playback.playerState
@@ -118,43 +112,59 @@ class EqualizerViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun setEnabled(on: Boolean) = update { it.copy(enabled = on, style = EqStyle.WINAMP) }
+    fun setEnabled(on: Boolean) = update { it.copy(enabled = on) }
 
-    fun setWinampBand(index: Int, gainDb: Float) = update { current ->
-        current.copy(
-            enabled = true,
-            style = EqStyle.WINAMP,
-            winampGainsDb = current.winampGainsDb.toMutableList()
-                .also { it[index] = gainDb.coerceIn(-WinampEqDesign.MAX_DB, WinampEqDesign.MAX_DB) },
-        )
+    /** The ON button. */
+    fun toggle() = update { it.copy(enabled = !it.enabled) }
+
+    /** The AUTO button; switching it on switches the equalizer on too. */
+    fun toggleAuto() = update { it.copy(auto = !it.auto, enabled = it.enabled || !it.auto) }
+
+    fun setBand(index: Int, gainDb: Float) = edit { gains ->
+        gains.toMutableList().also { it[index] = gainDb.coerceIn(-EqSettings.MAX_GAIN_DB, EqSettings.MAX_GAIN_DB) }
     }
 
-    fun setWinampPreamp(gainDb: Float) = update {
-        it.copy(enabled = true, style = EqStyle.WINAMP, winampPreampDb = gainDb.coerceIn(-WinampEqDesign.MAX_DB, WinampEqDesign.MAX_DB))
+    fun setPreamp(gainDb: Float) = update {
+        it.copy(enabled = true, preampDb = gainDb.coerceIn(-EqSettings.MAX_PREAMP_DB, EqSettings.MAX_PREAMP_DB))
     }
 
-    fun applyWinampPreset(name: String) {
-        val (preamp, gains) = WinampEqDesign.PRESETS.firstOrNull { it.first == name }?.second ?: return
-        update { it.copy(enabled = true, style = EqStyle.WINAMP, winampPreampDb = preamp, winampGainsDb = gains.toList()) }
+    fun applyPreset(name: String) {
+        val preset = EqPresets.named(name) ?: return
+        edit { preset }
     }
 
-    fun resetWinamp() = update {
-        it.copy(style = EqStyle.WINAMP, winampPreampDb = 0f, winampGainsDb = List(EqSettings.BAND_COUNT) { 0f })
+    /** RESET: flat; with Auto on, the song goes back to what Auto would pick for it. */
+    fun reset() {
+        val song = autoSong()
+        if (song != null) {
+            viewModelScope.launch { settings.setEqSongCurve(song, null) }
+        } else {
+            update { it.copy(bandGainsDb = EqSettings.FLAT, preampDb = 0f) }
+        }
     }
 
-    /** Winamp's ON button. */
-    fun toggleWinamp() = update { it.copy(enabled = !it.enabled, style = EqStyle.WINAMP) }
+    fun forgetSongCurve() {
+        val song = status.value.songId ?: return
+        viewModelScope.launch { settings.setEqSongCurve(song, null) }
+    }
 
-    /**
-     * Winamp's AUTO button, which once loaded a preset per song. Here it does
-     * the modern version of that: Auto's song-by-song tone correction.
-     */
-    fun toggleAuto() {
-        viewModelScope.launch {
-            val s = settings.settings.first()
-            val on = !s.autoEq.tone
-            settings.setAutoEq(s.autoEq.copy(tone = on))
-            if (on && !s.eq.enabled) settings.setEq(s.eq.copy(enabled = true, style = EqStyle.WINAMP))
+    fun setBitPerfect(on: Boolean) = update { it.copy(bitPerfectUsb = on) }
+
+    /** The song whose own curve the sliders edit, or null when they edit the listener's curve. */
+    private fun autoSong(): Long? {
+        val e = eq.value
+        val s = status.value
+        return s.songId.takeIf { e.enabled && e.auto && s.autoCurve != null }
+    }
+
+    /** Changes the curve the sliders show: the song's with Auto on, the listener's otherwise. */
+    private fun edit(transform: (List<Float>) -> List<Float>) {
+        val song = autoSong()
+        if (song != null) {
+            val base = status.value.autoCurve?.gainsDb ?: eq.value.bandGainsDb
+            viewModelScope.launch { settings.setEqSongCurve(song, transform(base)) }
+        } else {
+            update { it.copy(enabled = true, bandGainsDb = EqSettings.sanitize(transform(it.bandGainsDb))) }
         }
     }
 
@@ -163,16 +173,28 @@ class EqualizerViewModel @Inject constructor(
     }
 }
 
+/** The curve the sliders show, and what Auto is doing with it. */
+private fun shownGains(eq: EqSettings, status: EqStatus): List<Float> =
+    status.autoCurve?.takeIf { eq.enabled && eq.auto }?.gainsDb ?: eq.bandGainsDb
+
+private fun autoNote(eq: EqSettings, curve: EqAutoCurve?): String? = when {
+    !(eq.enabled && eq.auto) -> null
+    curve == null -> "AUTO · waiting for a song"
+    curve.source == EqAutoSource.SONG -> "AUTO · this song's own curve"
+    curve.source == EqAutoSource.GENRE -> "AUTO · ${curve.preset} (from the genre)"
+    else -> "AUTO · your curve (no genre to go by)"
+}
+
 // =====================================================================
 //  Screen
 // =====================================================================
 
 /**
- * The equalizer: Winamp's, and Auto on top of it.
+ * The equalizer: Harmony's native engine behind a Winamp face.
  *
- * A soft glow of the section colour sits behind the header, and the two
- * tabs are a segmented switch rather than big text tabs: there are only two,
- * and each is a whole instrument.
+ * A soft glow of the section colour sits behind the header; below it the
+ * two Winamp windows, Auto, the presets, and what the engine does to keep
+ * the sound clean on the device playing.
  */
 @Composable
 fun EqualizerScreen(
@@ -184,13 +206,22 @@ fun EqualizerScreen(
      */
     onBack: (() -> Unit)? = null,
     viewModel: EqualizerViewModel = hiltViewModel(),
-    /** The Auto tab; a slot so previews can show it without the microphone and player behind it. */
-    autoTab: @Composable (EditorialPalette) -> Unit = { AutoTab(it) },
 ) {
     val eq by viewModel.eq.collectAsStateWithLifecycle()
-    val auto by viewModel.autoEq.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(WINAMP_TAB) }
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val nowPlaying by viewModel.nowPlaying.collectAsStateWithLifecycle()
     val palette = bluePalette()
+    val gains = shownGains(eq, status)
+    val actions = remember(viewModel) {
+        WinampEqActions(
+            onToggle = viewModel::toggle,
+            onAuto = viewModel::toggleAuto,
+            onBand = viewModel::setBand,
+            onPreamp = viewModel::setPreamp,
+            onPreset = viewModel::applyPreset,
+            onReset = viewModel::reset,
+        )
+    }
 
     Column(
         Modifier
@@ -221,7 +252,7 @@ fun EqualizerScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 22.dp, end = 20.dp, top = 14.dp),
+                .padding(start = 22.dp, end = 20.dp, top = 14.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -250,9 +281,10 @@ fun EqualizerScreen(
                 )
                 Text(
                     when {
-                        !eq.enabled -> "Off — audio passes through untouched"
-                        auto.any -> "On — Winamp with Auto on top"
-                        else -> "On — playing through Winamp's EQ"
+                        status.bitPerfect -> "Bit-perfect — the DAC gets the file untouched"
+                        !eq.enabled -> "Off — flat, with clean-output protection"
+                        eq.auto -> "On — Auto picks each song's curve"
+                        else -> "On — your curve"
                     },
                     fontSize = 12.sp,
                     color = palette.muted,
@@ -261,132 +293,135 @@ fun EqualizerScreen(
             EditorialSwitch(eq.enabled, viewModel::setEnabled, palette)
         }
 
-        SegmentedTabs(
-            selected = tab,
-            onSelect = { tab = it },
-            autoOn = eq.enabled && auto.any,
-            winampOn = eq.enabled,
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-        )
-
-        when (tab) {
-            WINAMP_TAB -> WinampTab(eq, viewModel, palette)
-            AUTO_TAB -> autoTab(palette)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = LocalFloatingChromeHeight.current)
+                .padding(horizontal = 16.dp),
+        ) {
+            WinampEqPanel(
+                gains = gains,
+                preampDb = eq.preampDb,
+                on = eq.enabled && !status.bitPerfect,
+                autoOn = eq.enabled && eq.auto,
+                autoNote = autoNote(eq, status.autoCurve),
+                nowPlaying = nowPlaying,
+                actions = actions,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(18.dp))
+            AutoCard(eq, status, viewModel, palette)
+            Spacer(Modifier.height(18.dp))
+            SectionTitle("Presets", if (eq.enabled && eq.auto) "applied to this song" else "${EqPresets.ALL.size} curves", palette)
+            Spacer(Modifier.height(10.dp))
+            PresetGallery(gains, actions.onPreset)
+            Spacer(Modifier.height(18.dp))
+            SectionTitle("Clean output", status.output.label, palette)
+            Spacer(Modifier.height(10.dp))
+            SignalTiles(eq, gains, status, nowPlaying, palette)
+            if (status.bitPerfectAvailable) {
+                Spacer(Modifier.height(10.dp))
+                BitPerfectRow(eq.bitPerfectUsb, status.bitPerfect, viewModel::setBitPerfect, palette)
+            }
+            Text(
+                "Ten bands from 31 Hz to 16 kHz, ±12 dB each, run by Harmony's own engine in 32-bit float at the " +
+                    "file's sample rate. It makes its own headroom as you boost, filters out what the output can't " +
+                    "play (below 90 Hz on the phone speaker), and a soft saturator and a look-ahead limiter keep " +
+                    "the sound from ever clipping. Tap a slider to jump, drag it, double-tap to centre.",
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = palette.muted,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
+            )
         }
     }
 }
 
-private const val WINAMP_TAB = 0
-private const val AUTO_TAB = 1
 private val WinampGold = Color(0xFFE2B451)
 
-/** Winamp | Auto, each with an icon and a small light when it's working. */
+/** What AUTO does and where this song's curve came from. */
 @Composable
-private fun SegmentedTabs(
-    selected: Int,
-    onSelect: (Int) -> Unit,
-    autoOn: Boolean,
-    winampOn: Boolean,
-    palette: EditorialPalette,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(50)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(palette.ink.copy(alpha = 0.06f))
-            .border(1.dp, palette.line, shape)
-            .padding(4.dp),
-    ) {
-        TabPill("Winamp", Icons.Rounded.Tune, selected == WINAMP_TAB, winampOn, palette, Modifier.weight(1f)) { onSelect(WINAMP_TAB) }
-        TabPill("Auto", Icons.Rounded.AutoAwesome, selected == AUTO_TAB, autoOn, palette, Modifier.weight(1f)) { onSelect(AUTO_TAB) }
-    }
-}
-
-@Composable
-private fun TabPill(
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    lit: Boolean,
-    palette: EditorialPalette,
-    modifier: Modifier,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(50)
-    Row(
-        modifier
-            .clip(shape)
-            .background(
-                if (selected) Brush.horizontalGradient(listOf(palette.accent, palette.accent.copy(alpha = 0.78f)))
-                else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)),
-            )
-            .clickable(role = Role.Tab, onClick = onClick)
-            .semantics { this.selected = selected }
-            .padding(vertical = 11.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val ink = if (selected) palette.onAccent else palette.ink.copy(alpha = 0.75f)
-        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
-        Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink, modifier = Modifier.padding(start = 8.dp))
-        if (lit) {
-            Box(
-                Modifier
-                    .padding(start = 8.dp)
-                    .size(7.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (selected) palette.onAccent else Color(0xFF3CDB5A)),
-            )
-        }
-    }
-}
-
-// =====================================================================
-//  WINAMP tab
-// =====================================================================
-
-@Composable
-private fun WinampTab(eq: EqSettings, viewModel: EqualizerViewModel, palette: EditorialPalette) {
-    val auto by viewModel.autoEq.collectAsStateWithLifecycle()
-    val nowPlaying by viewModel.nowPlaying.collectAsStateWithLifecycle()
-    val actions = remember(viewModel) {
-        WinampEqActions(
-            onToggle = viewModel::toggleWinamp,
-            onAuto = viewModel::toggleAuto,
-            onBand = viewModel::setWinampBand,
-            onPreamp = viewModel::setWinampPreamp,
-            onPreset = viewModel::applyWinampPreset,
-            onReset = viewModel::resetWinamp,
-        )
-    }
+private fun AutoCard(eq: EqSettings, status: EqStatus, viewModel: EqualizerViewModel, palette: EditorialPalette) {
+    val on = eq.enabled && eq.auto
+    val curve = status.autoCurve
     Column(
         Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = LocalFloatingChromeHeight.current)
-            .padding(horizontal = 16.dp),
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.accent.copy(alpha = if (on) 0.12f else 0.06f))
+            .border(1.dp, if (on) palette.accent.copy(alpha = 0.5f) else palette.line, RoundedCornerShape(18.dp))
+            .padding(16.dp),
     ) {
-        WinampEqPanel(eq, auto.tone, nowPlaying, actions, Modifier.fillMaxWidth())
-        Spacer(Modifier.height(18.dp))
-        SectionTitle("Presets", "${WinampEqDesign.PRESETS.size} from Winamp", palette)
-        Spacer(Modifier.height(10.dp))
-        PresetGallery(eq, actions.onPreset)
-        Spacer(Modifier.height(18.dp))
-        SectionTitle("Signal", if (eq.enabled) "What the EQ does now" else "Equalizer off", palette)
-        Spacer(Modifier.height(10.dp))
-        SignalTiles(eq, nowPlaying, palette)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto", fontSize = 19.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = palette.ink)
+                Text(
+                    when {
+                        !on -> "Off — every song plays with your curve"
+                        curve == null -> "On — starts with the next song"
+                        curve.source == EqAutoSource.SONG -> "This song has its own curve"
+                        curve.source == EqAutoSource.GENRE -> "${curve.preset}, picked from the song's genre"
+                        else -> "No genre to go by: your curve"
+                    },
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = palette.muted,
+                )
+            }
+            EditorialSwitch(on, { viewModel.toggleAuto() }, palette)
+        }
         Text(
-            "Winamp's own equalizer: ten one-octave bands from 60 Hz to 16 kHz, ±20 dB each, mixed in parallel " +
-                "the way Winamp did it, with its preamp and presets. Tap a slider to jump, drag it, double-tap to " +
-                "centre. AUTO switches on Auto's song-by-song tone on top.",
+            "Each song gets its own curve as it starts, blended in over 400 ms: the one you shaped for it, or " +
+                "the preset for its genre. Move a slider while Auto plays a song and that song keeps it. " +
+                "Heavy kicks pull the deepest bass boost back by up to 4 dB so it never turns muddy.",
             fontSize = 12.sp,
             lineHeight = 17.sp,
             color = palette.muted,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
+            modifier = Modifier.padding(top = 10.dp),
         )
+        if (on && curve?.source == EqAutoSource.SONG) {
+            Text(
+                "Forget this song's curve",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.accent,
+                modifier = Modifier
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(50))
+                    .clickable(role = Role.Button, onClick = viewModel::forgetSongCurve)
+                    .padding(vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/** Android 14+ with a USB DAC: the choice between the EQ and an untouched signal. */
+@Composable
+private fun BitPerfectRow(wanted: Boolean, active: Boolean, onChange: (Boolean) -> Unit, palette: EditorialPalette) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(palette.accent.copy(alpha = 0.07f))
+            .border(1.dp, palette.line, RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Bit-perfect USB", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = palette.ink)
+            Text(
+                when {
+                    active -> "On: the DAC gets the file as it is; the EQ steps aside"
+                    wanted -> "This DAC or Android build doesn't offer it"
+                    else -> "Send the file to the DAC untouched instead of equalizing it"
+                },
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                color = palette.muted,
+            )
+        }
+        EditorialSwitch(wanted, onChange, palette)
     }
 }
 
@@ -399,25 +434,24 @@ private fun SectionTitle(title: String, detail: String, palette: EditorialPalett
 }
 
 /**
- * Every Winamp preset as a little card with its own curve, so they can be
- * compared at a glance. The one in use glows gold.
+ * Every preset as a little card with its own curve, so they can be compared
+ * at a glance. The one in use glows gold.
  */
 @Composable
-private fun PresetGallery(eq: EqSettings, onPreset: (String) -> Unit) {
-    val current = currentPreset(eq)
+private fun PresetGallery(gains: List<Float>, onPreset: (String) -> Unit) {
+    val current = EqPresets.matching(gains)
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     // Bring the preset in use into view, as the gallery opens and when it changes.
     LaunchedEffect(current) {
-        val index = WinampEqDesign.PRESETS.indexOfFirst { it.first == current }
+        val index = EqPresets.ALL.indexOfFirst { it.first == current }
         if (index > 0) scroll.animateScrollTo(with(density) { ((118 + 10) * index - 40).dp.roundToPx() }.coerceAtLeast(0))
     }
     Row(
         Modifier.horizontalScroll(scroll).padding(horizontal = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        WinampEqDesign.PRESETS.forEach { (name, preset) ->
-            val (preamp, gains) = preset
+        EqPresets.ALL.forEach { (name, preset) ->
             val selected = name == current
             val shape = RoundedCornerShape(16.dp)
             Column(
@@ -430,7 +464,7 @@ private fun PresetGallery(eq: EqSettings, onPreset: (String) -> Unit) {
                     .testTag(WinampTags.preset(name))
                     .padding(10.dp),
             ) {
-                MiniCurve(gains, preamp, Modifier.fillMaxWidth().height(40.dp))
+                MiniCurve(preset, Modifier.fillMaxWidth().height(40.dp))
                 Spacer(Modifier.height(8.dp))
                 Text(
                     name,
@@ -442,7 +476,7 @@ private fun PresetGallery(eq: EqSettings, onPreset: (String) -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "Preamp ${fmtDb(preamp)}",
+                    "Headroom ${fmtDb(EqResponse.autoPreampDb(preset))}",
                     fontSize = 10.sp,
                     lineHeight = 13.sp,
                     fontFamily = FontFamily.Monospace,
@@ -456,10 +490,10 @@ private fun PresetGallery(eq: EqSettings, onPreset: (String) -> Unit) {
 
 /** A preset's curve on a tiny black display, in Winamp's red-yellow-green. */
 @Composable
-private fun MiniCurve(gains: List<Float>, preamp: Float, modifier: Modifier) {
-    val points = remember(gains, preamp) {
-        val freqs = FloatArray(40) { i -> 30f * 600f.let { r -> Math.pow(r.toDouble(), i / 39.0).toFloat() } }
-        WinampEqDesign.responseDb(gains, 0f, freqs)
+private fun MiniCurve(gains: List<Float>, modifier: Modifier) {
+    val points = remember(gains) {
+        val freqs = FloatArray(40) { i -> 25f * Math.pow(760.0, i / 39.0).toFloat() }
+        EqResponse.bandsDb(gains, freqs)
     }
     Canvas(modifier.clip(RoundedCornerShape(8.dp)).background(Color.Black)) {
         val mid = size.height / 2f
@@ -467,7 +501,7 @@ private fun MiniCurve(gains: List<Float>, preamp: Float, modifier: Modifier) {
         val path = Path()
         points.forEachIndexed { i, db ->
             val x = size.width * i / (points.size - 1f)
-            val y = mid - (db / 20f).coerceIn(-1f, 1f) * size.height * 0.42f
+            val y = mid - (db / EqSettings.MAX_GAIN_DB).coerceIn(-1f, 1f) * size.height * 0.42f
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         drawPath(
@@ -478,32 +512,30 @@ private fun MiniCurve(gains: List<Float>, preamp: Float, modifier: Modifier) {
     }
 }
 
-/** Four readouts: preamp, the strongest boost and cut, and the device it's playing on. */
+/** Four readouts: the headroom taken, the high-pass for this output, the limiter's ceiling, the device. */
 @Composable
-private fun SignalTiles(eq: EqSettings, nowPlaying: NowPlayingInfo?, palette: EditorialPalette) {
-    val gains = eq.winampGainsDb
-    val up = gains.indices.maxByOrNull { gains[it] }
-    val down = gains.indices.minByOrNull { gains[it] }
+private fun SignalTiles(eq: EqSettings, gains: List<Float>, status: EqStatus, nowPlaying: NowPlayingInfo?, palette: EditorialPalette) {
+    val headroom = if (eq.enabled) EqResponse.autoPreampDb(gains) else 0f
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SignalTile("Preamp", fmtDb(eq.winampPreampDb), "applied after the bands", palette, Modifier.weight(1f))
-            SignalTile(
-                "Biggest boost",
-                if (up != null && gains[up] > 0.05f) fmtDb(gains[up]) else "—",
-                if (up != null && gains[up] > 0.05f) "at ${bandName(up)}" else "no band raised",
-                palette,
-                Modifier.weight(1f),
-            )
+            SignalTile("Headroom", fmtDb(headroom), "taken back for your boosts", palette, Modifier.weight(1f))
+            SignalTile("Preamp", fmtDb(if (eq.enabled) eq.preampDb else 0f), "yours, on top", palette, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SignalTile(
-                "Biggest cut",
-                if (down != null && gains[down] < -0.05f) fmtDb(gains[down]) else "—",
-                if (down != null && gains[down] < -0.05f) "at ${bandName(down)}" else "no band lowered",
+                "High-pass",
+                "${status.output.highPassHz} Hz",
+                "rumble the output can't play",
                 palette,
                 Modifier.weight(1f),
             )
-            SignalTile("Output", nowPlaying?.output ?: "—", if (nowPlaying?.playing == true) "playing now" else "idle", palette, Modifier.weight(1f))
+            SignalTile(
+                "Ceiling",
+                "%.2f dBFS".format(status.output.ceilingDb),
+                status.outputName.ifBlank { nowPlaying?.output ?: "look-ahead limiter" },
+                palette,
+                Modifier.weight(1f),
+            )
         }
     }
 }
@@ -530,12 +562,6 @@ private fun SignalTile(label: String, value: String, detail: String, palette: Ed
         )
         Text(detail, fontSize = 11.sp, lineHeight = 14.sp, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
-}
-
-/** "60 Hz", "12 kHz". */
-private fun bandName(i: Int): String {
-    val f = WinampEqDesign.FREQUENCIES_HZ[i]
-    return if (f >= 1000f) "${(f / 1000f).let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }} kHz" else "${f.toInt()} Hz"
 }
 
 private fun fmtDb(v: Float): String = when {
