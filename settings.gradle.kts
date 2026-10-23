@@ -55,6 +55,8 @@ include(":feature:downloads")
 include(":feature:discover")
 include(":feature:home")
 include(":sync:analysis-worker")
+// Mornye's Rust download backend, used only by the Mornye build.
+include(":vendor:mornye")
 // Added in later phases:
 // include(":core:database"), ":core:media", ":core:dsp-native", ":core:datastore",
 // ":domain:library", ":domain:analysis", ":domain:similarity", ":domain:shuffle",

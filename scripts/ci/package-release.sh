@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION_NAME="${1:?usage: package-release.sh <version-name>}"
+VERSION_NAME="${1:?usage: package-release.sh <version-name> [abi] [stable|mornye]}"
 ABI="${2:-arm64-v8a}"
-APK_IN="app/build/outputs/apk/release/app-release.apk"
+# stable: SpotiFLAC 4.9.6's Go download runtime; mornye: Mornye 5's Rust one.
+FLAVOR="${3:-stable}"
+APK_IN="app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk"
 DIST_DIR="dist"
+
+case "$FLAVOR" in
+  stable)
+    APK_OUT_NAME="Harmony-v${VERSION_NAME}-${ABI}.apk"
+    BACKEND_LIBRARIES="libgojni.so"
+    ;;
+  mornye)
+    APK_OUT_NAME="Harmony-v${VERSION_NAME}-mornye-${ABI}.apk"
+    # UniFFI reaches the Rust library through JNA's dispatcher.
+    BACKEND_LIBRARIES="libmornye_mobile.so libjnidispatch.so"
+    ;;
+  *)
+    echo "ERROR: unsupported release flavor: $FLAVOR" >&2
+    exit 8
+    ;;
+esac
 
 case "$ABI" in
   arm64-v8a|x86_64) ;;
@@ -14,7 +32,7 @@ case "$ABI" in
     ;;
 esac
 
-APK_OUT="$DIST_DIR/Harmony-v${VERSION_NAME}-${ABI}.apk"
+APK_OUT="$DIST_DIR/$APK_OUT_NAME"
 
 if [[ ! -f "$APK_IN" ]]; then
   echo "ERROR: release APK not found at $APK_IN" >&2
@@ -23,7 +41,7 @@ fi
 
 # Direct FFmpeg is launched from nativeLibraryDir. An APK missing its shared
 # C++ runtime or either archive must never be published as a working FLAC build.
-for LIBRARY in libgojni.so libffmpeg.so libffmpeg.zip.so libpython.zip.so libc++_shared.so; do
+for LIBRARY in $BACKEND_LIBRARIES libffmpeg.so libffmpeg.zip.so libpython.zip.so libc++_shared.so; do
   if ! unzip -t "$APK_IN" "lib/$ABI/$LIBRARY" >/dev/null; then
     echo "ERROR: required FLAC runtime missing/corrupt for $ABI: $LIBRARY" >&2
     exit 6

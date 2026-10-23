@@ -11,6 +11,8 @@ captures/
 
 # Generated from pinned SpotiFLAC Go source by CI/local release tooling.
 vendor-maven/
+# Mornye's Rust backend and bindings, staged by scripts/ci/build-mornye-backend.sh.
+vendor-mornye/
 feature/downloads/libs/
 
 # GitHub/local release signing material

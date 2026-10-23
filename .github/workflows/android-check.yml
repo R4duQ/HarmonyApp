@@ -17,6 +17,8 @@ on:
       - 'gradle/**'
       - '*.gradle.kts'
       - 'gradle.properties'
+      - 'vendor/**'
+      - 'scripts/ci/**'
       - '.github/workflows/android-check.yml'
   workflow_dispatch:
 
@@ -34,12 +36,14 @@ env:
   ANDROID_BUILD_TOOLS: '35.0.0'
   NDK_VERSION: '29.0.14206865'
   SPOTIFLAC_TAG: 'v4.9.6'
+  MORNYE_TAG: 'v5.2.5'
+  MORNYE_NDK_VERSION: '30.0.16248370'
 
 jobs:
   check:
     name: Build and test (unsigned)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +77,8 @@ jobs:
             "platforms;android-${ANDROID_API_LEVEL}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" \
             "cmake;3.22.1" \
-            "ndk;${NDK_VERSION}"
+            "ndk;${NDK_VERSION}" \
+            "ndk;${MORNYE_NDK_VERSION}"
 
       - name: Build pinned SpotiFLAC Go backend
         env:
@@ -82,13 +87,21 @@ jobs:
           EXPECTED_GO_VERSION: ${{ env.GO_VERSION }}
         run: bash ./scripts/ci/build-spotiflac-backend.sh
 
+      - name: Build pinned Mornye Rust backend
+        env:
+          MORNYE_TAG: ${{ env.MORNYE_TAG }}
+          MORNYE_NDK_VERSION: ${{ env.MORNYE_NDK_VERSION }}
+        run: bash ./scripts/ci/build-mornye-backend.sh
+
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: Playback tests
+      - name: Playback and download tests
         run: >-
           ./gradlew
           :playback:service:testReleaseUnitTest
+          :feature:downloads:testStableReleaseUnitTest
+          :feature:downloads:testMornyeReleaseUnitTest
           --no-daemon
           --stacktrace
 
@@ -97,14 +110,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playback-test-report
-          path: playback/service/build/reports/tests/
+          path: |
+            playback/service/build/reports/tests/
+            feature/downloads/build/reports/tests/
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Build the app (unsigned, arm64)
+      - name: Build both apps (unsigned, arm64)
         run: >-
           ./gradlew
-          :app:assembleRelease
+          :app:assembleStableRelease
+          :app:assembleMornyeRelease
           -PharmonyAbi=arm64-v8a
           --no-daemon
           --stacktrace

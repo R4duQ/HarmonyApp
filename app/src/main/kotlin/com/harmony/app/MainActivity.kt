@@ -147,7 +147,7 @@ class MainActivity : ComponentActivity() {
     private fun handleSpotiFlacVerificationIntent(sourceIntent: Intent?) {
         if (sourceIntent?.action != Intent.ACTION_VIEW) return
         val data = sourceIntent.data ?: return
-        if (!data.scheme.orEmpty().equals(SPOTIFLAC_SCHEME, ignoreCase = true)) return
+        if (data.scheme.orEmpty().lowercase(Locale.ROOT) !in SPOTIFLAC_SCHEMES) return
         if (data.host.orEmpty().lowercase(Locale.ROOT) !in SPOTIFLAC_CALLBACK_HOSTS) return
 
         val callbackUrl = data.toString()
@@ -188,7 +188,9 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val SPOTIFLAC_SCHEME = "spotiflac"
+        // spotiflac:// for the stable build, mornye:// for the Mornye one; each
+        // build's manifest only lets its own scheme through.
+        private val SPOTIFLAC_SCHEMES = setOf("spotiflac", "mornye")
         private val SPOTIFLAC_CALLBACK_HOSTS = setOf("callback", "spotify-callback", "session-grant")
         private const val SPOTIFY_PLAYLIST_SCHEME = "com.harmony.app"
         private const val SPOTIFY_PLAYLIST_CALLBACK_HOST = "spotify-playlist-callback"

@@ -7,13 +7,27 @@ plugins {
 android {
     namespace = "com.harmony.feature.downloads"
     buildFeatures { compose = true }
+
+    // Two builds that differ only in the runtime behind SpotiFlacBackend:
+    // stable keeps SpotiFLAC 4.9.6's Go runtime, mornye uses Mornye 5's Rust
+    // runtime, which replaced it upstream.
+    flavorDimensions += "backend"
+    productFlavors {
+        create("stable") {
+            dimension = "backend"
+            isDefault = true
+        }
+        create("mornye") { dimension = "backend" }
+    }
 }
 
 dependencies {
     // Local Maven dependency containing the real SpotiFLAC Mobile v4.9.6
     // GoMobile bridge. It is used by both debug and release variants so local
     // phone builds support current extensions that require downloadSegments.
-    implementation("com.harmony.vendor:gobackend:4.9.6")
+    "stableImplementation"("com.harmony.vendor:gobackend:4.9.6")
+    // Mornye 5's Rust runtime and its UniFFI bindings (scripts/ci/build-mornye-backend.sh).
+    "mornyeImplementation"(projects.vendor.mornye)
     implementation(projects.core.ui)
     implementation(projects.core.common)
     implementation(projects.core.database)
