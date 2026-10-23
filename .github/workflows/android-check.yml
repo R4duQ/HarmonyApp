@@ -111,6 +111,7 @@ jobs:
           :feature:downloads:testStableReleaseUnitTest
           :feature:downloads:testMornyeReleaseUnitTest
           :core:eq-engine:testReleaseUnitTest
+          :core:model:test
           --no-daemon
           --stacktrace
 

@@ -525,7 +525,7 @@ private fun SignalTiles(eq: EqSettings, gains: List<Float>, status: EqStatus, no
             SignalTile(
                 "High-pass",
                 "${status.output.highPassHz} Hz",
-                "below it the ${status.output.label.lowercase()} only distorts",
+                "rumble the output can't play",
                 palette,
                 Modifier.weight(1f),
             )
