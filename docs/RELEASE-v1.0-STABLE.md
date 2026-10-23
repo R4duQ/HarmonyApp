@@ -1,13 +1,36 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **135**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 134), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **136**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 135), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
 
-- `Harmony-v1.0-arm64-v8a.apk`: for phones (64-bit ARM, Android 10 or newer).
-- `Harmony-v1.0-x86_64.apk`: for the Android emulator only.
+- `Harmony-v1.0-arm64-v8a.apk`: for phones (64-bit ARM, Android 10 or newer). The stable
+  build: downloads run on SpotiFLAC 4.9.6, as before.
+- `Harmony-v1.0-mornye-arm64-v8a.apk`: the same app for phones, with downloads running on
+  Mornye 5.2.5 instead (see below). Try it if you want the newer download runtime.
+- `Harmony-v1.0-x86_64.apk`: for the Android emulator only (stable build).
+
+The two phone APKs are the same app with the same version, so either one installs over
+the other, in both directions, and keeps your library, playlists and settings. Only the
+downloads differ.
+
+### Stable or Mornye
+
+SpotiFLAC, the download runtime behind Harmony's lossless downloads, has become
+**Mornye**, and from version 5 its Go runtime was replaced by a new one written in Rust.
+The stable build keeps SpotiFLAC 4.9.6, which still runs every current download
+extension. The Mornye build uses Mornye 5.2.5 with the same extensions (Tidal, Qobuz,
+Deezer, Amazon), the same requests and the same answers, so downloads look and behave
+the same. Differences you may notice:
+
+- Sign-in and verification pages return to the app on `mornye://` links instead of
+  `spotiflac://`. If the Mornye app itself is also installed, Android may ask which app
+  should open them: choose Harmony.
+- Mornye looks up network addresses with its own encrypted DNS.
+- Extension sign-ins are stored separately per runtime, so after switching builds a
+  provider may ask you to verify once more.
 
 `SHA256SUMS.txt` and `APK-SIGNATURE.txt` let you check the file and its signing
 certificate.

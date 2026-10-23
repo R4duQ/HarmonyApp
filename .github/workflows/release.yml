@@ -25,12 +25,15 @@ env:
   ANDROID_BUILD_TOOLS: '35.0.0'
   NDK_VERSION: '29.0.14206865'
   SPOTIFLAC_TAG: 'v4.9.6'
+  # The Mornye build's download runtime (Rust), and the NDK Mornye pins for it.
+  MORNYE_TAG: 'v5.2.5'
+  MORNYE_NDK_VERSION: '30.0.16248370'
 
 jobs:
   release:
     name: Signed phone + emulator APKs
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout release tag
@@ -81,7 +84,8 @@ jobs:
             "platforms;android-${ANDROID_API_LEVEL}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" \
             "cmake;3.22.1" \
-            "ndk;${NDK_VERSION}"
+            "ndk;${NDK_VERSION}" \
+            "ndk;${MORNYE_NDK_VERSION}"
 
       - name: Build pinned SpotiFLAC Go backend
         env:
@@ -89,6 +93,12 @@ jobs:
           SPOTIFLAC_TAG: ${{ env.SPOTIFLAC_TAG }}
           EXPECTED_GO_VERSION: ${{ env.GO_VERSION }}
         run: bash ./scripts/ci/build-spotiflac-backend.sh
+
+      - name: Build pinned Mornye Rust backend
+        env:
+          MORNYE_TAG: ${{ env.MORNYE_TAG }}
+          MORNYE_NDK_VERSION: ${{ env.MORNYE_NDK_VERSION }}
+        run: bash ./scripts/ci/build-mornye-backend.sh
 
       - name: Restore release signing key
         shell: bash
@@ -123,8 +133,10 @@ jobs:
           :core:database:compileReleaseKotlin
           :domain:shuffle:compileKotlin
           :feature:player:compileReleaseKotlin
-          :feature:downloads:compileReleaseKotlin
-          :feature:downloads:testReleaseUnitTest
+          :feature:downloads:compileStableReleaseKotlin
+          :feature:downloads:compileMornyeReleaseKotlin
+          :feature:downloads:testStableReleaseUnitTest
+          :playback:service:testReleaseUnitTest
           :domain:library:test
           :data:library:testReleaseUnitTest
           :feature:discover:compileReleaseKotlin
@@ -142,13 +154,29 @@ jobs:
           HARMONY_KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
         run: >-
           ./gradlew
-          :app:assembleRelease
+          :app:assembleStableRelease
           -PharmonyAbi=arm64-v8a
           --no-daemon
           --stacktrace
 
       - name: Verify and package arm64 phone APK
-        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" arm64-v8a
+        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" arm64-v8a stable
+
+      - name: Build signed arm64 Mornye phone APK
+        env:
+          HARMONY_KEYSTORE_FILE: release.keystore
+          HARMONY_KEYSTORE_PASSWORD: ${{ secrets.HARMONY_KEYSTORE_PASSWORD }}
+          HARMONY_KEY_ALIAS: ${{ secrets.HARMONY_KEY_ALIAS }}
+          HARMONY_KEY_PASSWORD: ${{ secrets.HARMONY_KEY_PASSWORD }}
+        run: >-
+          ./gradlew
+          :app:assembleMornyeRelease
+          -PharmonyAbi=arm64-v8a
+          --no-daemon
+          --stacktrace
+
+      - name: Verify and package arm64 Mornye phone APK
+        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" arm64-v8a mornye
 
       - name: Build signed x86_64 emulator APK
         env:
@@ -159,13 +187,13 @@ jobs:
         run: >-
           ./gradlew
           :app:clean
-          :app:assembleRelease
+          :app:assembleStableRelease
           -PharmonyAbi=x86_64
           --no-daemon
           --stacktrace
 
       - name: Verify and package x86_64 emulator APK
-        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" x86_64
+        run: bash ./scripts/ci/package-release.sh "${{ steps.version.outputs.version_name }}" x86_64 stable
 
       - name: Upload signed APK as workflow artifact
         uses: actions/upload-artifact@v4
@@ -173,11 +201,13 @@ jobs:
           name: Harmony-v${{ steps.version.outputs.version_name }}-release-apks
           path: |
             dist/Harmony-v${{ steps.version.outputs.version_name }}-arm64-v8a.apk
+            dist/Harmony-v${{ steps.version.outputs.version_name }}-mornye-arm64-v8a.apk
             dist/Harmony-v${{ steps.version.outputs.version_name }}-x86_64.apk
             dist/SHA256SUMS.txt
             dist/APK-SIGNATURE.txt
             vendor-maven/com/harmony/vendor/gobackend/4.9.6/gobackend-4.9.6.aar.source.txt
             vendor-maven/com/harmony/vendor/gobackend/4.9.6/gobackend-4.9.6.aar.sha256.txt
+            vendor-mornye/SOURCE.txt
           if-no-files-found: error
           retention-days: 90
 
@@ -198,6 +228,7 @@ jobs:
             gh release edit "${RELEASE_TAG}" --title "$RELEASE_TITLE" --notes-file "$NOTES"
             gh release upload "${RELEASE_TAG}" --clobber \
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
+              "dist/Harmony-v${VERSION_NAME}-mornye-arm64-v8a.apk#Harmony v${VERSION_NAME} Mornye — Android arm64-v8a (new download runtime)" \
               "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
               "dist/APK-SIGNATURE.txt#APK signing certificate details"
@@ -207,6 +238,7 @@ jobs:
               --notes-file "$NOTES" \
               --target "${GITHUB_SHA}" \
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
+              "dist/Harmony-v${VERSION_NAME}-mornye-arm64-v8a.apk#Harmony v${VERSION_NAME} Mornye — Android arm64-v8a (new download runtime)" \
               "dist/Harmony-v${VERSION_NAME}-x86_64.apk#Harmony v${VERSION_NAME} — Android Emulator x86_64" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
               "dist/APK-SIGNATURE.txt#APK signing certificate details"

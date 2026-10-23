@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
-import gobackend.Gobackend
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +73,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
 ) {
     private val initMutex = Mutex()
     private val providerStateMutex = Mutex()
+
+    /** SpotiFLAC's Go runtime or Mornye's Rust one, depending on the build. */
+    private val backend: SpotiFlacBackend = createSpotiFlacBackend()
 
     // MainActivity can receive the deep link before a workflow ViewModel is
     // recreated after browser verification. Replay preserves that completion,
@@ -165,7 +167,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     detail = "Resolving exact track identity for SpotiFLAC providers…",
                 ),
             )
-            nativeControl { Gobackend.resetDownloadCancel(itemId) }
+            nativeControl { backend.resetDownloadCancel(itemId) }
 
             // song.link only adds Tidal/Qobuz/Spotify ids; the track's own ids are enough to
             // start, so a slow song.link must not hold the download on "Resolving".
@@ -272,7 +274,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             )
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
-                runCatching { nativeControl { Gobackend.cancelDownload(itemId) } }
+                runCatching { nativeControl { backend.cancelDownload(itemId) } }
                 withContext(Dispatchers.IO) { jobDir.deleteRecursively() }
             }
             throw cancelled
@@ -295,7 +297,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         } finally {
             poller.cancel()
             withContext(NonCancellable) {
-                runCatching { nativeControl { Gobackend.clearItemProgress(itemId) } }
+                runCatching { nativeControl { backend.clearItemProgress(itemId) } }
             }
             activeItemId = null
             activeJobDir = null
@@ -307,7 +309,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         if (DownloadEngineGate.albumOwnsTransfer) return // Album cancellation belongs to its WorkManager job.
         val itemId = activeItemId
         if (itemId != null) {
-            nativeControlExecutor.execute { runCatching { Gobackend.cancelDownload(itemId) } }
+            nativeControlExecutor.execute { runCatching { backend.cancelDownload(itemId) } }
         }
         activeJobDir?.deleteRecursively()
     }
@@ -328,7 +330,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
     /**
      * Android deep-link entry point used by MainActivity. This mirrors the
-     * official SpotiFLAC Android host contract: spotiflac://session-grant uses
+     * official SpotiFLAC Android host contract: spotiflac://session-grant (mornye://
+     * in the Mornye build) uses
      * `state` as a one-time host nonce. The nonce is consumed to resolve the
      * owning extension before `grant` (or `code`) is staged. The grant is not
      * considered complete until the extension action `completeGrant` reports
@@ -349,7 +352,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 providerId = "",
                 message = "Harmony could not parse the SpotiFLAC verification callback.",
             )
-            !parsed.scheme.orEmpty().equals(SPOTIFLAC_CALLBACK_SCHEME, ignoreCase = true) -> SpotiFlacVerificationCallbackResult(
+            !parsed.scheme.orEmpty().equals(backend.callbackScheme, ignoreCase = true) -> SpotiFlacVerificationCallbackResult(
                 accepted = false,
                 providerId = "",
                 message = "Harmony ignored a verification callback with an unexpected URL scheme.",
@@ -394,7 +397,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // after process recreation. The raw nonce and signed grant are never
         // persisted by Harmony.
         val consumedProviderId = runCatching {
-            nativeControl { Gobackend.consumeExtensionCallbackState(callbackState) }
+            nativeControl { backend.consumeCallbackState(callbackState) }
                 .orEmpty()
                 .trim()
         }.getOrNull()
@@ -489,9 +492,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
             }
 
             val completionRaw = try {
-                nativeControl { Gobackend.setExtensionSessionGrantByID(normalized, sessionGrant) }
+                nativeControl { backend.setSessionGrant(normalized, sessionGrant) }
                 nativeControl {
-                    Gobackend.invokeExtensionActionJSON(normalized, SPOTIFLAC_COMPLETE_GRANT_ACTION)
+                    backend.invokeAction(normalized, SPOTIFLAC_COMPLETE_GRANT_ACTION)
                 }.orEmpty().trim()
             } catch (t: Throwable) {
                 return SpotiFlacVerificationCallbackResult(
@@ -531,7 +534,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // the backend's auth-code API and then consumed by the provider flow.
         val authCode = firstCallbackParameter(uri, "code", "auth_code", "authorization_code")
         if (!authCode.isNullOrBlank()) {
-            nativeControl { Gobackend.setExtensionAuthCodeByID(normalized, authCode) }
+            nativeControl { backend.setAuthCode(normalized, authCode) }
             return SpotiFlacVerificationCallbackResult(
                 accepted = true,
                 providerId = normalized,
@@ -552,7 +555,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         if (normalized.isBlank()) return
         ensureReady { }
         providerStateMutex.withLock {
-            runCatching { nativeControl { Gobackend.clearExtensionPendingAuthByID(normalized) } }
+            runCatching { nativeControl { backend.clearPendingAuth(normalized) } }
             clearPersistedCallbackState(normalized)
         }
     }
@@ -582,7 +585,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             // extracted ELF before touching the generated Go bindings. A
             // mismatched build now leaves the Downloads screen alive and
             // explains which APK the user needs.
-            SpotiFlacNativeRuntime.requireCompatible(context)
+            SpotiFlacNativeRuntime.requireCompatible(context, backend.nativeLibrary)
 
             onProgress(
                 SpotiFlacTransferProgress(
@@ -599,7 +602,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             // shadowing a newer .sflx file after an update.
             val runtimeRoot = File(
                 context.filesDir,
-                "spotiflac/runtime-v3/${registry.fingerprint}",
+                "${backend.runtimeDirectory}/${registry.fingerprint}",
             )
             val extensionsDir = File(runtimeRoot, "extensions").apply { mkdirs() }
             val dataDir = File(runtimeRoot, "data").apply { mkdirs() }
@@ -621,14 +624,16 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 SpotiFlacExtensionStorageKey.loadOrCreateEncoded()
             }
 
+            // Every download is staged under here; the Rust runtime refuses writes anywhere else.
+            val stagingRoot = File(context.cacheDir, "spotiflac/staging").apply { mkdirs() }
             nativeControl {
-                // Match the official SpotiFLAC host contract. Extensions use
-                // this value for compatibility gates, utilities and signed-
-                // session request identity.
-                Gobackend.setAppVersion(SPOTIFLAC_BACKEND_VERSION)
-                Gobackend.setExtensionStorageMasterKey(extensionStorageMasterKey)
-                Gobackend.initExtensionSystem(extensionsDir.absolutePath, dataDir.absolutePath)
-                val loadResult = JSONObject(Gobackend.loadExtensionsFromDir(extensionsDir.absolutePath))
+                backend.initialize(
+                    extensionsDir.absolutePath,
+                    dataDir.absolutePath,
+                    extensionStorageMasterKey,
+                    stagingRoot.absolutePath,
+                )
+                val loadResult = JSONObject(backend.loadExtensionsFromDir(extensionsDir.absolutePath))
                 val errors = loadResult.optJSONArray("errors")
                 if (errors != null && errors.length() > 0) {
                     val messages = (0 until errors.length())
@@ -708,7 +713,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 }
                 nativeControl {
                     configureProviderRoute(listOf(currentProvider))
-                    Gobackend.resetDownloadCancel(itemId)
+                    backend.resetDownloadCancel(itemId)
                 }
 
                 val label = "SpotiFLAC isolated ${providerDisplay(currentProvider)} attempt"
@@ -1086,14 +1091,14 @@ class SpotiFlacDownloadEngine @Inject constructor(
     ): JSONObject = withContext(Dispatchers.IO) {
         val startedAt = System.nanoTime()
         val future = nativeDownloadExecutor.submit<String> {
-            Gobackend.downloadByStrategy(request.toString())
+            backend.downloadByStrategy(request.toString())
         }
         try {
             val raw = future.get(timeoutMs, TimeUnit.MILLISECONDS)
             parseBackendResponse(raw, label, elapsedMs(startedAt))
         } catch (_: TimeoutException) {
             runCatching {
-                nativeControlExecutor.submit { Gobackend.cancelDownload(itemId) }
+                nativeControlExecutor.submit { backend.cancelDownload(itemId) }
                     .get(CANCEL_DELIVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             }
             future.cancel(true)
@@ -1366,7 +1371,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
     }
 
     private suspend fun readProgress(itemId: String): SpotiFlacTransferProgress? {
-        val raw = nativeControl { Gobackend.getAllDownloadProgress() }
+        val raw = nativeControl { backend.getAllDownloadProgress() }
         if (raw.isBlank()) return null
         val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
         val node = findProgressNode(root, itemId) ?: return null
@@ -1470,7 +1475,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
      */
     suspend fun searchProviderTracks(query: String, limit: Int): String {
         ensureReady { }
-        return nativeControl { Gobackend.searchTracksWithMetadataProvidersJSON(query, limit.toLong(), true) }
+        return nativeControl { backend.searchTracksWithMetadataProviders(query, limit.toLong(), true) }
     }
 
     private suspend fun <T> nativeControl(block: () -> T): T = withContext(Dispatchers.IO) {
@@ -1485,12 +1490,12 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // Enabling is idempotent and done only as part of initialization/restore.
         // We never disable providers during a download attempt because unloading
         // an extension can unregister its provider from the Go runtime.
-        PROVIDER_PRIORITY.forEach { Gobackend.setExtensionEnabledByID(it, true) }
+        PROVIDER_PRIORITY.forEach { backend.setExtensionEnabled(it, true) }
         configureProviderRoute(PROVIDER_PRIORITY)
     }
 
     private fun readInstalledProviderQualityOptions(): Map<String, List<SpotiFlacQualityOption>> {
-        val installed = JSONArray(Gobackend.getInstalledExtensions())
+        val installed = JSONArray(backend.getInstalledExtensions())
         return buildMap {
             for (index in 0 until installed.length()) {
                 val extension = installed.optJSONObject(index) ?: continue
@@ -1510,8 +1515,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
     private fun configureProviderRoute(providerIds: List<String>) {
         val route = JSONArray(providerIds).toString()
-        Gobackend.setProviderPriorityJSON(route)
-        Gobackend.setExtensionFallbackProviderIDsJSON(route)
+        backend.setProviderPriority(route)
+        backend.setFallbackProviders(route)
     }
 
     private fun isBenignDuplicateExtensionMessage(message: String): Boolean {
@@ -1722,7 +1727,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
     private suspend fun readVerificationChallengeNative(providerId: String): SpotiFlacVerificationChallenge {
         val authenticated = runCatching {
-            nativeControl { Gobackend.isExtensionAuthenticatedByID(providerId) }
+            nativeControl { backend.isAuthenticated(providerId) }
         }.getOrDefault(false)
 
         // v4.9.5 exposes a typed PendingAuthRequest. Its javap contract contains
@@ -1730,11 +1735,11 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // verification-code field in this object. Prefer this typed API over
         // guessing a flow type from arbitrary JSON keys.
         val typedPending = runCatching {
-            nativeControl { Gobackend.getPendingAuthRequest(providerId) }
+            nativeControl { backend.pendingAuth(providerId) }
         }.getOrNull()
-        val typedExtensionId = runCatching { typedPending?.getExtensionID()?.trim() }.getOrNull().orEmpty()
-        val typedAuthUrlRaw = runCatching { typedPending?.getAuthURL()?.trim() }.getOrNull().orEmpty()
-        val typedCallbackUrl = runCatching { typedPending?.getCallbackURL()?.trim() }.getOrNull().orEmpty()
+        val typedExtensionId = typedPending?.extensionId?.trim().orEmpty()
+        val typedAuthUrlRaw = typedPending?.authUrl?.trim().orEmpty()
+        val typedCallbackUrl = typedPending?.callbackUrl?.trim().orEmpty()
             .takeIf(String::isNotBlank)
         val typedAuthUrl = typedAuthUrlRaw.takeIf(::isSafeExternalHttpsUrl)
         val typedPendingMeaningful = typedExtensionId.isNotBlank() || typedAuthUrlRaw.isNotBlank() || typedCallbackUrl != null
@@ -1743,13 +1748,13 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // the typed proxy is temporarily empty. Never infer an auth-code/session-
         // grant input field from this payload.
         val directRaw = runCatching {
-            nativeControl { Gobackend.getExtensionPendingAuthJSON(providerId) }
+            nativeControl { backend.pendingAuthJson(providerId) }
         }.getOrNull().orEmpty().trim()
         val directPayload = parseJsonValue(directRaw)
         val allRaw = if (hasMeaningfulJson(directPayload)) {
             ""
         } else {
-            runCatching { nativeControl { Gobackend.getAllPendingAuthRequestsJSON() } }
+            runCatching { nativeControl { backend.allPendingAuthJson() } }
                 .getOrNull().orEmpty().trim()
         }
         val allPayload = parseJsonValue(allRaw)
@@ -3421,10 +3426,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
     companion object {
         private const val HARMONY_VALIDATED_FILE_PATH = "_harmony_validated_file_path"
         private val SPOTIFY_TRACK_ID = Regex("[A-Za-z0-9]{10,64}")
-        private const val SPOTIFLAC_CALLBACK_SCHEME = "spotiflac"
         private const val SPOTIFLAC_SESSION_GRANT_HOST = "session-grant"
         private const val SPOTIFLAC_COMPLETE_GRANT_ACTION = "completeGrant"
-        private const val SPOTIFLAC_BACKEND_VERSION = "4.9.6"
         private val SPOTIFLAC_CALLBACK_HOSTS = setOf("callback", "spotify-callback", SPOTIFLAC_SESSION_GRANT_HOST)
         private const val PROGRESS_POLL_MS = 450L
         private const val PROVIDER_CONNECT_TIMEOUT_MS = 20_000

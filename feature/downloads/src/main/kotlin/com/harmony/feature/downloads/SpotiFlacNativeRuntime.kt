@@ -6,7 +6,8 @@ import java.io.File
 import java.io.RandomAccessFile
 
 /**
- * Guards the GoMobile boundary before any generated Gobackend class is used.
+ * Guards the native boundary (SpotiFLAC's GoMobile library, or Mornye's Rust
+ * one) before any generated binding is used.
  *
  * Some Android emulators can install an ARM64-only APK through native
  * translation. Most of Harmony continues to work because it is Kotlin, but
@@ -24,11 +25,12 @@ internal object SpotiFlacNativeRuntime {
     private const val EM_X86_64 = 62
     private const val EM_AARCH64 = 183
 
-    fun requireCompatible(context: Context) {
+    /** [library] is the backend's native library name, without "lib" and ".so". */
+    fun requireCompatible(context: Context, library: String) {
         val deviceAbis = Build.SUPPORTED_ABIS.toList()
         val primaryAbi = deviceAbis.firstOrNull().orEmpty()
         val nativeDir = File(context.applicationInfo.nativeLibraryDir)
-        val goLibrary = File(nativeDir, System.mapLibraryName("gojni"))
+        val goLibrary = File(nativeDir, System.mapLibraryName(library))
 
         if (!goLibrary.isFile) {
             throw incompatibleRuntime(
