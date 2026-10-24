@@ -57,6 +57,12 @@ internal object MobileEqNative {
     @JvmStatic external fun nativeBassDuckDb(handle: Long): Float
     @JvmStatic external fun nativeHarshDuckDb(handle: Long): Float
     @JvmStatic external fun nativeTonalFrozen(handle: Long): Boolean
+
+    /** Times the engine healed itself from non-finite state (should stay 0). */
+    @JvmStatic external fun nativeHealCount(handle: Long): Int
+
+    /** Input samples that were NaN, infinite or beyond +24 dBFS, repaired before processing. */
+    @JvmStatic external fun nativeSanitizedSamples(handle: Long): Int
     @JvmStatic external fun nativeLiveAutoOffsets(handle: Long, out: FloatArray)
 
     /**

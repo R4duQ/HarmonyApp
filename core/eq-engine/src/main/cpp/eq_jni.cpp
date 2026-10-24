@@ -195,6 +195,14 @@ jfloat nativeBassDuckDb(JNIEnv*, jclass, jlong handle) { return engineOf(handle)
 
 jfloat nativeHarshDuckDb(JNIEnv*, jclass, jlong handle) { return engineOf(handle)->harshDuckDb(); }
 
+jint nativeHealCount(JNIEnv*, jclass, jlong handle) {
+    return static_cast<jint>(engineOf(handle)->healCount() & 0x7FFFFFFF);
+}
+
+jint nativeSanitizedSamples(JNIEnv*, jclass, jlong handle) {
+    return static_cast<jint>(engineOf(handle)->sanitizedSamples() & 0x7FFFFFFF);
+}
+
 jboolean nativeTonalFrozen(JNIEnv*, jclass, jlong handle) {
     return engineOf(handle)->tonalFrozen() ? JNI_TRUE : JNI_FALSE;
 }
@@ -277,6 +285,8 @@ const JNINativeMethod kMethods[] = {
     HARMONY_JNI_METHOD(nativeBassDuckDb, "(J)F"),
     HARMONY_JNI_METHOD(nativeHarshDuckDb, "(J)F"),
     HARMONY_JNI_METHOD(nativeTonalFrozen, "(J)Z"),
+    HARMONY_JNI_METHOD(nativeHealCount, "(J)I"),
+    HARMONY_JNI_METHOD(nativeSanitizedSamples, "(J)I"),
     HARMONY_JNI_METHOD(nativeLiveAutoOffsets, "(J[F)V"),
     HARMONY_JNI_METHOD(nativePollDspTelemetry, "(J[F[F[F)F"),
     HARMONY_JNI_METHOD(nativePollSpectrum, "(J[F[F)I"),

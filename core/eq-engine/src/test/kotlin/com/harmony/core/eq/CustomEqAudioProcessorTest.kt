@@ -100,6 +100,32 @@ class CustomEqAudioProcessorTest {
     }
 
     @Test
+    fun `odd-sized buffers are always taken in full, partial frames carried over`() {
+        processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
+        processor.flush()
+        val frames = 9_600
+        val input = pcm16Sine(frames, 2, 48_000, 1000.0, 0.25)
+        // 1001 bytes a time: a 16-bit stereo frame is 4 bytes, so most chunks end mid-frame.
+        // runThrough loops until the input is gone, so a processor that left bytes behind would hang here.
+        val out = runThrough(input, chunkBytes = 1001)
+        assertEquals("every frame accounted for", frames * 2, out.size)
+        val reference = FloatArray(frames) { input.getShort(it * 4) / 32768f }
+        for (i in frames / 2 until frames step 97) assertEquals("frame $i", reference[i], out[i * 2], 5e-3f)
+
+        // A single byte at a time, too: nothing is ever left in the caller's buffer.
+        processor.flush()
+        val tiny = pcm16Sine(64, 2, 48_000, 1000.0, 0.25)
+        while (tiny.hasRemaining()) {
+            val one = tiny.duplicate().order(ByteOrder.nativeOrder())
+            one.limit(one.position() + 1)
+            processor.queueInput(one)
+            assertFalse("byte left behind", one.hasRemaining())
+            tiny.position(one.position())
+            processor.output
+        }
+    }
+
+    @Test
     fun `flat EQ keeps the signal where it was`() {
         processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
         processor.flush()

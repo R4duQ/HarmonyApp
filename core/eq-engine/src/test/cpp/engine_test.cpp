@@ -458,6 +458,75 @@ void convertsEveryFormat() {
     CHECK(finite, "NaN/Inf leaked into the output");
 }
 
+void corruptFramesNeverSilencePlayback() {
+    // A corrupt stretch in the middle of a song: NaN, infinities and absurd
+    // values, as a broken decoder frame might deliver. The output must stay
+    // finite and under the ceiling, and the music must come straight back:
+    // no silence that only a seek would end.
+    for (bool inPlace : {true, false}) {
+        const int sr = 48000;
+        auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
+        engine->setAutoMode(true);
+        float gains[kNumBands] = {6, 4, 2, 0, -2, 0, 2, 4, 6, 8};
+        engine->setBandGainsDb(gains);
+        std::vector<float> song = sine(sr, 2, 1000.0, 0.25f, 2.0);
+        const size_t corruptFrom = static_cast<size_t>(sr) * 2 / 2;  // at 0.5 s
+        for (size_t i = corruptFrom; i < corruptFrom + 4800; ++i) {
+            switch (i % 4) {
+                case 0: song[i] = std::nanf(""); break;
+                case 1: song[i] = INFINITY; break;
+                case 2: song[i] = -1e30f; break;
+                default: song[i] = 3e38f; break;
+            }
+        }
+        std::vector<float> out(song.size());
+        const int frames = static_cast<int>(song.size() / 2);
+        int written = 0;
+        for (int start = 0; start < frames; start += 480) {
+            const int count = std::min(480, frames - start);
+            float* in = song.data() + static_cast<size_t>(start) * 2;
+            float* dst = out.data() + static_cast<size_t>(written) * 2;
+            if (inPlace) {
+                const int produced = engine->process(in, SampleFormat::kFloat, count, in);
+                std::memcpy(dst, in, static_cast<size_t>(produced) * 2 * sizeof(float));
+                written += produced;
+            } else {
+                written += engine->process(in, SampleFormat::kFloat, count, dst);
+            }
+        }
+        bool finite = true;
+        for (int i = 0; i < written * 2; ++i) finite &= std::isfinite(out[i]);
+        CHECK(finite, "corrupt frames leaked non-finite output (in place %d)", inPlace);
+        const float ceiling = std::pow(10.f, engine->ceilingDb() / 20.f);
+        CHECK(peakOf(out) <= ceiling * 1.000001f, "corrupt frames broke the ceiling: %.3f", peakOf(out));
+        // The last half second: the sine is back at its level (the limiter and preamp recovered).
+        std::vector<float> tail(out.begin() + static_cast<long>(written * 2 - sr), out.begin() + written * 2);
+        CHECK(peakOf(tail) > 0.1f, "playback stayed quiet after the corrupt frames: %.3f", peakOf(tail));
+        CHECK(engine->sanitizedSamples() >= 4800, "repaired samples counted: %u", engine->sanitizedSamples());
+        CHECK(engine->healCount() == 0, "sanitized input never needs a heal: %u", engine->healCount());
+        float live[kNumBands];
+        engine->effectiveGainsDb(live);
+        for (float g : live) CHECK(std::isfinite(g), "live gains stay finite");
+        CHECK(std::isfinite(engine->targetPreampDb()), "preamp stays finite");
+    }
+}
+
+void selfHealsPoisonedState() {
+    const int sr = 48000;
+    auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
+    float gains[kNumBands] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
+    engine->setBandGainsDb(gains);
+    run(*engine, sine(sr, 2, 440.0, 0.2f, 0.2));
+    engine->poisonStateForTest();
+    const auto out = run(*engine, sine(sr, 2, 440.0, 0.2f, 1.0));
+    bool finite = true;
+    for (float v : out) finite &= std::isfinite(v);
+    CHECK(finite, "poisoned state leaked into the output");
+    CHECK(engine->healCount() >= 1, "the heal ran: %u", engine->healCount());
+    std::vector<float> tail(out.end() - sr, out.end());
+    CHECK(peakOf(tail) > 0.1f, "sound came back after the heal: %.3f", peakOf(tail));
+}
+
 void sampleRateChangesReconfigure() {
     auto engine = engineAt(44100, 2, OutputDevice::kUsbDacHiRes);
     float gains[kNumBands] = {};
@@ -591,6 +660,8 @@ int main() {
     autoCalibratesLive();
     tamersDuckBassAndHarshness();
     convertsEveryFormat();
+    corruptFramesNeverSilencePlayback();
+    selfHealsPoisonedState();
     sampleRateChangesReconfigure();
     spectrumFindsTheTone();
     analyzerRunsConcurrently();

@@ -15,8 +15,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import com.harmony.core.eq.AudioOutputMonitor
 import com.harmony.core.eq.CustomEqAudioProcessor
+import com.harmony.core.eq.EqDebug
 import com.harmony.core.eq.HiResEqAudioSink
 import com.harmony.core.eq.OutputDeviceType
 import com.harmony.core.eq.OutputRoute
@@ -89,6 +93,10 @@ class HarmonyPlayer(
     private var retriesForCurrentItem = 0
     private var failedItemsInARow = 0
 
+    /** 200 ms hops past corrupt frames in the current item, and stall nudges; reset per item. */
+    private var hopsForCurrentItem = 0
+    private var nudgesForCurrentItem = 0
+
     /** Follows the output (speaker, wired, Bluetooth, USB DAC) for the engines. */
     private val outputMonitor: AudioOutputMonitor
 
@@ -118,6 +126,7 @@ class HarmonyPlayer(
         onRouteChanged(outputMonitor.route.value)
         startAnalyser()
         startEqStatus()
+        startStallWatchdog()
 
         player.addListener(object : Player.Listener {
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
@@ -130,6 +139,8 @@ class HarmonyPlayer(
                 // item calls prepare() without a transition, so the counter
                 // only resets when we genuinely move on.
                 retriesForCurrentItem = 0
+                hopsForCurrentItem = 0
+                nudgesForCurrentItem = 0
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -151,6 +162,7 @@ class HarmonyPlayer(
             setEqEnabled(false)
         }
         val exo = ExoPlayer.Builder(context, renderersFactory(equalizer))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(context, resilientExtractors()))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -194,6 +206,21 @@ class HarmonyPlayer(
                 "retries=$retriesForCurrentItem failedInARow=$failedItemsInARow",
             error,
         )
+        EqDebug.decoderError(error.errorCodeName, position, error.cause?.message)
+
+        // A corrupt frame in an offline file: hop 200 ms past it and play on,
+        // rather than retry the same spot (which fails again) and lose the
+        // whole song. A few hops per song at most; then the old budget applies.
+        val duration = player.duration
+        if (error.errorCode in CORRUPT_STRETCH_ERRORS && hopsForCurrentItem < MAX_HOPS_PER_ITEM &&
+            (duration == C.TIME_UNSET || position + CORRUPT_HOP_MS < duration)
+        ) {
+            hopsForCurrentItem++
+            EqDebug.decoderSkip(position, position + CORRUPT_HOP_MS)
+            player.seekTo(index, position + CORRUPT_HOP_MS)
+            player.prepare()
+            return
+        }
 
         if (failedItemsInARow >= MAX_FAILED_ITEMS_IN_A_ROW) {
             Log.e(TAG, "Giving up: $failedItemsInARow items failed in a row.")
@@ -374,6 +401,67 @@ class HarmonyPlayer(
         }
     }
 
+    /**
+     * Extractors that cope with real-world offline files: constant-bitrate
+     * seeking for MP3/AAC/AMR files without a seek table (always, even where
+     * the length is unknown), and index seeking for MP3s whose VBR headers are
+     * missing or wrong, so a seek lands where it should instead of somewhere
+     * the extractor then can't sync from. The MP3 and FLAC extractors already
+     * resync past corrupt frames on their own.
+     */
+    private fun resilientExtractors(): DefaultExtractorsFactory = DefaultExtractorsFactory()
+        .setConstantBitrateSeekingEnabled(true)
+        .setConstantBitrateSeekingAlwaysEnabled(true)
+        .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
+
+    /**
+     * Playback that stands still with no error at all is what a stuck
+     * decoder, extractor or audio path looks like: a position that doesn't
+     * move while the player is supposed to play, until the listener seeks.
+     * Once a second this checks for exactly that and, after a few seconds,
+     * does what the listener would: seeks 200 ms on, which flushes the whole
+     * chain. Never while playback is suppressed (a call, lost focus), paused,
+     * or ended, and only a few times per song.
+     */
+    private fun startStallWatchdog() {
+        scope.launch {
+            var lastPosition = -1L
+            var lastIndex = -1
+            var stillSinceMs = 0L
+            while (true) {
+                delay(WATCHDOG_EVERY_MS)
+                val state = player.playbackState
+                val shouldPlay = player.playWhenReady &&
+                    player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE &&
+                    (state == Player.STATE_READY || state == Player.STATE_BUFFERING) &&
+                    player.mediaItemCount > 0
+                val index = player.currentMediaItemIndex
+                val position = player.currentPosition
+                if (!shouldPlay || index != lastIndex || position != lastPosition) {
+                    lastIndex = index
+                    lastPosition = position
+                    stillSinceMs = 0L
+                    continue
+                }
+                stillSinceMs += WATCHDOG_EVERY_MS
+                if (stillSinceMs < STALL_AFTER_MS || nudgesForCurrentItem >= MAX_NUDGES_PER_ITEM) continue
+                val duration = player.duration
+                val target = position + CORRUPT_HOP_MS
+                if (duration != C.TIME_UNSET && target >= duration) {
+                    if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                } else {
+                    player.seekTo(index, target)
+                }
+                nudgesForCurrentItem++
+                EqDebug.playbackStall(
+                    if (state == Player.STATE_BUFFERING) "buffering" else "ready, not advancing",
+                    position, stillSinceMs, target,
+                )
+                stillSinceMs = 0L
+            }
+        }
+    }
+
     private fun renderersFactory(equalizer: CustomEqAudioProcessor): DefaultRenderersFactory =
         object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(
@@ -390,6 +478,9 @@ class HarmonyPlayer(
             // present) before falling back to MediaCodec, for consistent
             // gapless behaviour across OEM codec implementations.
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            // A decoder that fails to start (or dies) hands over to the next one
+            // that can play the format, instead of failing the song.
+            setEnableDecoderFallback(true)
         }
 
     fun release() {
@@ -458,6 +549,18 @@ class HarmonyPlayer(
         const val TAG = "HarmonyPlayback"
         const val STATUS_EVERY_MS = 500L
         const val MAX_RETRIES_PER_ITEM = 1
+        const val CORRUPT_HOP_MS = 200L
+        const val MAX_HOPS_PER_ITEM = 10
+        const val WATCHDOG_EVERY_MS = 1_000L
+        const val STALL_AFTER_MS = 3_000L
+        const val MAX_NUDGES_PER_ITEM = 5
+
+        /** Errors that mean "this stretch of the file is bad", where hopping past it helps. */
+        val CORRUPT_STRETCH_ERRORS = setOf(
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
+        )
         const val MAX_FAILED_ITEMS_IN_A_ROW = 3
     }
 }

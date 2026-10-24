@@ -25,6 +25,7 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -239,6 +240,10 @@ public:
     float bassDuckDb() const { return bassDuckDb_.load(std::memory_order_relaxed); }
     /** The current harshness tamer on 4/8 kHz, in dB (0..4). */
     float harshDuckDb() const { return harshDuckOutDb_.load(std::memory_order_relaxed); }
+    /** How often the engine has healed itself from non-finite state (diagnostics; should stay 0). */
+    uint32_t healCount() const { return healCount_.load(std::memory_order_relaxed); }
+    /** Input samples that were NaN, infinite or past +24 dBFS and were repaired (diagnostics). */
+    uint32_t sanitizedSamples() const { return sanitizedSamples_.load(std::memory_order_relaxed); }
     /** Whether the tonal adaptation is frozen (the music is below -42 dBFS). */
     bool tonalFrozen() const { return frozenOut_.load(std::memory_order_relaxed); }
     /** Ceiling of the limiter for the current device, in dBFS. */
@@ -251,6 +256,14 @@ public:
      * ±4.5 dB. Pure.
      */
     static void autoOffsetTargetDb(OutputDevice device, const double* bandPower, float* out);
+
+#ifdef HARMONY_EQ_TESTING
+    /** Tests only: puts NaN into the filter state, as a bug elsewhere might, to exercise the self-heal. */
+    void poisonStateForTest() {
+        bandState_[3][0][0] = NAN;
+        releaseGain_ = INFINITY;
+    }
+#endif
 
     /** Gain (dB) band [band] is currently designed at, ducking included. */
     float designedBandGainDb(int band) const { return designedDb_[band]; }
@@ -270,6 +283,7 @@ private:
     int processBlock(float* io, int frames);
     float limitFrame(float* frame, float* out);
     void pushAnalyzer(const float* io, int frames);
+    void healState();
     void rebuildBarMap(int sampleRate, int bars);
 
     // Shared controls.
@@ -291,6 +305,8 @@ private:
     std::atomic<float> liveAutoPreampOutDb_{0.f};
     std::atomic<float> harshDuckOutDb_{0.f};
     std::atomic<bool> frozenOut_{true};
+    std::atomic<uint32_t> healCount_{0};
+    std::atomic<uint32_t> sanitizedSamples_{0};
 
     // Audio-thread state.
     int sampleRate_ = 48000;

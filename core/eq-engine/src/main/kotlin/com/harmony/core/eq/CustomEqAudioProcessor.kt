@@ -55,6 +55,15 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     private var tailWritten = false
     private var heapInputCopy: ByteBuffer = EMPTY_DIRECT
 
+    /** A trailing partial frame, completed by the next buffer (8 channels of 32-bit at most). */
+    private val carry = ByteArray(MAX_CHANNELS * 4)
+    private var carryLength = 0
+
+    /** Frames since the last flush, to place diagnostics on the timeline. */
+    private var framesIn = 0L
+    private var lastHealCount = 0
+    private var lastSanitizedSamples = 0
+
     // ---- Controls ------------------------------------------------------------------------
 
     /** Gain of one band, -12..+12 dB. Bands: 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8, 16 kHz. */
@@ -180,26 +189,60 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
             MobileEqNative.nativeReset(checkedHandle())
         }
         tailWritten = false
+        carryLength = 0  // a partial frame from before a seek belongs nowhere
+        framesIn = 0
     }
 
+    /**
+     * Takes ALL of [inputBuffer], every time: its position always reaches its
+     * limit. This matters more than anything else here. A processor that
+     * leaves bytes behind is offered the same buffer again; if it can never
+     * take them (less than one frame, which it used to skip), the pipeline
+     * makes no progress, the sink keeps saying "not consumed", and playback
+     * freezes at that timestamp until a seek flushes everything.
+     *
+     * So a trailing partial frame (an odd-sized decoder buffer) is carried
+     * over and completed by the next buffer, and the output buffer is sized
+     * exactly for the whole frames this call processes.
+     */
     override fun queueInput(inputBuffer: ByteBuffer) {
-        val position = inputBuffer.position()
-        val frames = inputBuffer.remaining() / inputAudioFormat.bytesPerFrame
-        if (frames == 0) return
-        val inputBytes = frames * inputAudioFormat.bytesPerFrame
+        val frameBytes = inputAudioFormat.bytesPerFrame
+        val incoming = inputBuffer.remaining()
+        if (incoming == 0) return
+        if (frameBytes <= 0) {
+            // Not configured for anything: drop it rather than stall the pipeline.
+            inputBuffer.position(inputBuffer.limit())
+            return
+        }
+        val available = carryLength + incoming
+        val frames = available / frameBytes
+        if (frames == 0) {
+            // Not even one whole frame yet: keep it for the next buffer.
+            inputBuffer.get(carry, carryLength, incoming)
+            carryLength += incoming
+            EqDebug.partialFrame(incoming, frameBytes)
+            return
+        }
+        val inputBytes = frames * frameBytes
+        val fromInput = inputBytes - carryLength
 
-        // The engine reads native memory: copy the rare heap buffer into a direct one.
+        // The engine reads native memory, starting on a frame boundary: use the
+        // caller's buffer in place when it is direct and nothing is carried
+        // over, else gather into our own direct buffer.
         val source: ByteBuffer
         val sourceOffset: Int
-        if (inputBuffer.isDirect) {
+        if (carryLength == 0 && inputBuffer.isDirect) {
             source = inputBuffer
-            sourceOffset = position
+            sourceOffset = inputBuffer.position()
         } else {
             if (heapInputCopy.capacity() < inputBytes) {
                 heapInputCopy = ByteBuffer.allocateDirect(inputBytes).order(ByteOrder.nativeOrder())
             }
             heapInputCopy.clear()
-            heapInputCopy.put(inputBuffer.duplicate().apply { limit(position + inputBytes) })
+            heapInputCopy.put(carry, 0, carryLength)
+            val slice = inputBuffer.duplicate()
+            slice.limit(slice.position() + fromInput)
+            heapInputCopy.put(slice)
             source = heapInputCopy
             sourceOffset = 0
         }
@@ -208,9 +251,33 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
         val produced = MobileEqNative.nativeProcess(
             checkedHandle(), source, sourceOffset, frames, formatCode, output, 0,
         )
-        inputBuffer.position(position + inputBytes)
-        output.position(produced * outputAudioFormat.bytesPerFrame)
+        // Consume what was processed, then carry the rest (less than one frame).
+        inputBuffer.position(inputBuffer.position() + fromInput)
+        carryLength = inputBuffer.remaining()
+        if (carryLength > 0) {
+            inputBuffer.get(carry, 0, carryLength)
+            EqDebug.partialFrame(carryLength, frameBytes)
+        }
+        output.position(produced.coerceIn(0, frames) * outputAudioFormat.bytesPerFrame)
         output.flip()
+        framesIn += frames
+        reportEngineHealth()
+    }
+
+    /** Tells Logcat (EQ_DEBUG) when the engine repaired input or healed itself since the last buffer. */
+    private fun reportEngineHealth() {
+        val engine = handle
+        if (engine == 0L) return
+        val heals = MobileEqNative.nativeHealCount(engine)
+        val repaired = MobileEqNative.nativeSanitizedSamples(engine)
+        if (heals != lastHealCount) {
+            EqDebug.nanHealed(heals - lastHealCount, framesIn, inputAudioFormat.sampleRate)
+            lastHealCount = heals
+        }
+        if (repaired != lastSanitizedSamples) {
+            EqDebug.corruptInput(repaired - lastSanitizedSamples, framesIn, inputAudioFormat.sampleRate)
+            lastSanitizedSamples = repaired
+        }
     }
 
     override fun getOutput(): ByteBuffer {
@@ -237,6 +304,8 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
         formatCode = 0
         tailWritten = false
         heapInputCopy = EMPTY_DIRECT
+        carryLength = 0
+        framesIn = 0
     }
 
     private fun checkedHandle(): Long {

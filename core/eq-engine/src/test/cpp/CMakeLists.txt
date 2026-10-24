@@ -11,6 +11,7 @@ endif()
 find_package(Threads REQUIRED)
 add_executable(eq_engine_test engine_test.cpp ../../main/cpp/MobileEqEngine.cpp)
 target_include_directories(eq_engine_test PRIVATE ../../main/cpp)
+target_compile_definitions(eq_engine_test PRIVATE HARMONY_EQ_TESTING)
 target_compile_options(eq_engine_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(eq_engine_test PRIVATE Threads::Threads)
 

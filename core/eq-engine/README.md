@@ -44,6 +44,22 @@ input ─┬─▶ device high-pass ─▶ live preamp ─▶ 10 biquads (RBJ, D
 - **Denormals:** flush-to-zero is set per process call (FPCR.FZ on ARM, MXCSR FTZ|DAZ on x86) and restored afterwards.
 - **Telemetry:** `nativePollDspTelemetry(effectiveGains10, fftMagnitudes32, fftPeaks32)` returns the live preamp and fills the ten effective gains and the FFT in one call, through `GetPrimitiveArrayCritical`.
 
+## Robustness: playback never stops at a bad spot
+
+- **Every input buffer is taken in full.** `CustomEqAudioProcessor.queueInput` always moves the buffer's position to its limit. A trailing partial frame is carried over to the next buffer. Before, it was left behind, and that froze playback at that timestamp until a seek.
+- **A wedged pipeline is flushed.** If the EQ pipeline takes no input and produces nothing for three calls in a row while the sink has room, `EqSinkStage` flushes it, as a seek would, and carries on.
+- **Input is bounded.** NaN, ±Inf and anything beyond ±16.0 (+24 dBFS) are repaired before processing.
+- **Every power has a floor.** Each logarithm and ratio is floored at `1e-12`.
+- **Self-heal.** After every 32-frame block the engine checks its filter states, the limiter gain and its output. Anything non-finite is zeroed in place, with the frame count kept, so the output stays sample-aligned. Playback continues.
+- **Diagnostics.** These events go to Logcat under the tag `EQ_DEBUG` (`EqDebug`), rate-limited to one line per kind per second:
+  - `NAN_HEAL`
+  - `CORRUPT_INPUT`
+  - `PARTIAL_FRAME`
+  - `PIPELINE_WEDGED`
+  - `DECODER_ERROR`
+  - `DECODER_SKIP`
+  - `PLAYBACK_STALL`
+
 ## Using it
 
 ```kotlin

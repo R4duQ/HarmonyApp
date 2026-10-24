@@ -130,6 +130,16 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   - *Bit-perfect USB* (Android 14 and newer, with a USB DAC): a switch to send the file to the DAC
     untouched instead of equalizing it.
   - ReplayGain now runs inside the engine, ahead of its limiter, so lifting a quiet record can't clip.
+- **No more freezes at a bad spot in a song.**
+  - Some files made playback stop or go silent at the same moment every time, until you seeked past it. Each cause is fixed:
+    - a decoder buffer that ended mid-frame was never taken, and now always is;
+    - corrupt samples (NaN, infinities, absurd values) are repaired before the EQ;
+    - the engine heals itself if anything non-finite ever reaches its filters.
+  - A corrupt frame now makes playback hop 200 ms past it instead of failing the song.
+  - A decoder that fails hands over to another one.
+  - MP3s without a proper seek table seek accurately.
+  - If playback ever stands still for 3 seconds while it should be playing, it is nudged on by itself.
+  - Developers can see each of these in Logcat under `EQ_DEBUG`.
 - **New mini player.** The bar above the navigation is now a card with the record half out of
   it, turning while the music plays, coasting to a stop on pause and spinning on to the next
   song. It shows where the music is playing (AirPods, phone speaker, car…), the song, a

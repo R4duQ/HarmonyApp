@@ -27,6 +27,8 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
     implementation(libs.media3.common)
+    // DefaultExtractorsFactory flags for real-world files (CBR and index seeking).
+    implementation(libs.media3.extractor)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.guava)
