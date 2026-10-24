@@ -89,6 +89,8 @@ fun SmartShuffleSheet(viewModel: PlayerViewModel) {
     val discovery by viewModel.smartDiscovery.collectAsStateWithLifecycle()
     val variety by viewModel.smartVariety.collectAsStateWithLifecycle()
     val preview by viewModel.smartQueuePreview.collectAsStateWithLifecycle()
+    val brain by viewModel.brainTelemetry.collectAsStateWithLifecycle()
+    val brainHud by viewModel.brainHudVisible.collectAsStateWithLifecycle()
     val palette = playerPalette()
 
     val mode = state.shuffleMode
@@ -446,8 +448,45 @@ fun SmartShuffleSheet(viewModel: PlayerViewModel) {
             }
         }
 
+        // ---- Diagnostic Brain -------------------------------------------------
+        SheetCard(palette) {
+            CardLabel("Diagnostic Brain", palette)
+            Text(
+                brainSummary(brain),
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+                color = palette.muted,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ShufflePill(if (brainHud) "Hide brain HUD" else "Show brain HUD", brainHud, palette) {
+                    viewModel.setBrainHudVisible(!brainHud)
+                }
+                ShufflePill("Run self-test", selected = false, palette = palette) {
+                    viewModel.setBrainHudVisible(true)
+                    viewModel.runBrainSelfTest()
+                }
+            }
+        }
+
         Spacer(Modifier.height(12.dp))
     }
+}
+
+/** One line on the brain's state: the last audit's verdict and how much of the library it can hear. */
+private fun brainSummary(t: com.harmony.core.model.ShuffleBrainTelemetry): String {
+    if (!t.engineAvailable) return "The native engine is not available on this device; Smart Shuffle picks at random."
+    val audit = t.audit ?: return "Audits every queue it builds: artist spacing, skip repulsion, " +
+        "echo chamber, vector integrity and transition smoothness."
+    val verdict = when {
+        !audit.healthy -> "Last audit: ${audit.verdict.lowercase()}"
+        audit.healedCount > 0 -> "Last audit: all checks pass, ${audit.healedCount} auto-healed"
+        else -> "Last audit: all 5 checks pass"
+    }
+    return "$verdict · ${"%.0f".format(audit.realVectorPct)}% of ${t.librarySize} songs measured in 24-D"
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ package com.harmony.app
 
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.domain.playback.PlaybackController
-import com.harmony.domain.shuffle.SmartQueueCoordinator
+import com.harmony.domain.shuffle.SmartQueueManager
 import com.harmony.domain.shuffle.model.SmartShuffleStyle
 import com.harmony.sync.analysis.AnalysisScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +21,7 @@ import javax.inject.Singleton
 class SettingsApplier @Inject constructor(
     private val settings: SettingsRepository,
     private val playback: PlaybackController,
-    private val coordinator: SmartQueueCoordinator,
+    private val queueManager: SmartQueueManager,
     private val analysisScheduler: AnalysisScheduler,
 ) {
     fun start(scope: CoroutineScope) {
@@ -30,10 +30,10 @@ class SettingsApplier @Inject constructor(
                 playback.setCrossfade(s.crossfadeSeconds)
                 playback.setReplayGainMode(s.replayGainMode)
                 playback.setEqualizer(s.eq)
-                coordinator.setEnergyTarget(s.energySliderValue)
+                queueManager.setEnergyTarget(s.energySliderValue)
                 val smartStyle = runCatching { SmartShuffleStyle.valueOf(s.smartShuffleStyle) }
                     .getOrDefault(SmartShuffleStyle.BALANCED)
-                coordinator.applyPersistedSmartSettings(
+                queueManager.applyPersistedSmartSettings(
                     style = smartStyle,
                     familiarity = s.smartShuffleFamiliarity,
                     discovery = s.smartShuffleDiscovery,

@@ -131,7 +131,7 @@ jobs:
         run: >-
           ./gradlew
           :core:database:compileReleaseKotlin
-          :domain:shuffle:compileKotlin
+          :domain:shuffle:test
           :feature:player:compileReleaseKotlin
           :feature:downloads:compileStableReleaseKotlin
           :feature:downloads:compileMornyeReleaseKotlin

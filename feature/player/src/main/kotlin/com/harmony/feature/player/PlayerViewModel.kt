@@ -11,7 +11,7 @@ import com.harmony.core.model.Song
 import com.harmony.domain.library.repository.FavoritesRepository
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.usecase.TogglePlayPauseUseCase
-import com.harmony.domain.shuffle.SmartQueueCoordinator
+import com.harmony.domain.shuffle.SmartQueueManager
 import com.harmony.domain.shuffle.model.SmartShuffleStyle
 import com.harmony.domain.shuffle.usecase.StartJourneyToMoodUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,7 +36,7 @@ import javax.inject.Inject
 class PlayerViewModel @Inject constructor(
     private val playback: PlaybackController,
     private val togglePlayPause: TogglePlayPauseUseCase,
-    private val coordinator: SmartQueueCoordinator,
+    private val queueManager: SmartQueueManager,
     private val startJourneyToMood: StartJourneyToMoodUseCase,
     private val favorites: FavoritesRepository,
     private val settings: SettingsRepository,
@@ -72,27 +72,27 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { settings.setOutputForm(name, form) }
     }
 
-    val journeyProgress: StateFlow<Float?> = coordinator.journey
+    val journeyProgress: StateFlow<Float?> = queueManager.journey
         .map { it?.progress }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val energySliderValue: StateFlow<Float?> = coordinator.config
+    val energySliderValue: StateFlow<Float?> = queueManager.config
         .map { it.energyTarget }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val smartShuffleStyle: StateFlow<SmartShuffleStyle> = coordinator.config
+    val smartShuffleStyle: StateFlow<SmartShuffleStyle> = queueManager.config
         .map { it.style }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SmartShuffleStyle.BALANCED)
 
-    val smartFamiliarity: StateFlow<Float> = coordinator.config
+    val smartFamiliarity: StateFlow<Float> = queueManager.config
         .map { it.familiarity }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.55f)
 
-    val smartDiscovery: StateFlow<Float> = coordinator.config
+    val smartDiscovery: StateFlow<Float> = queueManager.config
         .map { it.discovery }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.45f)
 
-    val smartVariety: StateFlow<Float> = coordinator.config
+    val smartVariety: StateFlow<Float> = queueManager.config
         .map { it.variety }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0.45f)
 
@@ -108,13 +108,38 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Persisted source of truth for the mood chips — survives the sheet closing/reopening. */
-    val moodFilter: StateFlow<MoodFilter?> = coordinator.config
+    val moodFilter: StateFlow<MoodFilter?> = queueManager.config
         .map { it.moodFilter }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Which mood the active journey (if any) is heading toward, for chip highlighting. */
-    val activeJourneyMood: StateFlow<MoodFilter?> = coordinator.journeyMood
+    val activeJourneyMood: StateFlow<MoodFilter?> = queueManager.journeyMood
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // -- Smart Shuffle's Diagnostic Brain -------------------------------------
+
+    /** S_t, the five audits and why each upcoming song was picked. */
+    val brainTelemetry: StateFlow<com.harmony.core.model.ShuffleBrainTelemetry> = queueManager.telemetry
+
+    val brainHudVisible: StateFlow<Boolean> = queueManager.debugOverlayVisible
+
+    fun setBrainHudVisible(visible: Boolean) = queueManager.setDebugOverlayVisible(visible)
+
+    private val _selfTestRunning = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val brainSelfTestRunning: StateFlow<Boolean> = _selfTestRunning
+
+    /** Runs the engine's synthetic 100-track self-test; the report lands in [brainTelemetry] and Logcat. */
+    fun runBrainSelfTest() {
+        if (_selfTestRunning.value) return
+        _selfTestRunning.value = true
+        viewModelScope.launch {
+            try {
+                queueManager.runBrainSelfTest()
+            } finally {
+                _selfTestRunning.value = false
+            }
+        }
+    }
 
     // -- Transport ----------------------------------------------------------
     fun onPlayPause() = togglePlayPause()
@@ -148,10 +173,10 @@ class PlayerViewModel @Inject constructor(
      * press. Plain random is still available, but as a deliberate choice in
      * the Smart Shuffle sheet rather than a surprise stop on the way to off.
      */
-    fun cycleShuffleMode() = coordinator.toggleShuffle()
+    fun cycleShuffleMode() = queueManager.toggleShuffle()
 
     /** Explicit mode selection from the Smart Shuffle sheet. */
-    fun setShuffleMode(mode: ShuffleMode) = coordinator.chooseShuffleMode(mode)
+    fun setShuffleMode(mode: ShuffleMode) = queueManager.chooseShuffleMode(mode)
 
     fun setPlaybackSpeed(speed: Float) = playback.setPlaybackSpeed(speed)
     fun setSleepTimerMinutes(minutes: Int?, finishTrack: Boolean) =
@@ -159,8 +184,8 @@ class PlayerViewModel @Inject constructor(
 
     // -- Smart Shuffle sheet ------------------------------------------------
     fun onSmartStyleSelected(style: SmartShuffleStyle) {
-        coordinator.setSmartStyle(style)
-        val c = coordinator.config.value
+        queueManager.setSmartStyle(style)
+        val c = queueManager.config.value
         viewModelScope.launch {
             settings.setSmartShuffleProfile(
                 style = style.name,
@@ -172,36 +197,36 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun onSmartFamiliarityChange(value: Float) {
-        coordinator.setFamiliarity(value)
+        queueManager.setFamiliarity(value)
         viewModelScope.launch { settings.setSmartShuffleFamiliarity(value) }
     }
 
     fun onSmartDiscoveryChange(value: Float) {
-        coordinator.setDiscovery(value)
+        queueManager.setDiscovery(value)
         viewModelScope.launch { settings.setSmartShuffleDiscovery(value) }
     }
 
     fun onSmartVarietyChange(value: Float) {
-        coordinator.setVariety(value)
+        queueManager.setVariety(value)
         viewModelScope.launch { settings.setSmartShuffleVariety(value) }
     }
 
-    fun onRegenerateSmartQueue() = coordinator.regenerateSmartQueue()
+    fun onRegenerateSmartQueue() = queueManager.regenerateSmartQueue()
 
     /** value null = slider "off"; persisted so it survives restarts. */
     fun onEnergySliderChange(value: Float?) {
-        coordinator.setEnergyTarget(value)
+        queueManager.setEnergyTarget(value)
         viewModelScope.launch { settings.setEnergySlider(value) }
     }
 
     /** Selecting a mood also turns Smart Shuffle on if it wasn't already active. */
-    fun onMoodFilterSelected(mood: MoodFilter?) = coordinator.setMoodFilter(mood)
+    fun onMoodFilterSelected(mood: MoodFilter?) = queueManager.setMoodFilter(mood)
 
     fun onStartJourneyToMood(mood: MoodFilter, steps: Int) {
         viewModelScope.launch { startJourneyToMood(mood, steps) }
     }
 
-    fun onCancelJourney() = coordinator.cancelJourney()
+    fun onCancelJourney() = queueManager.cancelJourney()
 
     // -- Queue --------------------------------------------------------------
     fun onQueueItemClick(index: Int) = playback.skipToQueueItem(index)

@@ -14,9 +14,9 @@ import kotlin.math.sqrt
  * well under a millisecond. The swipe deck does *one* such query per card,
  * roughly one per second of human interaction. A hand-vectorized NEON kernel
  * would be optimizing something that already costs less than the frame it
- * renders in, at the price of a native dependency and two code paths. The
- * existing `distance_kernels.cpp` remains the right home if a future workload
- * ever needs batched scoring.
+ * renders in, at the price of a native dependency and two code paths. If a
+ * future workload ever needs batched scoring, core:dsp-native's
+ * SmartShuffleEngine already scores a whole library natively.
  */
 object SwipeVectorMath {
 

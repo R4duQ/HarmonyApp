@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **138**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 137), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **139**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 138), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -79,7 +79,37 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   Downloads show per-song progress. Albums and selected tracks can be downloaded
   through SpotiFLAC or Soulseek.
 - **FLAC compatibility fix.** FFmpeg runs from its own verified library set.
-- **Smart Shuffle** reshuffles the queue correctly.
+- **A new Smart Shuffle that listens.** Smart Shuffle now runs on Harmony's own engine, written
+  in C++, entirely on the phone: no internet, no account, and no genre tags. It knows each song
+  by how it sounds.
+  - *How it hears a song*: in the background, while nothing is playing, Harmony measures every
+    song on 24 points: the level of ten octave bands from 31 Hz to 16 kHz, how much each band
+    moves, the sub-bass punch, brightness, dynamics and how often it pulses. Songs not measured
+    yet borrow an estimate from the older analysis until their turn comes.
+  - *The vibe of the session*: as you listen, Harmony keeps a running picture of what the
+    session sounds like. A song you hear past half pulls it toward that song; a song you skip
+    in its first fifth pushes it away and the songs lined up after it are replaced at once; a
+    song you pick yourself or swipe in as Play next sets the direction.
+  - *How songs are chosen*: each song is scored on how well it fits the vibe, the songs you
+    usually play after the one before (learned from your own listening), how often you finish
+    it, and a bonus for songs you have not heard in a while. Songs heard in the last few hours
+    wait their turn. The next eight are drawn by weighted chance, so the best fits usually win
+    but never always, then spread so the same artist doesn't come back within three songs, and
+    ordered so each song flows into the next.
+  - *It checks itself*: every time it builds the queue, Smart Shuffle checks that artists are
+    spaced out, that a skip really moved it away from what you skipped, that the queue is not
+    all the same sound, that its numbers are sound, and that no song jumps harshly from the one
+    before. When a check fails it repairs the queue itself.
+  - *Journeys* toward a mood now travel through the same 24-point space, a song at a time.
+  - Energy, mood and the style sliders work as before.
+  - *Diagnostic Brain*: in the Smart Shuffle sheet, Show brain HUD opens a panel over the
+    player with the vibe as 24 live bars, a light per check (green passed, amber repaired, red
+    could not be repaired) and, under each upcoming song, why it was picked ("94% Bass/Vibe
+    Match", "Markov Favorite Transition", "Bandit Rediscovery Gem", "Post-Skip Pivot"). Run
+    self-test plays a simulated session on 100 virtual songs and shows a pass or fail for each
+    step. Developers can follow every queue in Logcat under `SHUFFLE_BRAIN`.
+  - The first time, measuring the whole library takes a while; Smart Shuffle works from the
+    start and gets better as more songs are measured.
 - **Romanian letters in tags.** Titles, artists and albums tagged by older Windows software
   showed up as "ºtefan", "Þara" or "Fãrã", and UTF-8 tags in the wrong frame as "È™tefan".
   Harmony now recognises both mistakes and restores ș ț ă î â (in the correct comma-below

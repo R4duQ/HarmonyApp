@@ -73,6 +73,22 @@ interface HistoryDao {
     )
     suspend fun behaviorStats(songIds: List<Long>): List<BehaviorStatsRow>
 
+    /** [behaviorStats] for the whole library in one query (no IN list to outgrow SQLite's limit). */
+    @Query(
+        """
+        SELECT songId,
+               SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) AS completedPlays,
+               SUM(CASE WHEN completed = 0 THEN 1 ELSE 0 END) AS skippedPlays,
+               MAX(playedAt) AS lastPlayedAt
+        FROM play_history
+        GROUP BY songId
+        """
+    )
+    suspend fun allBehaviorStats(): List<BehaviorStatsRow>
+
+    @Query("SELECT songId FROM favorites")
+    suspend fun allFavoriteIds(): List<Long>
+
     // -- Favorites -----------------------------------------------------------
 
     @Query(

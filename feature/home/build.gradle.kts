@@ -24,9 +24,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
-    // HomeViewModelTest builds a real StartSmartMixUseCase, whose engine
-    // takes a SimilarityRepository.
-    testImplementation(projects.domain.similarity)
 
     // Home interaction tests: ./gradlew :feature:home:connectedDebugAndroidTest
     androidTestImplementation(platform(libs.compose.bom))

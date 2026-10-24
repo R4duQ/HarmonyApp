@@ -4,7 +4,9 @@ import com.harmony.core.common.coroutines.DispatcherProvider
 import com.harmony.core.database.dao.AnalysisDao
 import com.harmony.core.database.dao.SongDao
 import com.harmony.core.database.entity.AnalysisResultEntity
+import com.harmony.core.dsp.NativeAcousticExtractor
 import com.harmony.core.dsp.NativeAnalyzer
+import com.harmony.core.dsp.SmartShuffleNative
 import com.harmony.data.analysis.decode.AudioDecoder
 import com.harmony.domain.analysis.embedding.EmbeddingBuilder
 import com.harmony.domain.analysis.embedding.EmbeddingCodec
@@ -12,6 +14,7 @@ import com.harmony.domain.analysis.model.AnalysisResult
 import com.harmony.domain.analysis.model.FeatureLayout
 import com.harmony.domain.analysis.model.RawFeatures
 import com.harmony.domain.analysis.perceptual.PerceptualMapper
+import com.harmony.domain.analysis.repository.AcousticVectorStore
 import com.harmony.domain.analysis.repository.AnalysisEvent
 import com.harmony.domain.analysis.repository.AnalysisRepository
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +29,11 @@ import javax.inject.Singleton
  *   Room (which songs need work?) -> AudioDecoder (Kotlin/MediaCodec)
  *     -> NativeAnalyzer (C++) -> PerceptualMapper + EmbeddingBuilder (Kotlin)
  *     -> Room (store result)
+ *
+ * The same decode pass feeds Smart Shuffle's AcousticExtractor (C++), whose
+ * 24 raw features go to the [AcousticVectorStore]: one read of the file
+ * serves both, and a song only missing its Smart Shuffle vector (the
+ * backfill after an update) is decoded once for it.
  *
  * "Analyze once": pendingSongIds() compares stored (fileHash, version)
  * against the current song row and FeatureLayout.ANALYSIS_VERSION. Unchanged
@@ -44,15 +52,21 @@ class AnalysisRepositoryImpl @Inject constructor(
     private val decoder: AudioDecoder,
     private val dispatchers: DispatcherProvider,
     private val playback: com.harmony.domain.playback.PlaybackController,
+    private val acousticVectors: AcousticVectorStore,
 ) : AnalysisRepository {
 
     override suspend fun pendingSongIds(): List<Long> {
         val analyzed = analysisDao.analysisKeys().associateBy { it.songId }
+        val measured = if (SmartShuffleNative.available) acousticVectors.keys() else null
         return songDao.allIdsAndHashes().filter { row ->
             val existing = analyzed[row.id]
-            existing == null ||
+            val analysisStale = existing == null ||
                 existing.analyzedAtFileHash != row.fileHash ||
                 existing.analysisVersion != FeatureLayout.ANALYSIS_VERSION
+            val vector = measured?.get(row.id)
+            val vectorStale = measured != null &&
+                (vector == null || vector.first != row.fileHash || vector.second != AcousticVectorStore.ACOUSTIC_VERSION)
+            analysisStale || vectorStale
         }.map { it.id }
     }
 
@@ -60,17 +74,30 @@ class AnalysisRepositoryImpl @Inject constructor(
         val song = songDao.byId(songId) ?: error("Song $songId not in library")
 
         var analyzer: NativeAnalyzer? = null
+        var extractor: NativeAcousticExtractor? = null
+        var acoustic: FloatArray? = null
         val raw = try {
             decoder.decode(
                 uriString = song.uri,
                 maxDurationUs = MAX_ANALYZED_US,
-                onStart = { sampleRate -> analyzer = NativeAnalyzer(sampleRate) },
-                onPcm = { samples, count -> analyzer?.process(samples, count) },
+                onStart = { sampleRate ->
+                    analyzer = NativeAnalyzer(sampleRate)
+                    // Smart Shuffle's 24-D vector, from the same PCM. Optional:
+                    // a failure here never costs the song its analysis.
+                    if (SmartShuffleNative.available) extractor = runCatching { NativeAcousticExtractor(sampleRate) }.getOrNull()
+                },
+                onPcm = { samples, count ->
+                    analyzer?.process(samples, count)
+                    extractor?.process(samples, count)
+                },
             )
+            acoustic = extractor?.finish()
             analyzer?.finish() ?: error("Empty or undecodable audio stream")
         } finally {
             analyzer?.close()
+            extractor?.close()
         }
+        if (extractor != null) acousticVectors.put(songId, song.fileHash, acoustic)
 
         val features = RawFeatures(raw)
         val perceptual = PerceptualMapper.map(features)

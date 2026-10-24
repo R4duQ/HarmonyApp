@@ -14,7 +14,7 @@ enum class SmartShuffleStyle {
 }
 
 /**
- * Live Smart Shuffle configuration, owned by the coordinator and mutated by
+ * Live Smart Shuffle configuration, owned by SmartQueueManager and mutated by
  * the UI.
  *
  * The v2 controls intentionally stay human-readable:
@@ -39,12 +39,13 @@ data class ShuffleConfig(
     val variety: Float = 0.45f,
 )
 
-/** A running Journey. */
+/**
+ * A running journey (a Sonic Adventure): [totalSteps] songs along the line
+ * from [fromSongId] to [toSongId] in the 24-D acoustic space.
+ */
 data class JourneyState(
-    /** Interpolation source (embedding of the song the journey started from). */
-    val startEmbedding: FloatArray,
-    /** Interpolation destination. */
-    val destinationEmbedding: FloatArray,
+    val fromSongId: Long,
+    val toSongId: Long,
     /** Total songs the journey should take to arrive. */
     val totalSteps: Int,
     /** Songs picked so far. */
@@ -53,6 +54,8 @@ data class JourneyState(
     val progress: Float get() = if (totalSteps <= 0) 1f else (step.toFloat() / totalSteps).coerceIn(0f, 1f)
     val isComplete: Boolean get() = step >= totalSteps
 
-    override fun equals(other: Any?) = this === other
-    override fun hashCode() = step
+    companion object {
+        const val MIN_STEPS = 5
+        const val MAX_STEPS = 100
+    }
 }
