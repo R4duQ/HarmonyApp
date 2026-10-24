@@ -70,6 +70,15 @@ class PlaybackConnection @Inject constructor(
     private val _playerState = MutableStateFlow(PlayerState())
     override val playerState: StateFlow<PlayerState> = _playerState
 
+    private val _playOutcomes = kotlinx.coroutines.flow.MutableSharedFlow<com.harmony.domain.playback.PlayOutcome>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+    override val playOutcomes: kotlinx.coroutines.flow.Flow<com.harmony.domain.playback.PlayOutcome> = _playOutcomes
+
+    /** Queue index of [trackingSongId], to tell a step back from a skip. */
+    private var trackingIndex = -1
+
     private var controller: MediaController? = null
     private var connectionJob: kotlinx.coroutines.Job? = null
     private var tickerJob: kotlinx.coroutines.Job? = null
@@ -280,6 +289,23 @@ class PlaybackConnection @Inject constructor(
                 previousId.toLongOrNull()?.let { historyRepository.recordPlay(it, completed) }
             }
         }
+        // Smart Shuffle hears every move to another song, a two-second skip
+        // included (that is the fastest of fast skips). A dropped connection
+        // (newMediaId null) is not a verdict on the song, so it is not reported.
+        val newIndex = controller?.currentMediaItemIndex ?: -1
+        val songId = previousId?.toLongOrNull()
+        if (songId != null && newMediaId != null && newMediaId != previousId) {
+            _playOutcomes.tryEmit(
+                com.harmony.domain.playback.PlayOutcome(
+                    songId = songId,
+                    listenedMs = listened,
+                    durationMs = duration,
+                    movedBackward = trackingIndex >= 0 && newIndex in 0 until trackingIndex,
+                    endedNaturally = lastAdvanceWasAutomatic,
+                ),
+            )
+        }
+        trackingIndex = newIndex
         trackingSongId = newMediaId
         trackingListenedMs = 0
         listeningClock.reset()
@@ -293,7 +319,7 @@ class PlaybackConnection @Inject constructor(
      * Without this the run evaporates the moment the first queued song
      * begins: the anchor still names the song that was playing when you
      * queued, so [playerState]'s playNextCount validates to 0. That number
-     * is what SmartQueueCoordinator's handover uses to decide how much of
+     * is what SmartQueueManager's handover uses to decide how much of
      * the tail to keep, so under Smart Shuffle it would keep nothing, delete
      * the rest of the run, and carry on with its own picks — i.e. queue four
      * songs by hand, hear the first, and shuffle takes back over. Re-anchoring

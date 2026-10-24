@@ -611,6 +611,17 @@ fun NowPlayingScreen(
             SmartShuffleSheet(viewModel)
         }
     }
+    val brainHud by viewModel.brainHudVisible.collectAsStateWithLifecycle()
+    if (brainHud) {
+        val brain by viewModel.brainTelemetry.collectAsStateWithLifecycle()
+        val selfTestRunning by viewModel.brainSelfTestRunning.collectAsStateWithLifecycle()
+        ShuffleBrainDebugOverlay(
+            telemetry = brain,
+            selfTestRunning = selfTestRunning,
+            onRunSelfTest = viewModel::runBrainSelfTest,
+            onClose = { viewModel.setBrainHudVisible(false) },
+        )
+    }
     if (showLyrics && song?.embeddedLyrics != null) {
         ModalBottomSheet(onDismissRequest = { showLyrics = false }) {
             Column(

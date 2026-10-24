@@ -82,6 +82,37 @@ interface AnalysisDao {
     )
     fun observePerceptualRows(): Flow<List<PerceptualRow>>
 
+    /** [observePerceptualRows], once: Smart Shuffle's energy and mood steering. */
+    @Query(
+        """
+        SELECT songId, energy, danceability, acousticness, instrumentalness,
+               brightness, warmth, aggressiveness, calmness, happiness, sadness, tension
+        FROM analysis_results
+        """
+    )
+    suspend fun perceptualRows(): List<PerceptualRow>
+
+    /**
+     * What Smart Shuffle's cold start can borrow from this analysis for a song
+     * not yet measured in 24-D: the band split, the crest and the tempo.
+     */
+    @Query("SELECT songId, bassEnergy, midEnergy, trebleEnergy, rms, peakLevel, bpm, beatConfidence FROM analysis_results")
+    suspend fun coldStartRows(): List<ColdStartRow>
+
+    data class ColdStartRow(
+        val songId: Long,
+        val bassEnergy: Float,
+        val midEnergy: Float,
+        val trebleEnergy: Float,
+        val rms: Float,
+        val peakLevel: Float,
+        val bpm: Float?,
+        val beatConfidence: Float?,
+    )
+
+    @Query("SELECT COUNT(*) FROM analysis_results")
+    suspend fun count(): Int
+
     data class PerceptualRow(
         val songId: Long,
         val energy: Float, val danceability: Float, val acousticness: Float,

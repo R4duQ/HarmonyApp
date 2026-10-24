@@ -6,6 +6,11 @@
     native <methods>;
 }
 
+# shuffle_jni.cpp registers its natives on this class by name in JNI_OnLoad.
+-keep class com.harmony.core.dsp.SmartShuffleNative {
+    native <methods>;
+}
+
 # Room, Hilt, Compose, Coroutines, DataStore all ship consumer rules via AGP;
 # no additional keeps required. Verify with a minified release install before
 # every release (see docs/release-checklist.md).

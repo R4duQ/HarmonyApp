@@ -104,6 +104,14 @@ jobs:
           ./build/eq-engine-host/eq_engine_test
           echo "HARMONY_EQ_HOST_LIB_DIR=$PWD/build/eq-engine-host" >> "$GITHUB_ENV"
 
+      - name: Smart Shuffle engine host tests (C++, self-test) and host JNI library
+        run: |
+          set -euo pipefail
+          cmake -S core/dsp-native/src/test/cpp -B build/shuffle-host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/shuffle-host --parallel
+          ./build/shuffle-host/shuffle_test
+          echo "HARMONY_SHUFFLE_HOST_LIB_DIR=$PWD/build/shuffle-host" >> "$GITHUB_ENV"
+
       - name: Playback and download tests
         run: >-
           ./gradlew
@@ -112,6 +120,10 @@ jobs:
           :feature:downloads:testMornyeReleaseUnitTest
           :core:eq-engine:testReleaseUnitTest
           :core:model:test
+          :core:dsp-native:testReleaseUnitTest
+          :domain:shuffle:test
+          :data:shuffle:testReleaseUnitTest
+          :feature:home:testReleaseUnitTest
           --no-daemon
           --stacktrace
 
@@ -124,6 +136,10 @@ jobs:
             playback/service/build/reports/tests/
             feature/downloads/build/reports/tests/
             core/eq-engine/build/reports/tests/
+            core/dsp-native/build/reports/tests/
+            domain/shuffle/build/reports/tests/
+            data/shuffle/build/reports/tests/
+            feature/home/build/reports/tests/
           if-no-files-found: ignore
           retention-days: 14
 

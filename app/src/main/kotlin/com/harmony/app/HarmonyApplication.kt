@@ -3,7 +3,7 @@ package com.harmony.app
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
-import com.harmony.domain.shuffle.SmartQueueCoordinator
+import com.harmony.domain.shuffle.SmartQueueManager
 import com.harmony.sync.analysis.LibraryAutoUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +42,7 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var libraryAutoUpdater: LibraryAutoUpdater
-    @Inject lateinit var smartQueueCoordinator: SmartQueueCoordinator
+    @Inject lateinit var smartQueueManager: SmartQueueManager
     @Inject lateinit var settingsApplier: SettingsApplier
     @Inject lateinit var connectShuffleBridge: ConnectShuffleBridge
 
@@ -62,7 +62,7 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
         // granted, MediaStore queries legally return empty and the first real
         // scan happens right after the grant fires the content observer.
         libraryAutoUpdater.start()
-        smartQueueCoordinator.start(appScope)
+        smartQueueManager.start(appScope)
         settingsApplier.start(appScope)
         connectShuffleBridge.start(appScope)
     }

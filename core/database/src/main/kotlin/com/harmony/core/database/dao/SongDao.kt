@@ -184,6 +184,15 @@ interface SongDao {
 
     data class IdHashRow(val id: Long, val fileHash: String)
 
+    /** Smart Shuffle's library snapshot: who made each song (edits applied), for anti-clumping. */
+    @Query("SELECT id, artist, albumId FROM songs_effective")
+    suspend fun shuffleRows(): List<ShuffleSongRow>
+
+    data class ShuffleSongRow(val id: Long, val artist: String, val albumId: Long)
+
+    @Query("SELECT COUNT(*) FROM songs")
+    suspend fun songCount(): Int
+
     // -- Writes --------------------------------------------------------------
 
     // @Upsert, NOT @Insert(REPLACE). REPLACE is implemented as DELETE then

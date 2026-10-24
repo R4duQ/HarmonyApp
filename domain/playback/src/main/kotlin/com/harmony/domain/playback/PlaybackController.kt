@@ -6,7 +6,9 @@ import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.ShuffleMode
 import com.harmony.core.model.Song
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * The single abstraction the rest of the app uses to drive playback.
@@ -20,6 +22,14 @@ interface PlaybackController {
 
     /** Hot state stream; always emits the latest snapshot immediately on collect. */
     val playerState: StateFlow<PlayerState>
+
+    /**
+     * One event each time playback moves from a song to another, saying how
+     * much of the song that was left had been heard. Smart Shuffle learns
+     * from it (a play past half, a fast skip under 20%). Hot: only what
+     * happens while collecting is seen.
+     */
+    val playOutcomes: Flow<PlayOutcome> get() = emptyFlow()
 
     // -- Queue --------------------------------------------------------------
     /** Replace the queue with [songs] and start playing from [startIndex]. */
@@ -66,4 +76,29 @@ interface PlaybackController {
     // -- Sleep timer --------------------------------------------------------
     /** Pass null to cancel. If [finishTrack] is true, playback stops at track end after expiry. */
     fun setSleepTimer(durationMs: Long?, finishTrack: Boolean = false)
+}
+
+/** How a song ended: heard to the end, or left after [listenedMs] of [durationMs]. */
+data class PlayOutcome(
+    val songId: Long,
+    /** Time actually heard (seeking does not count). */
+    val listenedMs: Long,
+    val durationMs: Long,
+    /** Playback went back to an earlier queue entry (previous, or a tap above): not a verdict on the song. */
+    val movedBackward: Boolean = false,
+    /** The player moved on by itself (the song ended). */
+    val endedNaturally: Boolean = false,
+    val atMillis: Long = System.currentTimeMillis(),
+) {
+    /** Share of the song heard, 0..1. Four minutes counts as a full play, as in the play history. */
+    val fraction: Float
+        get() {
+            if (endedNaturally) return 1f
+            val heard = if (durationMs > 0) listenedMs.toFloat() / durationMs else 0f
+            return if (listenedMs >= FULL_PLAY_MS) maxOf(heard, 0.55f).coerceIn(0f, 1f) else heard.coerceIn(0f, 1f)
+        }
+
+    companion object {
+        const val FULL_PLAY_MS = 4 * 60 * 1000L
+    }
 }

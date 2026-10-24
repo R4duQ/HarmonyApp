@@ -34,3 +34,16 @@ android {
         }
     }
 }
+
+// NativeShuffleEngineTest runs the real engine on the JVM: CI builds the host
+// libharmonyshuffle (src/test/cpp) and points this variable at it. Without it
+// those tests are skipped.
+android.testOptions.unitTests.isReturnDefaultValues = true
+tasks.withType<Test>().configureEach {
+    System.getenv("HARMONY_SHUFFLE_HOST_LIB_DIR")?.let { systemProperty("java.library.path", it) }
+}
+
+dependencies {
+    api(projects.core.model)
+    testImplementation(libs.junit)
+}

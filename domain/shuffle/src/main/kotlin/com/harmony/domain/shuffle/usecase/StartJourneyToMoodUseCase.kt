@@ -1,7 +1,7 @@
 package com.harmony.domain.shuffle.usecase
 
 import com.harmony.core.model.MoodFilter
-import com.harmony.domain.shuffle.SmartQueueCoordinator
+import com.harmony.domain.shuffle.SmartQueueManager
 import com.harmony.domain.shuffle.repository.MoodRepository
 import javax.inject.Inject
 
@@ -12,12 +12,12 @@ import javax.inject.Inject
  * the endpoint reachable by definition.
  */
 class StartJourneyToMoodUseCase @Inject constructor(
-    private val coordinator: SmartQueueCoordinator,
+    private val queueManager: SmartQueueManager,
     private val moodRepository: MoodRepository,
 ) {
     suspend operator fun invoke(mood: MoodFilter, steps: Int = DEFAULT_STEPS): Boolean {
         val destination = moodRepository.topSongForMood(mood) ?: return false
-        return coordinator.startJourney(destination.id, steps, mood)
+        return queueManager.startJourney(destination.id, steps, mood)
     }
 
     private companion object {

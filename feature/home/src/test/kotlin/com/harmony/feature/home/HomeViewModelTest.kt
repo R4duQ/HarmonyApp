@@ -7,11 +7,10 @@ import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.library.repository.PlaybackHistoryRepository
 import com.harmony.domain.library.repository.PlaylistRepository
 import com.harmony.domain.playback.PlaybackController
-import com.harmony.domain.shuffle.SmartQueueCoordinator
-import com.harmony.domain.shuffle.engine.JourneyEngine
-import com.harmony.domain.shuffle.engine.SmartShuffleEngine
+import com.harmony.domain.shuffle.SmartQueueManager
+import com.harmony.domain.shuffle.brain.ShuffleBrain
+import com.harmony.domain.shuffle.brain.ShuffleBrainLog
 import com.harmony.domain.shuffle.usecase.StartSmartMixUseCase
-import com.harmony.domain.similarity.repository.SimilarityRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +29,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.lang.reflect.Proxy
-import kotlin.random.Random
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -84,10 +82,9 @@ class HomeViewModelTest {
     }
 
     private fun vm(): HomeViewModel {
-        val similarity = fake<SimilarityRepository> { _, _ -> null }
-        val engine = SmartShuffleEngine(similarity, null, null, null, Random(1))
-        val coordinator = SmartQueueCoordinator(playback, engine, JourneyEngine(similarity, engine), library, historyRepo)
-        return HomeViewModel(library, playlistRepo, historyRepo, playback, StartSmartMixUseCase(playback, library, coordinator))
+        val brain = fake<ShuffleBrain> { name, _ -> if (name == "getAvailable") false else error("unexpected $name") }
+        val queueManager = SmartQueueManager(playback, brain, library, historyRepo, ShuffleBrainLog.NONE)
+        return HomeViewModel(library, playlistRepo, historyRepo, playback, StartSmartMixUseCase(playback, library, queueManager))
     }
 
     private fun TestScope.collect(vm: HomeViewModel) {

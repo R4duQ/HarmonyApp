@@ -2,7 +2,7 @@ package com.harmony.app
 
 import com.harmony.core.model.ShuffleMode
 import com.harmony.domain.playback.PlaybackController
-import com.harmony.domain.shuffle.SmartQueueCoordinator
+import com.harmony.domain.shuffle.SmartQueueManager
 import com.harmony.playback.service.connect.ConnectSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -22,11 +22,11 @@ import javax.inject.Singleton
 class ConnectShuffleBridge @Inject constructor(
     private val connect: ConnectSession,
     private val playback: PlaybackController,
-    private val coordinator: SmartQueueCoordinator,
+    private val queueManager: SmartQueueManager,
 ) {
     fun start(scope: CoroutineScope) {
         scope.launch {
-            connect.shuffleRequests.collect { coordinator.toggleShuffle() }
+            connect.shuffleRequests.collect { queueManager.toggleShuffle() }
         }
         scope.launch {
             playback.playerState
