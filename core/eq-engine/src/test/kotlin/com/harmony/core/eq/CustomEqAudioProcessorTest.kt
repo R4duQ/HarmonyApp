@@ -103,6 +103,8 @@ class CustomEqAudioProcessorTest {
     fun `odd-sized buffers are always taken in full, partial frames carried over`() {
         processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
         processor.flush()
+        // The DAC's 10 Hz high-pass leaves 1 kHz where it was (the speaker's 90 Hz one shifts its phase).
+        processor.setOutputDeviceType(OutputDeviceType.USB_DAC_HIRES)
         val frames = 9_600
         val input = pcm16Sine(frames, 2, 48_000, 1000.0, 0.25)
         // 1001 bytes a time: a 16-bit stereo frame is 4 bytes, so most chunks end mid-frame.
