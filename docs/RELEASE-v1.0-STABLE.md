@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **139**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 138), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **140**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 139), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -208,6 +208,14 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
     default) no Harmony card stays there after you close or force-stop the app. A card
     left over from an earlier build goes once you swipe it away (or long-press it and
     choose Hide). Android Auto can still offer the last song when the car connects.
+  - *It stays closed.* After you swipe Harmony away, nothing in the app connects to the
+    player again on its own; before, a background task or a settings update could
+    reconnect, restore the last queue (paused) and bring the notification back. The last
+    queue is now only restored when you open the app (or a car connects), so the library
+    analysis running in the background no longer makes a paused notification appear.
+  - *Keep playing after closing the app*, a new switch in Settings > Playback, is off by
+    default. When it is on, swiping Harmony away while music plays leaves the music and
+    its notification; a paused player is still closed.
 - **Notification opens the app.** Tapping the playback notification or the lock-screen
   player brings Harmony to the front, or starts it if it was closed.
 - **Tablet layout.** On tablets a glass navigation rail on the left replaces the bottom

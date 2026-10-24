@@ -1,10 +1,13 @@
 package com.harmony.playback.service
 
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.IBinder
 import androidx.annotation.OptIn
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.harmony.playback.service.connect.ConnectPlayer
@@ -22,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -185,7 +189,9 @@ class PlaybackService : MediaLibraryService() {
         val position = snap?.third ?: 0L
         val carConnected = audioOutput.carConnected
         AutoDiagnostics.log("app swiped away · legacy browser bound=${browserBindings.carBrowserBound} · car controller=$carConnected")
-        if (browserBindings.onTaskRemoved(carConnected) == TaskRemovedAction.KEEP_SESSION) {
+        if (browserBindings.onTaskRemoved(carConnected) == TaskRemovedAction.KEEP_SESSION ||
+            keepPlayingAfterSwipe(player)
+        ) {
             // Android Auto is attached. Swiping the app away is a gesture on
             // the PHONE's screen; the car is a separate client of this same
             // session and is still using it. Tearing the session down here
@@ -194,6 +200,10 @@ class PlaybackService : MediaLibraryService() {
             // the process for the OS to freeze or kill while the car was
             // still attached. Save the position and leave the session
             // exactly as it is; it ends normally after the car disconnects.
+            //
+            // The same when the listener chose "Keep playing after closing
+            // the app" and music is playing: the notification stays because
+            // the music does, and it is the way back to it.
             if (ids.isNotEmpty()) {
                 serviceScope.launch { settingsRepository.saveLastPlaybackState(ids, index, position) }
             }
@@ -233,6 +243,10 @@ class PlaybackService : MediaLibraryService() {
         // can't come back and overwrite that good state with an empty one.
         player.stop()
         player.clearMediaItems()
+        // Media3's notification manager forgets the session first, so no
+        // update still queued for it (the stop and the cleared queue above
+        // each post one) can post the notification again after it is gone.
+        mediaSession?.takeIf(::isSessionAdded)?.let(::removeSession)
         // Explicit, rather than trusting stopSelf() to tear the foreground
         // down: the service may be stopped but not yet destroyed, and the
         // notification outlives that gap. Platform constant rather than
@@ -240,6 +254,7 @@ class PlaybackService : MediaLibraryService() {
         // module, and minSdk is 29, so STOP_FOREGROUND_REMOVE is always
         // there.
         stopForeground(STOP_FOREGROUND_REMOVE)
+        cancelPlaybackNotification()
         // stopSelf() cannot destroy a service that still has clients bound,
         // and the app's own MediaController (PlaybackConnection) stays bound
         // for the life of the process. Without letting go of it the service
@@ -251,6 +266,34 @@ class PlaybackService : MediaLibraryService() {
         // own the next time the Activity starts.
         playbackConnection.get().releaseConnection()
         stopSelf()
+    }
+
+    /**
+     * "Smart close": the listener asked for music to keep playing when the
+     * app is swiped away, and it is playing now. A paused player is closed
+     * either way ("strict close" for everything else).
+     */
+    private fun keepPlayingAfterSwipe(player: Player): Boolean {
+        val playing = player.playWhenReady &&
+            (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
+        if (!playing) return false
+        return runCatching {
+            runBlocking {
+                withTimeoutOrNull(SETTINGS_TIMEOUT_MS) { settingsRepository.settings.first().keepPlayingAfterSwipe }
+            }
+        }.getOrNull() == true
+    }
+
+    /**
+     * Fail-safe: removes Media3's playback notification by its id (the
+     * default provider's), in case the platform kept it after the service
+     * left the foreground. A no-op when it is already gone.
+     */
+    private fun cancelPlaybackNotification() {
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                ?.cancel(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID)
+        }
     }
 
     override fun onDestroy() {
@@ -272,20 +315,29 @@ class PlaybackService : MediaLibraryService() {
         sleepTimer.detach()
         connect.detach()
         callback.close()
+        // Teardown order: the player first (it stops feeding the session and
+        // the notification), then the session (which takes its notification
+        // with it), then what only the player used. Nothing here is left
+        // holding the service: the scope's coroutines are cancelled and the
+        // output monitor's device callback is unregistered.
         mediaSession?.run {
+            player.stop()
             player.release()
+            if (isSessionAdded(this)) removeSession(this)
             release()
         }
-        // The native EQ engines, the output monitor and the analyser.
-        harmonyPlayer.release()
         mediaSession = null
+        // The native EQ engines (C++), the output monitor's AudioDeviceCallback and the analyser.
+        harmonyPlayer.release()
         serviceScope.cancel()
+        cancelPlaybackNotification()
         super.onDestroy()
     }
 
     private companion object {
         const val SESSION_ID = "harmony_session"
         const val SAVE_TIMEOUT_MS = 2_000L
+        const val SETTINGS_TIMEOUT_MS = 500L
         const val SAVE_INTERVAL_MS = 5_000L
 
         /** The action Android Auto binds with (MediaBrowserServiceCompat.SERVICE_INTERFACE). */

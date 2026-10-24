@@ -6,9 +6,18 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application>
+        <!--
+            exported: Android Auto, Bluetooth and system media controllers bind it.
+            stopWithTask="false" (the default, stated on purpose): with "true"
+            the system stops the service when the app is swiped away WITHOUT
+            calling onTaskRemoved, so the position is never saved and Android
+            Auto loses its session. PlaybackService.onTaskRemoved does the
+            teardown itself, notification included.
+        -->
         <service
             android:name=".PlaybackService"
             android:exported="true"
+            android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaLibraryService" />

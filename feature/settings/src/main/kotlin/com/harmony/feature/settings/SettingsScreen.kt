@@ -115,6 +115,7 @@ class SettingsViewModel @Inject constructor(
     fun setAmoled(on: Boolean) = launch { settings.setAmoledDark(on) }
     fun setDynamicColors(on: Boolean) = launch { settings.setDynamicColors(on) }
     fun setChargingOnly(on: Boolean) = launch { settings.setChargingOnlyAnalysis(on) }
+    fun setKeepPlayingAfterSwipe(on: Boolean) = launch { settings.setKeepPlayingAfterSwipe(on) }
     fun setCrossfade(seconds: Int) = launch { settings.setCrossfadeSeconds(seconds) }
     fun setReplayGain(mode: ReplayGainMode) = launch { settings.setReplayGainMode(mode) }
     fun setSmartFamiliarity(value: Float) = launch { settings.setSmartShuffleFamiliarity(value) }
@@ -290,6 +291,20 @@ fun SettingsScreen(
                         EditorialSectionGap(0)
                     }
                 }
+            },
+        )
+        EditorialSettingRow(
+            title = "Keep playing after closing the app",
+            subtitle = if (state.keepPlayingAfterSwipe) {
+                "Swiping Harmony away from recent apps leaves the music playing; " +
+                    "a paused player is closed with its notification"
+            } else {
+                "Swiping Harmony away from recent apps stops the music and removes " +
+                    "its notification"
+            },
+            palette = palette,
+            trailing = {
+                EditorialSwitch(state.keepPlayingAfterSwipe, viewModel::setKeepPlayingAfterSwipe, palette)
             },
         )
         EditorialSettingRow(
