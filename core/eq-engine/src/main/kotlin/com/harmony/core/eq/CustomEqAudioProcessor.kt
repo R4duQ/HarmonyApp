@@ -50,10 +50,19 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     var bitPerfectPassthrough: Boolean = false
 
     private var formatCode = 0
-    private var configuredRate = 0
+    @Volatile private var configuredRate = 0
     private var configuredChannels = 0
     private var tailWritten = false
     private var heapInputCopy: ByteBuffer = EMPTY_DIRECT
+
+    /** A trailing partial frame, completed by the next buffer (8 channels of 32-bit at most). */
+    private val carry = ByteArray(MAX_CHANNELS * 4)
+    private var carryLength = 0
+
+    /** Frames since the last flush, to place diagnostics on the timeline. */
+    private var framesIn = 0L
+    private var lastHealCount = 0
+    private var lastSanitizedSamples = 0
 
     // ---- Controls ------------------------------------------------------------------------
 
@@ -69,16 +78,15 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     /** EQ on, or flat. The high-pass, saturator and limiter protect the output either way. */
     fun setEqEnabled(enabled: Boolean) = MobileEqNative.nativeSetEqEnabled(checkedHandle(), enabled)
 
-    /** Winamp-style Auto: follow [setAutoTargetGains], morphing over 400 ms, with dynamic bass. */
+    /**
+     * Auto: live spectral auto-calibration. The engine's analysis bank measures
+     * the music's balance as it plays (about 1.2 s) against the output's target
+     * curve, and live offsets of up to ±4.5 dB lift thin sub-bass and air and
+     * take out mud and harshness, on top of the sliders. Never from tags.
+     */
     fun setAutoMode(enabled: Boolean) = MobileEqNative.nativeSetAutoMode(checkedHandle(), enabled)
 
-    /** The curve Auto morphs to (call it as each track starts). */
-    fun setAutoTargetGains(gainsDb: FloatArray) {
-        require(gainsDb.size >= BAND_COUNT) { "Expected $BAND_COUNT gains" }
-        MobileEqNative.nativeSetAutoTargetGains(checkedHandle(), gainsDb)
-    }
-
-    /** A manual preamp on top of the automatic compensation, -24..+12 dB. */
+    /** A manual preamp on top of the live automatic headroom, -24..+12 dB. */
     fun setPreampDb(preampDb: Float) = MobileEqNative.nativeSetUserPreamp(checkedHandle(), preampDb)
 
     /**
@@ -89,7 +97,7 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
 
     /** Where the sound goes; [AudioOutputMonitor] calls this on every routing change. */
     fun setOutputDeviceType(device: OutputDeviceType) =
-        MobileEqNative.nativeSetOutputDevice(checkedHandle(), device.engineCode)
+        MobileEqNative.nativeSetOutputDeviceType(checkedHandle(), device.engineCode)
 
     /** Stop feeding the spectrum analyzer while nothing shows it. */
     fun setAnalyzerEnabled(enabled: Boolean) = MobileEqNative.nativeSetAnalyzerEnabled(checkedHandle(), enabled)
@@ -98,17 +106,39 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     fun setSpectrumBarCount(bars: Int) = MobileEqNative.nativeSetSpectrumBarCount(checkedHandle(), bars)
 
     /**
-     * For a 60 fps UI: fills [bars] and [peaks] (allocate both once, at least
+     * The one call a 60 fps UI makes, garbage-free: fills [effectiveGains]
+     * (10: the sliders plus Auto's live offsets, ducking included), [bars] and
+     * [peaks] (32: the FFT, 0..1, ballistics applied); any may be null.
+     * Returns the live automatic preamp in dB (headroom, Bluetooth pad and
+     * the listener's preamp). Never blocks the audio thread.
+     */
+    fun pollDspTelemetry(effectiveGains: FloatArray?, bars: FloatArray?, peaks: FloatArray?): Float =
+        MobileEqNative.nativePollDspTelemetry(checkedHandle(), effectiveGains, bars, peaks)
+
+    /** Auto's live offset for each band right now, dB, into [out] (10 long). */
+    fun liveAutoOffsets(out: FloatArray) = MobileEqNative.nativeLiveAutoOffsets(checkedHandle(), out)
+
+    /** How far the harshness tamer is pulling the 4/8 kHz boost down right now, in dB. */
+    fun currentHarshDuckDb(): Float = MobileEqNative.nativeHarshDuckDb(checkedHandle())
+
+    /** Whether Auto's tonal adaptation is frozen (the music is below -42 dBFS). */
+    fun tonalFrozen(): Boolean = MobileEqNative.nativeTonalFrozen(checkedHandle())
+
+    /** The rate the engine runs at (the source's own; 0 before the first track). */
+    val sampleRate: Int get() = configuredRate
+
+    /**
+     * The spectrum alone: fills [bars] and [peaks] (allocate both once, at least
      * the bar count long) with 0..1 heights, ballistics already applied, and
      * returns the number of bars. Garbage-free; never blocks the audio thread.
      */
     fun pollSpectrum(bars: FloatArray, peaks: FloatArray?): Int =
         MobileEqNative.nativePollSpectrum(checkedHandle(), bars, peaks)
 
-    /** The automatic preamp being applied, in dB. */
+    /** The whole preamp being applied, in dB: live headroom, Bluetooth pad, the listener's and ReplayGain. */
     fun currentPreampDb(): Float = MobileEqNative.nativeTargetPreampDb(checkedHandle())
 
-    /** How far Auto's dynamic bass is pulling the 31/62 Hz boost down right now, in dB. */
+    /** How far the dynamic bass is pulling the 31/62 Hz boost down right now, in dB. */
     fun currentBassDuckDb(): Float = MobileEqNative.nativeBassDuckDb(checkedHandle())
 
     /** Frees the native engine. Call once the player is released; the processor is unusable after. */
@@ -159,26 +189,60 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
             MobileEqNative.nativeReset(checkedHandle())
         }
         tailWritten = false
+        carryLength = 0  // a partial frame from before a seek belongs nowhere
+        framesIn = 0
     }
 
+    /**
+     * Takes ALL of [inputBuffer], every time: its position always reaches its
+     * limit. This matters more than anything else here. A processor that
+     * leaves bytes behind is offered the same buffer again; if it can never
+     * take them (less than one frame, which it used to skip), the pipeline
+     * makes no progress, the sink keeps saying "not consumed", and playback
+     * freezes at that timestamp until a seek flushes everything.
+     *
+     * So a trailing partial frame (an odd-sized decoder buffer) is carried
+     * over and completed by the next buffer, and the output buffer is sized
+     * exactly for the whole frames this call processes.
+     */
     override fun queueInput(inputBuffer: ByteBuffer) {
-        val position = inputBuffer.position()
-        val frames = inputBuffer.remaining() / inputAudioFormat.bytesPerFrame
-        if (frames == 0) return
-        val inputBytes = frames * inputAudioFormat.bytesPerFrame
+        val frameBytes = inputAudioFormat.bytesPerFrame
+        val incoming = inputBuffer.remaining()
+        if (incoming == 0) return
+        if (frameBytes <= 0) {
+            // Not configured for anything: drop it rather than stall the pipeline.
+            inputBuffer.position(inputBuffer.limit())
+            return
+        }
+        val available = carryLength + incoming
+        val frames = available / frameBytes
+        if (frames == 0) {
+            // Not even one whole frame yet: keep it for the next buffer.
+            inputBuffer.get(carry, carryLength, incoming)
+            carryLength += incoming
+            EqDebug.partialFrame(incoming, frameBytes)
+            return
+        }
+        val inputBytes = frames * frameBytes
+        val fromInput = inputBytes - carryLength
 
-        // The engine reads native memory: copy the rare heap buffer into a direct one.
+        // The engine reads native memory, starting on a frame boundary: use the
+        // caller's buffer in place when it is direct and nothing is carried
+        // over, else gather into our own direct buffer.
         val source: ByteBuffer
         val sourceOffset: Int
-        if (inputBuffer.isDirect) {
+        if (carryLength == 0 && inputBuffer.isDirect) {
             source = inputBuffer
-            sourceOffset = position
+            sourceOffset = inputBuffer.position()
         } else {
             if (heapInputCopy.capacity() < inputBytes) {
                 heapInputCopy = ByteBuffer.allocateDirect(inputBytes).order(ByteOrder.nativeOrder())
             }
             heapInputCopy.clear()
-            heapInputCopy.put(inputBuffer.duplicate().apply { limit(position + inputBytes) })
+            heapInputCopy.put(carry, 0, carryLength)
+            val slice = inputBuffer.duplicate()
+            slice.limit(slice.position() + fromInput)
+            heapInputCopy.put(slice)
             source = heapInputCopy
             sourceOffset = 0
         }
@@ -187,9 +251,33 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
         val produced = MobileEqNative.nativeProcess(
             checkedHandle(), source, sourceOffset, frames, formatCode, output, 0,
         )
-        inputBuffer.position(position + inputBytes)
-        output.position(produced * outputAudioFormat.bytesPerFrame)
+        // Consume what was processed, then carry the rest (less than one frame).
+        inputBuffer.position(inputBuffer.position() + fromInput)
+        carryLength = inputBuffer.remaining()
+        if (carryLength > 0) {
+            inputBuffer.get(carry, 0, carryLength)
+            EqDebug.partialFrame(carryLength, frameBytes)
+        }
+        output.position(produced.coerceIn(0, frames) * outputAudioFormat.bytesPerFrame)
         output.flip()
+        framesIn += frames
+        reportEngineHealth()
+    }
+
+    /** Tells Logcat (EQ_DEBUG) when the engine repaired input or healed itself since the last buffer. */
+    private fun reportEngineHealth() {
+        val engine = handle
+        if (engine == 0L) return
+        val heals = MobileEqNative.nativeHealCount(engine)
+        val repaired = MobileEqNative.nativeSanitizedSamples(engine)
+        if (heals != lastHealCount) {
+            EqDebug.nanHealed(heals - lastHealCount, framesIn, inputAudioFormat.sampleRate)
+            lastHealCount = heals
+        }
+        if (repaired != lastSanitizedSamples) {
+            EqDebug.corruptInput(repaired - lastSanitizedSamples, framesIn, inputAudioFormat.sampleRate)
+            lastSanitizedSamples = repaired
+        }
     }
 
     override fun getOutput(): ByteBuffer {
@@ -216,6 +304,8 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
         formatCode = 0
         tailWritten = false
         heapInputCopy = EMPTY_DIRECT
+        carryLength = 0
+        framesIn = 0
     }
 
     private fun checkedHandle(): Long {

@@ -16,28 +16,33 @@ data class AudioLevel(
     val brightness: Float = 0f,
 )
 
-/** Reads the playing EQ engine's analyser into [bars] and [peaks]; returns how many bars it wrote. */
-fun interface SpectrumSource {
-    fun poll(bars: FloatArray, peaks: FloatArray?): Int
+/**
+ * The playing EQ engine's live telemetry, in one native call: the ten
+ * effective band gains (sliders plus Auto's live offsets) into
+ * [effectiveGains], the FFT bars and peak dots into [bars] and [peaks] (any
+ * may be null). Returns the live automatic preamp in dB.
+ */
+fun interface DspTelemetrySource {
+    fun poll(effectiveGains: FloatArray?, bars: FloatArray?, peaks: FloatArray?): Float
 }
 
 /**
- * The live spectrum, from the native EQ engine (core:eq-engine) to the screens.
+ * The live DSP telemetry, from the native EQ engine (core:eq-engine) to the screens.
  *
- * The UI polls it at 60 fps, once per frame (withFrameNanos), into arrays it
- * allocated once: [poll] runs the engine's Hann-windowed 2048-point FFT, the
- * logarithmic bars and their ballistics in C++ and only copies the 0..1
- * heights out. Nothing is allocated per frame and the audio thread never
- * waits for it.
+ * The UI polls it at 60 fps, once per frame, into arrays it allocated once:
+ * [pollTelemetry] runs the engine's Hann-windowed 2048-point FFT, the
+ * logarithmic bars and their ballistics in C++ and copies out the 0..1
+ * heights, the effective band gains and the live preamp. Nothing is allocated
+ * per frame and the audio thread never waits for it.
  *
  * Every poll happens on the main thread, which keeps the engine's analyser to
  * the single reader it expects. The playback service sets [source] and runs
  * the analyser only while a screen is [watching].
  */
 object AudioLevels {
-    /** The playing engine's analyser; set by the playback service, null without one. */
+    /** The playing engine's telemetry; set by the playback service, null without one. */
     @Volatile
-    var source: SpectrumSource? = null
+    var source: DspTelemetrySource? = null
 
     private val _watchers = MutableStateFlow(0)
 
@@ -54,8 +59,19 @@ object AudioLevels {
      * at least [SPECTRUM_BARS] long) with 0..1 heights and returns how many it
      * wrote; 0 when nothing plays.
      */
-    fun poll(bars: FloatArray, peaks: FloatArray?): Int =
-        source?.let { runCatching { it.poll(bars, peaks) }.getOrDefault(0) } ?: 0
+    fun poll(bars: FloatArray, peaks: FloatArray?): Int {
+        val telemetry = source ?: return 0
+        return if (runCatching { telemetry.poll(null, bars, peaks) }.isSuccess) bars.size else 0
+    }
+
+    /**
+     * Main thread, once per frame: the whole snapshot (see [DspTelemetrySource]).
+     * Returns the live preamp in dB, or NaN when nothing plays.
+     */
+    fun pollTelemetry(effectiveGains: FloatArray?, bars: FloatArray?, peaks: FloatArray?): Float {
+        val telemetry = source ?: return Float.NaN
+        return runCatching { telemetry.poll(effectiveGains, bars, peaks) }.getOrDefault(Float.NaN)
+    }
 
     /** Loudness and brightness (the centre of energy) of a polled frame of [count] bars. */
     fun levelOf(bars: FloatArray, count: Int): AudioLevel {

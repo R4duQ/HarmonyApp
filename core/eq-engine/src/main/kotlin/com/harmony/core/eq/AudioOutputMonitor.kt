@@ -20,12 +20,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** The current output: its kind, the device behind it, and the highest rate it reports (0 = any). */
+/**
+ * The current output: its kind, the device behind it, and what it reports it
+ * can take: the highest rate (0 = any) and the deepest PCM (16, 24 or 32 bits,
+ * 32 also for float; 0 = not reported). A USB DAC's figures are the DAC's own.
+ */
 data class OutputRoute(
     val type: OutputDeviceType,
     val name: String,
     val deviceId: Int,
     val maxSampleRate: Int,
+    val maxBitDepth: Int = 0,
 )
 
 /** What [AudioOutputMonitor.setBitPerfectUsbMode] achieved. */
@@ -145,6 +150,7 @@ class AudioOutputMonitor(
         name = device.productName?.toString().orEmpty(),
         deviceId = device.id,
         maxSampleRate = device.sampleRates.maxOrNull() ?: 0,
+        maxBitDepth = device.encodings.maxOfOrNull(::bitDepthOf) ?: 0,
     )
 
     // ---- Bit-perfect USB (Android 14+) ----------------------------------------------------

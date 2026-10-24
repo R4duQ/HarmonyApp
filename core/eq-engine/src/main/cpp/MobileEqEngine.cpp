@@ -15,36 +15,64 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kButterworthQ = 0.70710678118654752;
 
+// Numerical safety. Every power, ratio and logarithm has a floor, input is
+// bounded, and anything non-finite that still turns up is healed in place.
+constexpr float kEpsilon = 1e-12f;       // floor under every power before a division or log10
+constexpr float kInputLimit = 16.f;      // +24 dBFS: no real PCM goes past this; a corrupt frame might
+
 // Stage 1.
-constexpr float kPreampCompensation = 0.65f;   // share of the boost peak taken back by the preamp
 constexpr float kBluetoothPadDb = -0.3f;       // room for lossy codecs' inter-sample peaks
 constexpr float kMaxUserPreampDb = 12.f;
-constexpr float kMaxLevelGainDb = 15.f;     // ReplayGain lifts quiet records up to this
-constexpr float kMinLevelGainDb = -30.f;
 constexpr float kMinUserPreampDb = -24.f;
+constexpr float kMaxLevelGainDb = 15.f;        // ReplayGain lifts quiet records up to this
+constexpr float kMinLevelGainDb = -30.f;
 constexpr float kCoefficientSmoothingSeconds = 0.008f;
 constexpr float kGainSmoothingSeconds = 0.015f;
-constexpr float kPreampRecomputeSeconds = 0.005f;
+// Live preamp: how much headroom the curve needs for the energy actually present.
+constexpr float kBandEnergySeconds = 0.05f;    // per-band energy behind the weighting
+constexpr float kPreampAttackSeconds = 0.005f; // headroom is taken fast...
+constexpr float kPreampReleaseSeconds = 0.30f; // ...and given back slowly, so nothing pumps
 
-// Stage 2. Band 0 is a low shelf and band 9 a high shelf, both Q = 0.707 with
+// Stage 2: the live spectral analyser and Auto.
+constexpr double kOctaveQ = 1.41421356237;     // the analysis bank: one octave per band
+constexpr float kTonalSeconds = 1.2f;          // slow tonal envelope (RMS integration)
+constexpr float kGateSeconds = 0.1f;           // broadband RMS for the silence gate
+constexpr float kFreezeBelowDbfs = -42.f;      // quieter than this: tonal adaptation freezes
+constexpr float kOffsetGlideSeconds = 1.0f;    // live offsets glide towards their target
+constexpr float kAutoStrength = 0.75f;         // share of the difference from the target evened out
+constexpr float kMaxAutoBoostDb = 4.5f;
+constexpr float kMaxAutoCutDb = 4.5f;
+constexpr float kAbsentBelowTargetDb = 24.f;   // a band this far under target is absent, not thin: no boost
+// What each band may do: lift what is missing at the extremes (sub-bass, air),
+// take out what clutters (mud, harshness), and anchor the middle.
+enum class AutoRule { kBoost, kCut, kHold };
+constexpr AutoRule kAutoRule[kNumBands] = {
+    AutoRule::kBoost, AutoRule::kBoost,  // 31, 62 Hz: sub-bass
+    AutoRule::kCut, AutoRule::kCut,      // 125, 250 Hz: boxy, muddy
+    AutoRule::kHold, AutoRule::kHold,    // 500 Hz, 1 kHz: the anchor
+    AutoRule::kCut, AutoRule::kCut,      // 2, 4 kHz: harsh, piercing
+    AutoRule::kBoost, AutoRule::kBoost,  // 8, 16 kHz: air, brilliance
+};
+// Fast transient envelopes: dynamic bass and the harshness tamer.
+constexpr float kSubBassCutoffHz = 80.f;       // 31-62 Hz and their kicks
+constexpr double kSibilanceHz = 5657.0;        // 4-8 kHz, one octave around its centre
+constexpr float kTransientAttackSeconds = 0.008f;
+constexpr float kTransientReleaseSeconds = 0.12f;
+constexpr float kDuckThresholdDb = -5.f;       // sub-bass peaks above this pull the bass boost back
+constexpr float kHarshThresholdDb = -18.f;     // sibilance above this pulls the 4/8 kHz boost back
+constexpr float kDuckRangeDb = 6.f;            // full ducking this far above the threshold
+constexpr float kMaxDuckDb = 4.f;
+
+// Stage 3. Band 0 is a low shelf and band 9 a high shelf, both Q = 0.707 with
 // their corners on the band frequencies (31 Hz, 16 kHz); bands 1-8 are peaks.
 constexpr double kShelfQ = kButterworthQ;
 constexpr double kPeakQAtFlat = 1.2;
 constexpr double kPeakQGrowth = 0.8;   // Q at +-12 dB = 1.2 + 0.8
 
-// Stage 3.
-constexpr float kAutoMorphSeconds = 0.4f;
-constexpr float kSubBassCutoffHz = 80.f;
-constexpr float kDuckThresholdDb = -6.f;
-constexpr float kDuckRangeDb = 6.f;     // full ducking 6 dB above the threshold
-constexpr float kMaxDuckDb = 4.f;
-constexpr float kEnvelopeAttackSeconds = 0.003f;
-constexpr float kEnvelopeReleaseSeconds = 0.15f;
-constexpr float kDuckReleaseSeconds = 0.12f;
-
 // Stage 4.
 constexpr float kSaturatorKneeDb = -1.8f;
 constexpr float kCeilingDb = -0.15f;
+constexpr float kBluetoothCeilingDb = -0.4f;
 constexpr float kUsbCeilingDb = -0.05f;
 constexpr float kLookaheadSeconds = 0.002f;
 constexpr float kLimiterReleaseSeconds = 0.08f;
@@ -63,6 +91,15 @@ constexpr float kMaxLagSeconds = 0.75f; // never trail the audio thread by more
 constexpr int kPreampGridPoints = 64;
 
 inline float dbToLinear(float db) { return std::pow(10.f, db / 20.f); }
+
+/** x, or 0 when it is NaN or infinite. */
+inline float sanitizeFloat(float x) { return std::isfinite(x) ? x : 0.f; }
+inline double sanitizeDouble(double x) { return std::isfinite(x) ? x : 0.0; }
+
+/** 10·log10(p) with p floored at kEpsilon: never -inf, never NaN. */
+inline float powerDb(double p) {
+    return static_cast<float>(10.0 * std::log10(std::max(std::isfinite(p) ? p : 0.0, static_cast<double>(kEpsilon))));
+}
 
 inline float clampGainDb(float db) {
     if (!std::isfinite(db)) return 0.f;
@@ -179,7 +216,8 @@ inline float readSample(const uint8_t* p, SampleFormat format) {
         case SampleFormat::kFloat: {
             float v;
             std::memcpy(&v, p, 4);
-            return std::isfinite(v) ? v : 0.f;  // one NaN would poison every filter for good
+            // One NaN would poison every filter for good; a corrupt frame's 1e30 would drown them.
+            return std::isfinite(v) ? std::clamp(v, -kInputLimit, kInputLimit) : 0.f;
         }
     }
     return 0.f;
@@ -240,6 +278,13 @@ Biquad designHighPass(double sampleRate, double frequency, double q) {
     const double alpha = std::sin(w0) / (2.0 * q);
     return normalised((1.0 + cosW) / 2.0, -(1.0 + cosW), (1.0 + cosW) / 2.0,
                       1.0 + alpha, -2.0 * cosW, 1.0 - alpha);
+}
+
+// Band-pass with 0 dB at the centre (RBJ, constant peak gain).
+Biquad designBandPass(double sampleRate, double frequency, double q) {
+    const double w0 = 2.0 * kPi * nyquistSafe(sampleRate, frequency) / sampleRate;
+    const double alpha = std::sin(w0) / (2.0 * q);
+    return normalised(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * std::cos(w0), 1.0 - alpha);
 }
 
 Biquad designLowPass(double sampleRate, double frequency, double q) {
@@ -356,7 +401,8 @@ void Fft::forward(float* re, float* im) const {
 MobileEqEngine::MobileEqEngine() {
     for (int b = 0; b < kNumBands; ++b) {
         userGainDb_[b].store(0.f, std::memory_order_relaxed);
-        autoTargetDb_[b].store(0.f, std::memory_order_relaxed);
+        effectiveOutDb_[b].store(0.f, std::memory_order_relaxed);
+        offsetOutDb_[b].store(0.f, std::memory_order_relaxed);
     }
     // Periodic Hann: the right window for spectral analysis of a stream.
     for (int n = 0; n < kFftSize; ++n) {
@@ -370,7 +416,11 @@ MobileEqEngine::MobileEqEngine() {
 MobileEqEngine::~MobileEqEngine() = default;
 
 float MobileEqEngine::ceilingDb() const {
-    return activeDevice_ == OutputDevice::kUsbDacHiRes ? kUsbCeilingDb : kCeilingDb;
+    switch (activeDevice_) {
+        case OutputDevice::kUsbDacHiRes: return kUsbCeilingDb;
+        case OutputDevice::kBluetoothA2dp: return kBluetoothCeilingDb;
+        default: return kCeilingDb;
+    }
 }
 
 bool MobileEqEngine::configure(int sampleRate, int channels) {
@@ -381,14 +431,26 @@ bool MobileEqEngine::configure(int sampleRate, int channels) {
 
     coefAlpha_ = 1.0 - std::exp(-1.0 / (kCoefficientSmoothingSeconds * sampleRate));
     gainAlpha_ = smoothingAlpha(kGainSmoothingSeconds, sampleRate);
-    envAttack_ = smoothingAlpha(kEnvelopeAttackSeconds, sampleRate);
-    envRelease_ = smoothingAlpha(kEnvelopeReleaseSeconds, sampleRate);
+    envAttack_ = smoothingAlpha(kTransientAttackSeconds, sampleRate);
+    envRelease_ = smoothingAlpha(kTransientReleaseSeconds, sampleRate);
+    bandEnergyAlpha_ = smoothingAlpha(kBandEnergySeconds, sampleRate);
+    gateAlpha_ = smoothingAlpha(kGateSeconds, sampleRate);
+    const double blockRate = static_cast<double>(sampleRate) / kBlock;
+    tonalAlpha_ = smoothingAlpha(kTonalSeconds, blockRate);
+    offsetAlpha_ = smoothingAlpha(kOffsetGlideSeconds, blockRate);
+    preampAttack_ = smoothingAlpha(kPreampAttackSeconds, blockRate);
+    preampRelease_ = smoothingAlpha(kPreampReleaseSeconds, blockRate);
+    duckRelease_ = smoothingAlpha(kTransientReleaseSeconds, blockRate);
     releaseAlpha_ = smoothingAlpha(kLimiterReleaseSeconds, sampleRate);
     lookahead_ = std::clamp(static_cast<int>(std::lround(kLookaheadSeconds * sampleRate)), 1, kMaxLookahead);
     lookaheadDelay_ = lookahead_ - 1;
-    autoRampFrames_ = std::max(1, static_cast<int>(std::lround(kAutoMorphSeconds * sampleRate)));
     subBassLowPass_ = designLowPass(sampleRate, kSubBassCutoffHz, kButterworthQ);
+    sibilanceBandPass_ = designBandPass(sampleRate, kSibilanceHz, kOctaveQ);
     saturatorKnee_ = dbToLinear(kSaturatorKneeDb);
+    // The analysis bank follows the rate; what it has learned (in power, rate-independent) is kept.
+    for (int b = 0; b < kNumBands; ++b) analysisFilter_[b] = designBandPass(sampleRate, kBandFrequencies[b], kOctaveQ);
+    std::memset(analysisState_, 0, sizeof(analysisState_));
+    std::fill(blockPower_, blockPower_ + kNumBands, 0.0);
 
     // Every coefficient depends on the rate: redesign all of them now, at full
     // precision, and start from them directly (the state is cleared anyway).
@@ -398,8 +460,6 @@ bool MobileEqEngine::configure(int sampleRate, int channels) {
     highPass_.settling = false;
     seenControlGeneration_ = controlGeneration_.load(std::memory_order_acquire) - 1;  // force a pass
     for (int b = 0; b < kNumBands; ++b) designedDb_[b] = 1000.f;  // force every band
-    preampDirty_ = true;
-    preampAgeFrames_ = sampleRate;  // recompute at once
     updateControls();
     for (auto& band : bands_) {
         band.current = band.target;
@@ -418,7 +478,14 @@ void MobileEqEngine::reset() {
     std::memset(bandState_, 0, sizeof(bandState_));
     subBassState_[0] = subBassState_[1] = 0.0;
     subBassEnvelope_ = 0.f;
+    sibilanceState_[0] = sibilanceState_[1] = 0.0;
+    sibilanceEnvelope_ = 0.f;
     duckDb_ = 0.f;
+    harshDuckDb_ = 0.f;
+    // A seek keeps what Auto has learned of the music; only the filters restart.
+    std::memset(analysisState_, 0, sizeof(analysisState_));
+    std::fill(blockPower_, blockPower_ + kNumBands, 0.0);
+    blockFrames_ = 0;
     bassDuckDb_.store(0.f, std::memory_order_relaxed);
     highPass_.current = highPass_.target;
     highPass_.settling = false;
@@ -457,122 +524,159 @@ void MobileEqEngine::designHighPassForDevice() {
     ceiling_ = dbToLinear(ceilingDb());
 }
 
-void MobileEqEngine::recomputePreamp(const float* gainsDb) {
-    // The loudest point of the whole curve, not the loudest slider: two
-    // neighbouring bands at +8 dB add up to more than +8 dB between them.
-    const double top = std::min<double>(kMaxBarHz, sampleRate_ * 0.45);
-    Biquad bands[kNumBands];
-    for (int b = 0; b < kNumBands; ++b) bands[b] = designBand(b, sampleRate_, gainsDb[b]);
-    double peakDb = -1000.0;
-    auto evaluate = [&](double frequency) {
-        double db = 0.0;
-        for (int b = 0; b < kNumBands; ++b) {
-            db += 20.0 * std::log10(std::max(1e-9, magnitudeAt(bands[b], sampleRate_, frequency)));
-        }
-        peakDb = std::max(peakDb, db);
-    };
-    for (int i = 0; i < kPreampGridPoints; ++i) {
-        evaluate(kMinBarHz * std::pow(top / kMinBarHz, static_cast<double>(i) / (kPreampGridPoints - 1)));
+void MobileEqEngine::targetCurveDb(OutputDevice device, float* out) {
+    // Headphones, wired, Bluetooth and DACs: a warm Harman/pink -4.5 dB per
+    // octave. The phone speaker: the same tilt, centred on the midrange it can
+    // actually play, with no sub-bass expected.
+    static constexpr float kSpeakerMidBoost[kNumBands] = {-12.f, -6.f, 0.f, 1.f, 2.f, 3.f, 3.f, 2.f, 0.f, 0.f};
+    double total = 0.0;
+    for (int b = 0; b < kNumBands; ++b) {
+        out[b] = -4.5f * static_cast<float>(b);
+        if (device == OutputDevice::kPhoneSpeaker) out[b] += kSpeakerMidBoost[b];
+        total += std::pow(10.0, out[b] / 10.0);
     }
-    for (int b = 0; b < kNumBands; ++b) evaluate(std::min<double>(kBandFrequencies[b], top));
+    // Relative to the broadband level, as the measurement is.
+    const auto norm = static_cast<float>(10.0 * std::log10(total));
+    for (int b = 0; b < kNumBands; ++b) out[b] -= norm;
+}
 
-    const float compensation = -kPreampCompensation * static_cast<float>(std::max(0.0, peakDb));
-    float user = userPreampDb_.load(std::memory_order_relaxed);
-    if (!std::isfinite(user)) user = 0.f;
-    user = std::clamp(user, kMinUserPreampDb, kMaxUserPreampDb);
-    float level = levelGainDb_.load(std::memory_order_relaxed);
-    level = std::isfinite(level) ? std::clamp(level, kMinLevelGainDb, kMaxLevelGainDb) : 0.f;
-    const float total = compensation + devicePadDb_ + user + level;
-    targetPreampDb_.store(total, std::memory_order_relaxed);
-    preampTargetLinear_ = dbToLinear(total);
-    std::copy(gainsDb, gainsDb + kNumBands, preampSourceDb_);
-    preampDirty_ = false;
-    preampAgeFrames_ = 0;
+void MobileEqEngine::autoOffsetTargetDb(OutputDevice device, const double* bandPower, float* out) {
+    float target[kNumBands];
+    targetCurveDb(device, target);
+    double total = 0.0;
+    for (int b = 0; b < kNumBands; ++b) total += sanitizeDouble(bandPower[b]);
+    if (!(total > kEpsilon) || !std::isfinite(total)) {
+        std::fill(out, out + kNumBands, 0.f);
+        return;
+    }
+    for (int b = 0; b < kNumBands; ++b) {
+        const float relative = bandPower[b] > 0.0 ? powerDb(bandPower[b]) - powerDb(total) : -200.f;
+        const float diff = relative - target[b];  // > 0: more than the target, < 0: less
+        float offset = -kAutoStrength * diff;
+        switch (kAutoRule[b]) {
+            case AutoRule::kBoost:
+                // Lift what is thin, never what isn't there at all (an MP3's
+                // cut-off top, or noise), and never sub-bass on the phone speaker.
+                if (diff < -kAbsentBelowTargetDb ||
+                    (device == OutputDevice::kPhoneSpeaker && b < 2)) {
+                    offset = 0.f;
+                }
+                offset = std::clamp(offset, 0.f, kMaxAutoBoostDb);
+                break;
+            case AutoRule::kCut: offset = std::clamp(offset, -kMaxAutoCutDb, 0.f); break;
+            case AutoRule::kHold: offset = 0.f; break;
+        }
+        out[b] = offset;
+    }
 }
 
 void MobileEqEngine::updateControls() {
     const uint32_t generation = controlGeneration_.load(std::memory_order_acquire);
-    if (generation != seenControlGeneration_) {
-        seenControlGeneration_ = generation;
-        preampDirty_ = true;  // the user preamp may have moved
-    }
+    if (generation != seenControlGeneration_) seenControlGeneration_ = generation;
 
     const auto device = static_cast<OutputDevice>(device_.load(std::memory_order_acquire));
     if (device != activeDevice_) {
         activeDevice_ = device;
         designHighPassForDevice();
-        preampDirty_ = true;
     }
 
     const bool eqOn = eqEnabled_.load(std::memory_order_relaxed);
     const bool autoOn = eqOn && autoMode_.load(std::memory_order_relaxed);
 
-    float desired[kNumBands];
-    if (autoOn) {
-        const uint32_t autoGeneration = autoGeneration_.load(std::memory_order_acquire);
-        if (autoGeneration != seenAutoGeneration_ || !autoWasOn_) {
-            // Morph from whatever is heard right now to the new curve.
+    // Stage 2a: the slow tonal envelope (about 1.2 s), frozen below -42 dBFS
+    // so silence and quiet intros never teach it anything.
+    if (blockFrames_ > 0) {
+        broadbandPower_ = sanitizeFloat(broadbandPower_);
+        const float gateDb = powerDb(broadbandPower_);
+        frozen_ = gateDb < kFreezeBelowDbfs;
+        if (!frozen_) {
             for (int b = 0; b < kNumBands; ++b) {
-                autoFromDb_[b] = autoWasOn_ ? autoNowDb_[b]
-                                            : clampGainDb(userGainDb_[b].load(std::memory_order_relaxed));
-                autoToDb_[b] = clampGainDb(autoTargetDb_[b].load(std::memory_order_relaxed));
+                const double mean = sanitizeDouble(blockPower_[b] / std::max(1, blockFrames_));
+                tonalPower_[b] = sanitizeDouble(tonalPower_[b] + (mean - tonalPower_[b]) * tonalAlpha_);
             }
-            autoRampPos_ = 0;
-            seenAutoGeneration_ = autoGeneration;
+            tonalWarm_ = true;
         }
-        const float t = std::min(1.f, static_cast<float>(autoRampPos_) / static_cast<float>(autoRampFrames_));
-        // Smoothstep: no corner at either end of the 400 ms morph.
-        const float eased = t * t * (3.f - 2.f * t);
-        for (int b = 0; b < kNumBands; ++b) {
-            autoNowDb_[b] = autoFromDb_[b] + (autoToDb_[b] - autoFromDb_[b]) * eased;
-            desired[b] = autoNowDb_[b];
-        }
-        if (autoRampPos_ < autoRampFrames_) autoRampPos_ += kBlock;
-    } else {
-        for (int b = 0; b < kNumBands; ++b) {
-            desired[b] = eqOn ? clampGainDb(userGainDb_[b].load(std::memory_order_relaxed)) : 0.f;
-        }
+        std::fill(blockPower_, blockPower_ + kNumBands, 0.0);
+        blockFrames_ = 0;
     }
-    autoWasOn_ = autoOn;
 
-    // Stage 3: dynamic bass. When the track already carries sub-bass peaks
-    // above -6 dBFS, take back up to 4 dB of the 31/62 Hz boost while they hit.
-    float duckTarget = 0.f;
-    if (autoOn) {
-        const float envelopeDb = 20.f * std::log10(subBassEnvelope_ + 1e-9f);
-        duckTarget = std::clamp((envelopeDb - kDuckThresholdDb) / kDuckRangeDb, 0.f, 1.f) * kMaxDuckDb;
+    // Stage 2b: the live offsets glide towards what the measured balance asks for.
+    float offsetTarget[kNumBands] = {};
+    if (autoOn && tonalWarm_) autoOffsetTargetDb(activeDevice_, tonalPower_, offsetTarget);
+    if (!(autoOn && frozen_)) {
+        for (int b = 0; b < kNumBands; ++b) {
+            liveOffsetDb_[b] = sanitizeFloat(liveOffsetDb_[b] + (sanitizeFloat(offsetTarget[b]) - liveOffsetDb_[b]) * offsetAlpha_);
+        }
     }
-    if (duckTarget > duckDb_) {
-        duckDb_ = duckTarget;  // fast: the coefficient smoothing (8 ms) shapes the attack
-    } else {
-        const float release = smoothingAlpha(kDuckReleaseSeconds, static_cast<double>(sampleRate_) / kBlock);
-        duckDb_ += (duckTarget - duckDb_) * release;
-    }
-    bassDuckDb_.store(duckDb_, std::memory_order_relaxed);
 
+    float desired[kNumBands];
     for (int b = 0; b < kNumBands; ++b) {
-        float effective = desired[b];
-        if (b < 2) effective -= std::min(duckDb_, std::max(0.f, effective));
-        if (std::fabs(effective - designedDb_[b]) > 0.005f) {
-            bands_[b].target = designBand(b, sampleRate_, effective);
-            bands_[b].settling = true;
-            designedDb_[b] = effective;
-        }
+        const float user = clampGainDb(userGainDb_[b].load(std::memory_order_relaxed));
+        desired[b] = eqOn ? clampGainDb(user + liveOffsetDb_[b]) : 0.f;
     }
 
-    // The preamp follows the curve without the ducking, which only ever lowers it.
-    if (!preampDirty_) {
-        for (int b = 0; b < kNumBands; ++b) {
-            if (std::fabs(desired[b] - preampSourceDb_[b]) > 0.005f) {
-                preampDirty_ = true;
-                break;
-            }
+    // Stage 2c: the fast transient envelopes. Sub-bass peaks above -5 dBFS
+    // pull the 31/62 Hz boost back during the kick; sibilance pulls the 4/8 kHz
+    // boost back. Both only ever reduce a boost, by at most 4 dB.
+    auto duckFor = [](float envelope, float thresholdDb) {
+        const float levelDb = 20.f * std::log10(std::max(sanitizeFloat(envelope), 1e-9f));
+        return std::clamp((levelDb - thresholdDb) / kDuckRangeDb, 0.f, 1.f) * kMaxDuckDb;
+    };
+    subBassEnvelope_ = sanitizeFloat(subBassEnvelope_);
+    sibilanceEnvelope_ = sanitizeFloat(sibilanceEnvelope_);
+    const float bassTarget = eqOn ? duckFor(subBassEnvelope_, kDuckThresholdDb) : 0.f;
+    const float harshTarget = eqOn ? duckFor(sibilanceEnvelope_, kHarshThresholdDb) : 0.f;
+    // Fast in (the 8 ms coefficient smoothing shapes the attack), 120 ms out.
+    duckDb_ = bassTarget > duckDb_ ? bassTarget : duckDb_ + (bassTarget - duckDb_) * duckRelease_;
+    harshDuckDb_ = harshTarget > harshDuckDb_ ? harshTarget
+                                              : harshDuckDb_ + (harshTarget - harshDuckDb_) * duckRelease_;
+    bassDuckDb_.store(duckDb_, std::memory_order_relaxed);
+    harshDuckOutDb_.store(harshDuckDb_, std::memory_order_relaxed);
+
+    float effective[kNumBands];
+    for (int b = 0; b < kNumBands; ++b) {
+        float gain = desired[b];
+        if (b < 2) gain -= std::min(duckDb_, std::max(0.f, gain));
+        if (b == 7 || b == 8) gain -= std::min(harshDuckDb_, std::max(0.f, gain));
+        effective[b] = gain;
+        if (std::fabs(gain - designedDb_[b]) > 0.005f) {
+            bands_[b].target = designBand(b, sampleRate_, gain);
+            bands_[b].settling = true;
+            designedDb_[b] = gain;
+            designedPower_[b] = std::pow(10.f, gain / 10.f);
         }
+        effectiveOutDb_[b].store(gain, std::memory_order_relaxed);
+        offsetOutDb_[b].store(liveOffsetDb_[b], std::memory_order_relaxed);
     }
-    if (preampDirty_ && preampAgeFrames_ >= static_cast<long>(kPreampRecomputeSeconds * sampleRate_)) {
-        recomputePreamp(desired);
+    frozenOut_.store(frozen_, std::memory_order_relaxed);
+
+    // Stage 1: the live frequency-weighted preamp. The headroom the curve
+    // needs is the boost weighted by the energy each band carries right now:
+    // +10 dB at 62 Hz costs 10 dB of preamp on a bass line and almost nothing
+    // on a voice. Taken fast, given back slowly.
+    float needDb = 0.f;
+    if (eqOn) {
+        double in = 0.0;
+        double out = 0.0;
+        for (int b = 0; b < kNumBands; ++b) {
+            bandEnergy_[b] = sanitizeDouble(bandEnergy_[b]);
+            const double energy = bandEnergy_[b] + kEpsilon;
+            in += energy;
+            out += energy * designedPower_[b];
+        }
+        needDb = std::max(0.f, sanitizeFloat(powerDb(out) - powerDb(in)));
     }
-    preampAgeFrames_ += kBlock;
+    autoHeadroomDb_ = sanitizeFloat(
+        autoHeadroomDb_ + (needDb - autoHeadroomDb_) * (needDb > autoHeadroomDb_ ? preampAttack_ : preampRelease_));
+    float user = userPreampDb_.load(std::memory_order_relaxed);
+    user = std::isfinite(user) ? std::clamp(user, kMinUserPreampDb, kMaxUserPreampDb) : 0.f;
+    float level = levelGainDb_.load(std::memory_order_relaxed);
+    level = std::isfinite(level) ? std::clamp(level, kMinLevelGainDb, kMaxLevelGainDb) : 0.f;
+    const float total = -autoHeadroomDb_ + devicePadDb_ + user + level;
+    targetPreampDb_.store(total, std::memory_order_relaxed);
+    liveAutoPreampOutDb_.store(-autoHeadroomDb_ + devicePadDb_ + user, std::memory_order_relaxed);
+    preampTargetLinear_ = dbToLinear(total);
+    (void)effective;
 }
 
 float MobileEqEngine::limitFrame(float* frame, float* out) {
@@ -647,6 +751,21 @@ int MobileEqEngine::processBlock(float* io, int frames) {
 
         const float* in = io + static_cast<size_t>(i) * channels;
         double mono = 0.0;
+        // Stage 2: the live analysis bank hears the music as it comes in,
+        // before the high-pass and the EQ, one octave band-pass per EQ band.
+        double raw = 0.0;
+        for (int c = 0; c < channels; ++c) raw += in[c];
+        raw /= channels;
+        for (int b = 0; b < kNumBands; ++b) {
+            const double y = runBiquad(analysisFilter_[b], analysisState_[b], raw);
+            const double power = y * y;
+            blockPower_[b] += power;
+            bandEnergy_[b] += (power - bandEnergy_[b]) * bandEnergyAlpha_;
+        }
+        broadbandPower_ += (static_cast<float>(raw * raw) - broadbandPower_) * gateAlpha_;
+        ++blockFrames_;
+        const auto sibilance = static_cast<float>(std::fabs(runBiquad(sibilanceBandPass_, sibilanceState_, raw)));
+        sibilanceEnvelope_ += (sibilance - sibilanceEnvelope_) * (sibilance > sibilanceEnvelope_ ? envAttack_ : envRelease_);
         for (int c = 0; c < channels; ++c) {
             double y = runBiquad(highPass_.current, hpState_[c], in[c]);
             mono += y;
@@ -688,7 +807,61 @@ int MobileEqEngine::processBlock(float* io, int frames) {
         highPass_.current = highPass_.target;
         highPass_.settling = false;
     }
+
+    // Self-heal. Input is sanitized, so this should never fire; if anything
+    // non-finite reached the filters, the output or the limiter anyway, zero
+    // the state now and keep playing rather than stay silent until a seek.
+    bool healthy = std::isfinite(releaseGain_) && std::isfinite(boxSum_) && std::isfinite(preampLinear_);
+    double state = 0.0;
+    for (int c = 0; c < channels; ++c) state += hpState_[c][0] + hpState_[c][1];
+    for (int b = 0; b < kNumBands; ++b) {
+        for (int c = 0; c < channels; ++c) state += bandState_[b][c][0] + bandState_[b][c][1];
+        state += analysisState_[b][0] + analysisState_[b][1];
+    }
+    healthy = healthy && std::isfinite(state);
+    for (int s = 0; healthy && s < written * channels; ++s) healthy = std::isfinite(io[s]);
+    if (!healthy) {
+        healState();
+        std::fill(io, io + static_cast<size_t>(written) * channels, 0.f);
+    }
     return written;
+}
+
+void MobileEqEngine::healState() {
+    healCount_.fetch_add(1, std::memory_order_relaxed);
+    std::memset(hpState_, 0, sizeof(hpState_));
+    std::memset(bandState_, 0, sizeof(bandState_));
+    std::memset(analysisState_, 0, sizeof(analysisState_));
+    subBassState_[0] = subBassState_[1] = 0.0;
+    sibilanceState_[0] = sibilanceState_[1] = 0.0;
+    subBassEnvelope_ = 0.f;
+    sibilanceEnvelope_ = 0.f;
+    for (int b = 0; b < kNumBands; ++b) {
+        bandEnergy_[b] = sanitizeDouble(bandEnergy_[b]);
+        tonalPower_[b] = sanitizeDouble(tonalPower_[b]);
+        liveOffsetDb_[b] = sanitizeFloat(liveOffsetDb_[b]);
+    }
+    broadbandPower_ = sanitizeFloat(broadbandPower_);
+    autoHeadroomDb_ = sanitizeFloat(autoHeadroomDb_);
+    duckDb_ = 0.f;
+    harshDuckDb_ = 0.f;
+    // The coefficients themselves: back to their targets, settled.
+    highPass_.current = highPass_.target;
+    highPass_.settling = false;
+    for (auto& band : bands_) {
+        band.current = band.target;
+        band.settling = false;
+    }
+    if (!std::isfinite(preampLinear_)) preampLinear_ = 1.f;
+    if (!std::isfinite(preampTargetLinear_)) preampTargetLinear_ = 1.f;
+    // The limiter: its delay line and gain, without touching the frame
+    // count, so the output stays sample-aligned with the input.
+    std::fill(delay_, delay_ + lookahead_ * kMaxChannels, 0.f);
+    minCount_ = 0;
+    minHead_ = 0;
+    std::fill(box_, box_ + lookahead_, 1.f);
+    boxSum_ = static_cast<double>(lookahead_);
+    releaseGain_ = 1.f;
 }
 
 void MobileEqEngine::pushAnalyzer(const float* io, int frames) {
@@ -715,13 +888,27 @@ int MobileEqEngine::process(const void* input, SampleFormat format, int frames, 
     // even in place, as a float never takes less room than its source sample.
     const auto* src = static_cast<const uint8_t*>(input);
     const size_t samples = static_cast<size_t>(frames) * channels;
-    if (!(format == SampleFormat::kFloat && static_cast<const void*>(output) == input)) {
-        for (size_t s = 0; s < samples; ++s) output[s] = readSample(src + s * sampleBytes, format);
-    } else {
+    uint32_t repaired = 0;
+    if (format == SampleFormat::kFloat) {
+        // Float input is the one that can carry NaN, infinity or absurd values: bound it.
+        const bool inPlace = static_cast<const void*>(output) == input;
         for (size_t s = 0; s < samples; ++s) {
-            if (!std::isfinite(output[s])) output[s] = 0.f;
+            float v;
+            if (inPlace) {
+                v = output[s];
+            } else {
+                std::memcpy(&v, src + s * sampleBytes, 4);
+            }
+            if (!std::isfinite(v) || std::fabs(v) > kInputLimit) {
+                ++repaired;
+                v = std::isfinite(v) ? std::clamp(v, -kInputLimit, kInputLimit) : 0.f;
+            }
+            output[s] = v;
         }
+    } else {
+        for (size_t s = 0; s < samples; ++s) output[s] = readSample(src + s * sampleBytes, format);
     }
+    if (repaired > 0) sanitizedSamples_.fetch_add(repaired, std::memory_order_relaxed);
 
     int produced = 0;
     for (int start = 0; start < frames; start += kBlock) {
@@ -789,11 +976,6 @@ void MobileEqEngine::setAutoMode(bool enabled) {
     controlGeneration_.fetch_add(1, std::memory_order_release);
 }
 
-void MobileEqEngine::setAutoTargetGainsDb(const float* gainsDb) {
-    for (int b = 0; b < kNumBands; ++b) autoTargetDb_[b].store(clampGainDb(gainsDb[b]), std::memory_order_relaxed);
-    autoGeneration_.fetch_add(1, std::memory_order_release);
-}
-
 void MobileEqEngine::setUserPreampDb(float preampDb) {
     userPreampDb_.store(std::isfinite(preampDb) ? preampDb : 0.f, std::memory_order_relaxed);
     controlGeneration_.fetch_add(1, std::memory_order_release);
@@ -804,7 +986,7 @@ void MobileEqEngine::setLevelGainDb(float gainDb) {
     controlGeneration_.fetch_add(1, std::memory_order_release);
 }
 
-void MobileEqEngine::setOutputDevice(OutputDevice device) {
+void MobileEqEngine::setOutputDeviceType(OutputDevice device) {
     device_.store(static_cast<int32_t>(device), std::memory_order_release);
 }
 
@@ -836,6 +1018,27 @@ void MobileEqEngine::rebuildBarMap(int sampleRate, int bars) {
     }
     mappedSampleRate_ = sampleRate;
     mappedBars_ = bars;
+}
+
+float MobileEqEngine::pollDspTelemetry(float* gains, float* bars, float* peaks, int capacity) {
+    return pollDspTelemetryAt(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count(),
+        gains, bars, peaks, capacity);
+}
+
+float MobileEqEngine::pollDspTelemetryAt(int64_t now, float* gains, float* bars, float* peaks, int capacity) {
+    if (gains != nullptr) effectiveGainsDb(gains);
+    if (bars != nullptr || peaks != nullptr) pollSpectrumAt(now, bars, peaks, capacity);
+    return liveAutoPreampOutDb_.load(std::memory_order_relaxed);
+}
+
+void MobileEqEngine::effectiveGainsDb(float* out) const {
+    for (int b = 0; b < kNumBands; ++b) out[b] = effectiveOutDb_[b].load(std::memory_order_relaxed);
+}
+
+void MobileEqEngine::liveAutoOffsetsDb(float* out) const {
+    for (int b = 0; b < kNumBands; ++b) out[b] = offsetOutDb_[b].load(std::memory_order_relaxed);
 }
 
 int MobileEqEngine::pollSpectrum(float* bars, float* peaks, int capacity) {
@@ -917,7 +1120,7 @@ int MobileEqEngine::pollSpectrumAt(int64_t now, float* bars, float* peaks, int c
             const float frac = position - k;
             binPower = power(k) * (1.f - frac) + power(k + 1) * frac;
         }
-        const float db = 10.f * std::log10(binPower + 1e-20f) + normalisationDb;
+        const float db = powerDb(binPower) + normalisationDb;
         // Nothing new for a while (paused): let the bars fall rather than freeze.
         const float target = silent ? 0.f : std::clamp((db - kFloorDb) / -kFloorDb, 0.f, 1.f);
 

@@ -1,25 +1,31 @@
-// MobileEqEngine: Harmony's 10-band equalizer, output protection and spectrum
-// analyzer, in one real-time-safe C++ object.
+// MobileEqEngine: Harmony's 10-band equalizer, live spectral Auto, output
+// protection and spectrum analyzer, in one real-time-safe C++ object. Every
+// stage reacts to what the music sounds like right now; nothing reads tags.
 //
 // Signal path, per frame, in 32-bit float:
 //
-//   input ─▶ [1] device high-pass ─▶ auto-preamp ─▶ [2] 10 biquads ─▶
-//         ─▶ [4] soft-knee saturator ─▶ lookahead limiter ─▶ output
-//                 │                                            │
-//                 └─▶ [3] sub-bass envelope (Auto ducking)      └─▶ analyzer ring
+//   input ─┬─▶ [1] device high-pass ─▶ live preamp ─▶ [3] 10 biquads ─▶
+//          │     ─▶ [4] soft-knee saturator ─▶ lookahead limiter ─▶ output ─▶ analyzer ring (FFT)
+//          │                  ▲                       ▲
+//          └─▶ [2] live analysis bank (10 octave band-passes)
+//                ├─ fast band energy (50 ms)   ─▶ the frequency-weighted preamp
+//                ├─ slow tonal envelope (1.2 s) ─▶ Auto's live offsets (±4.5 dB vs the output's target curve)
+//                ├─ broadband RMS (100 ms)      ─▶ freeze below -42 dBFS
+//                └─ sub-bass / sibilance (8 ms / 120 ms) ─▶ bass and harshness tamer
 //
 // Threads:
 //  - One audio thread calls configure(), reset(), process*() and drain().
 //    Those calls never allocate, lock or make system calls.
 //  - Any thread may call the set*() controls. They only store atomics; the
 //    audio thread picks them up at the start of its next 32-frame block.
-//  - One UI thread calls pollSpectrum(). The audio thread hands it samples
-//    through a lock-free single-producer/single-consumer ring and never waits
-//    for it; the FFT and the bar ballistics run on the polling thread.
+//  - One UI thread calls pollDspTelemetry() at 60 fps. The audio thread hands
+//    it samples through a lock-free single-producer/single-consumer ring and
+//    never waits for it; the FFT and the bar ballistics run on the polling thread.
 
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -175,44 +181,90 @@ public:
     void setBandGainsDb(const float* gainsDb);  // kNumBands values
     /** EQ on (the sliders apply) or off (flat); the protection stages stay on either way. */
     void setEqEnabled(bool enabled);
-    /** Winamp-style Auto: the curve follows [setAutoTargetGainsDb] and the sub-bass ducks on kicks. */
+    /**
+     * Auto: live spectral auto-calibration. The analysis bank measures the
+     * music's balance (slow envelope, about 1.2 s) against the output's
+     * target curve and the live offsets lift thin sub-bass and air and take
+     * out mud and harshness, within ±4.5 dB, on top of the sliders.
+     */
     void setAutoMode(bool enabled);
-    /** The curve Auto morphs to, over 400 ms (call it when the track changes). */
-    void setAutoTargetGainsDb(const float* gainsDb);
-    /** Extra user preamp, on top of the automatic compensation. */
+    /** Extra user preamp, on top of the live automatic headroom, -24..+12 dB. */
     void setUserPreampDb(float preampDb);
     /**
      * Loudness levelling (ReplayGain), -30..+15 dB, on top of the preamps. It
      * runs even with the EQ off; the limiter catches what a lift pushes over.
      */
     void setLevelGainDb(float gainDb);
-    void setOutputDevice(OutputDevice device);
+    /** The output: switches the high-pass, the limiter ceiling and Auto's target curve. */
+    void setOutputDeviceType(OutputDevice device);
     /** Stops feeding the analyzer (saves the copy while nothing is on screen). */
     void setAnalyzerEnabled(bool enabled);
     /** 8 to 64 logarithmic bars from 20 Hz to 20 kHz. */
     void setSpectrumBarCount(int bars);
 
-    // ---- Spectrum (one polling thread) ------------------------------------------------
+    // ---- Telemetry and spectrum (one polling thread, 60 fps) -------------------------
 
     /**
-     * Runs a Hann-windowed 2048-point FFT over the newest audio and writes
-     * 0..1 bar heights to [bars] and peak-hold dots to [peaks] (either may be
-     * null), with attack/decay ballistics already applied. Returns the number
-     * of bars written (at most [capacity]). Never blocks the audio thread.
+     * One snapshot for a 60 fps UI: the effective band gains (sliders plus the
+     * live Auto offsets, ducking included) into [effectiveGainsDb] (kNumBands),
+     * and the Hann-windowed 2048-point FFT as 0..1 bars and peak-hold dots into
+     * [bars] and [peaks] (any may be null; at most [capacity] bars). Returns the
+     * live automatic preamp in dB (headroom, Bluetooth pad and user preamp).
+     * Never blocks the audio thread.
+     */
+    float pollDspTelemetry(float* effectiveGainsDb, float* bars, float* peaks, int capacity);
+    float pollDspTelemetryAt(int64_t nowNanos, float* effectiveGainsDb, float* bars, float* peaks, int capacity);
+
+    /**
+     * The FFT part of pollDspTelemetry: 0..1 bar heights to [bars] and
+     * peak-hold dots to [peaks] (either may be null), ballistics applied.
+     * Returns the number of bars written (at most [capacity]).
      */
     int pollSpectrum(float* bars, float* peaks, int capacity);
 
     /** pollSpectrum() at a given steady-clock time, in nanoseconds (for tests). */
     int pollSpectrumAt(int64_t nowNanos, float* bars, float* peaks, int capacity);
 
+    /** How many bars the spectrum has (setSpectrumBarCount). */
+    int spectrumBarCount() const { return barCount_.load(std::memory_order_relaxed); }
+    /** The effective gain of each band right now, dB. */
+    void effectiveGainsDb(float* out) const;
+    /** Auto's live offset for each band right now, dB (±4.5). */
+    void liveAutoOffsetsDb(float* out) const;
+
     // ---- Introspection (tests, diagnostics) -----------------------------------------------
 
-    /** The automatic preamp the engine is converging on, in dB (negative). */
+    /** The whole preamp the engine is converging on, in dB (live headroom, pad, user, level). */
     float targetPreampDb() const { return targetPreampDb_.load(std::memory_order_relaxed); }
-    /** The current Auto sub-bass ducking, in dB (0..4). */
+    /** The current sub-bass ducking, in dB (0..4). */
     float bassDuckDb() const { return bassDuckDb_.load(std::memory_order_relaxed); }
+    /** The current harshness tamer on 4/8 kHz, in dB (0..4). */
+    float harshDuckDb() const { return harshDuckOutDb_.load(std::memory_order_relaxed); }
+    /** How often the engine has healed itself from non-finite state (diagnostics; should stay 0). */
+    uint32_t healCount() const { return healCount_.load(std::memory_order_relaxed); }
+    /** Input samples that were NaN, infinite or past +24 dBFS and were repaired (diagnostics). */
+    uint32_t sanitizedSamples() const { return sanitizedSamples_.load(std::memory_order_relaxed); }
+    /** Whether the tonal adaptation is frozen (the music is below -42 dBFS). */
+    bool tonalFrozen() const { return frozenOut_.load(std::memory_order_relaxed); }
     /** Ceiling of the limiter for the current device, in dBFS. */
     float ceilingDb() const;
+    /** Auto's target balance for [device], dB per band relative to the broadband level. */
+    static void targetCurveDb(OutputDevice device, float* out);
+    /**
+     * The live offsets Auto aims for, for octave-band powers [bandPower] heard
+     * on [device]: thin sub-bass and air lifted, mud and harshness cut, within
+     * ±4.5 dB. Pure.
+     */
+    static void autoOffsetTargetDb(OutputDevice device, const double* bandPower, float* out);
+
+#ifdef HARMONY_EQ_TESTING
+    /** Tests only: puts NaN into the filter state, as a bug elsewhere might, to exercise the self-heal. */
+    void poisonStateForTest() {
+        bandState_[3][0][0] = NAN;
+        releaseGain_ = INFINITY;
+    }
+#endif
+
     /** Gain (dB) band [band] is currently designed at, ducking included. */
     float designedBandGainDb(int band) const { return designedDb_[band]; }
 
@@ -228,17 +280,15 @@ private:
 
     void updateControls();
     void designHighPassForDevice();
-    void recomputePreamp(const float* gainsDb);
     int processBlock(float* io, int frames);
     float limitFrame(float* frame, float* out);
     void pushAnalyzer(const float* io, int frames);
+    void healState();
     void rebuildBarMap(int sampleRate, int bars);
 
     // Shared controls.
     std::atomic<float> userGainDb_[kNumBands];
-    std::atomic<float> autoTargetDb_[kNumBands];
     std::atomic<uint32_t> controlGeneration_{1};
-    std::atomic<uint32_t> autoGeneration_{0};
     std::atomic<bool> eqEnabled_{true};
     std::atomic<bool> autoMode_{false};
     std::atomic<float> userPreampDb_{0.f};
@@ -249,12 +299,19 @@ private:
     std::atomic<int32_t> analyzerSampleRate_{48000};
     std::atomic<float> targetPreampDb_{0.f};
     std::atomic<float> bassDuckDb_{0.f};
+    // Telemetry out.
+    std::atomic<float> effectiveOutDb_[kNumBands];
+    std::atomic<float> offsetOutDb_[kNumBands];
+    std::atomic<float> liveAutoPreampOutDb_{0.f};
+    std::atomic<float> harshDuckOutDb_{0.f};
+    std::atomic<bool> frozenOut_{true};
+    std::atomic<uint32_t> healCount_{0};
+    std::atomic<uint32_t> sanitizedSamples_{0};
 
     // Audio-thread state.
     int sampleRate_ = 48000;
     int channels_ = 2;
     uint32_t seenControlGeneration_ = 0;
-    uint32_t seenAutoGeneration_ = 0;
     OutputDevice activeDevice_ = OutputDevice::kPhoneSpeaker;
     double coefAlpha_ = 0.0;  // per-sample coefficient smoothing
     float gainAlpha_ = 0.f;   // per-sample preamp smoothing
@@ -264,26 +321,42 @@ private:
     double hpState_[kMaxChannels][2] = {};
     double bandState_[kNumBands][kMaxChannels][2] = {};
     float designedDb_[kNumBands] = {};       // what each band is designed at now
-    float preampSourceDb_[kNumBands] = {};   // what the preamp was computed from
-    long preampAgeFrames_ = 0;
-    bool preampDirty_ = true;
+    float designedPower_[kNumBands] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};  // the same, as power
     float preampLinear_ = 1.f;
     float preampTargetLinear_ = 1.f;
     float devicePadDb_ = 0.f;
 
-    // Auto: 400 ms morph and the sub-bass ducker.
-    float autoFromDb_[kNumBands] = {};
-    float autoToDb_[kNumBands] = {};
-    float autoNowDb_[kNumBands] = {};
-    int autoRampFrames_ = 0;
-    int autoRampPos_ = 0;
-    bool autoWasOn_ = false;
+    // Stage 2: the live analysis bank (one octave band-pass per EQ band, on the input).
+    Biquad analysisFilter_[kNumBands];
+    double analysisState_[kNumBands][2] = {};
+    double blockPower_[kNumBands] = {};   // summed over the current 32-frame block
+    int blockFrames_ = 0;
+    double bandEnergy_[kNumBands] = {};   // ~50 ms, weights the live preamp
+    double tonalPower_[kNumBands] = {};   // ~1.2 s, the slow tonal envelope
+    bool tonalWarm_ = false;
+    float broadbandPower_ = 0.f;          // ~100 ms, the silence gate
+    bool frozen_ = true;
+    float liveOffsetDb_[kNumBands] = {};
+    float bandEnergyAlpha_ = 0.f;
+    float gateAlpha_ = 0.f;
+    double tonalAlpha_ = 0.0;
+    float offsetAlpha_ = 0.f;
+    // Stage 1: live headroom.
+    float autoHeadroomDb_ = 0.f;
+    float preampAttack_ = 0.f;
+    float preampRelease_ = 0.f;
+    // Stage 2c: fast transient envelopes (8 ms attack, 120 ms release).
     Biquad subBassLowPass_;
     double subBassState_[2] = {};
     float subBassEnvelope_ = 0.f;
+    Biquad sibilanceBandPass_;
+    double sibilanceState_[2] = {};
+    float sibilanceEnvelope_ = 0.f;
     float envAttack_ = 0.f;
     float envRelease_ = 0.f;
+    float duckRelease_ = 0.f;
     float duckDb_ = 0.f;
+    float harshDuckDb_ = 0.f;
 
     // Saturator and limiter.
     float saturatorKnee_ = 0.f;

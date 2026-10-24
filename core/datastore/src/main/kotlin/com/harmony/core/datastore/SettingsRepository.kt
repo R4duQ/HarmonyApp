@@ -77,7 +77,6 @@ class SettingsRepository @Inject constructor(
         val EQ_PREAMP_V2 = floatPreferencesKey("eq_preamp_v2")
         val EQ_AUTO = booleanPreferencesKey("eq_auto")
         val EQ_BIT_PERFECT_USB = booleanPreferencesKey("eq_bit_perfect_usb")
-        val EQ_SONG_CURVES = stringPreferencesKey("eq_song_curves_v1") // one "songId<tab>csv" per line, oldest first
         val ENERGY = floatPreferencesKey("energy_slider") // -1 sentinel = off
         val SOULSEEK_FORMAT = stringPreferencesKey("soulseek_format_preference")
         val SMART_SHUFFLE_STYLE = stringPreferencesKey("smart_shuffle_style_v2")
@@ -136,29 +135,6 @@ class SettingsRepository @Inject constructor(
 
     private fun csv(raw: String?): List<Float>? =
         raw?.split(',')?.mapNotNull { it.trim().toFloatOrNull() }?.takeIf { it.size == EqSettings.BAND_COUNT }
-
-    /** The curves Auto saved for single songs (see EqAuto), by song id. */
-    val eqSongCurves: Flow<Map<Long, List<Float>>> = context.store.data.map { decodeSongCurves(it[Keys.EQ_SONG_CURVES]) }
-
-    /** Saves [gains] as [songId]'s own Auto curve; null forgets it. Keeps the newest EqAuto.MAX_SONG_CURVES. */
-    suspend fun setEqSongCurve(songId: Long, gains: List<Float>?) = edit { p ->
-        val all = LinkedHashMap(decodeSongCurves(p[Keys.EQ_SONG_CURVES]))
-        all.remove(songId)
-        if (gains != null) all[songId] = EqSettings.sanitize(gains)
-        while (all.size > EqAuto.MAX_SONG_CURVES) all.remove(all.keys.first())
-        p[Keys.EQ_SONG_CURVES] = all.entries.joinToString("\n") { (id, g) -> "$id\t${g.joinToString(",")}" }
-    }
-
-    private fun decodeSongCurves(raw: String?): Map<Long, List<Float>> {
-        if (raw.isNullOrBlank()) return emptyMap()
-        val out = LinkedHashMap<Long, List<Float>>()
-        for (line in raw.lines()) {
-            val id = line.substringBefore('\t').toLongOrNull() ?: continue
-            val gains = csv(line.substringAfter('\t', "")) ?: continue
-            out[id] = EqSettings.sanitize(gains)
-        }
-        return out
-    }
 
     /** The kind of device the listener picked for each output, keyed by [OutputForms.key]. */
     val outputForms: Flow<Map<String, OutputForm>> = context.store.data.map { decodeForms(it[Keys.OUTPUT_FORMS]) }

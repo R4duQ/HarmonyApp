@@ -5,6 +5,7 @@
 
 #include "MobileEqEngine.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -38,7 +39,7 @@ float dbfs(float linear) { return 20.f * std::log10(std::max(linear, 1e-12f)); }
 
 std::unique_ptr<MobileEqEngine> engineAt(int sampleRate, int channels, OutputDevice device) {
     auto engine = std::make_unique<MobileEqEngine>();
-    engine->setOutputDevice(device);
+    engine->setOutputDeviceType(device);
     CHECK(engine->configure(sampleRate, channels), "configure %d/%d", sampleRate, channels);
     return engine;
 }
@@ -126,28 +127,55 @@ void bandsHitTheirTargets() {
     CHECK(proportionalQ(12.0) > proportionalQ(3.0), "Q grows with gain");
 }
 
-void autoPreampCompensates() {
-    auto engine = engineAt(48000, 2, OutputDevice::kWiredHeadphones);
-    float gains[kNumBands];
+std::vector<float> whiteNoise(int sr, int channels, double seconds, float sigma, unsigned seed) {
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> white(0.f, sigma);
+    const size_t frames = static_cast<size_t>(seconds * sr);
+    std::vector<float> out(frames * channels);
+    for (size_t i = 0; i < frames; ++i) {
+        const float v = white(rng);
+        for (int c = 0; c < channels; ++c) out[i * channels + c] = v;
+    }
+    return out;
+}
+
+void livePreampFollowsTheEnergy() {
+    const int sr = 48000;
+    auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
+    float gains[kNumBands] = {};
+    gains[1] = 10.f;  // +10 dB at 62 Hz
+    engine->setBandGainsDb(gains);
+    // A voice-like 1 kHz line: the bass boost has nothing to lift, so almost no headroom is taken.
+    auto voice = sine(sr, 2, 1000.0, 0.3f, 1.0);
+    run(*engine, voice);
+    CHECK(engine->targetPreampDb() > -1.5f, "preamp on a 1 kHz line: %.2f", engine->targetPreampDb());
+    // A bass line at 62 Hz: now the boost is all there is, and the preamp takes it back fast.
+    auto bass = sine(sr, 2, 62.0, 0.3f, 0.3);
+    run(*engine, bass);
+    CHECK(engine->targetPreampDb() < -8.f, "preamp on a 62 Hz line: %.2f", engine->targetPreampDb());
+    // Back to the voice: given back, slowly but surely.
+    run(*engine, voice);
+    CHECK(engine->targetPreampDb() > -1.5f, "preamp given back: %.2f", engine->targetPreampDb());
+
+    // Everything at +12 dB on broadband noise: about 12 dB taken.
     for (float& g : gains) g = 12.f;
     engine->setBandGainsDb(gains);
-    std::vector<float> nothing(512 * 2, 0.f);
-    run(*engine, nothing);
-    const float preamp = engine->targetPreampDb();
-    CHECK(preamp < -7.5f && preamp > -12.f, "preamp for all +12 dB: %.2f", preamp);
-
-    for (float& g : gains) g = 0.f;
-    gains[5] = 6.f;
-    engine->setBandGainsDb(gains);
-    run(*engine, nothing);
-    CHECK(std::fabs(engine->targetPreampDb() - (-0.65f * 6.f)) < 0.3f, "preamp for +6 dB: %.2f",
+    run(*engine, whiteNoise(sr, 2, 1.0, 0.1f, 3));
+    CHECK(engine->targetPreampDb() < -10.5f && engine->targetPreampDb() > -12.5f, "preamp for all +12 dB: %.2f",
           engine->targetPreampDb());
 
     // Cuts never raise the level.
     for (float& g : gains) g = -12.f;
     engine->setBandGainsDb(gains);
-    run(*engine, nothing);
+    run(*engine, whiteNoise(sr, 2, 1.0, 0.1f, 4));
     CHECK(engine->targetPreampDb() <= 0.f, "preamp for cuts: %.2f", engine->targetPreampDb());
+
+    // What the UI reads: the same preamp, without the ReplayGain level.
+    engine->setLevelGainDb(-6.f);
+    run(*engine, whiteNoise(sr, 2, 0.1, 0.1f, 5));
+    const float telemetry = engine->pollDspTelemetry(nullptr, nullptr, nullptr, 0);
+    CHECK(std::fabs(telemetry - (engine->targetPreampDb() + 6.f)) < 0.05f, "telemetry preamp %.2f vs %.2f",
+          telemetry, engine->targetPreampDb());
 }
 
 void levelGainAddsToThePreamp() {
@@ -237,7 +265,9 @@ void slidersDoNotClick() {
         if (i < out.size() / 2 - 512) baseline = std::max(baseline, d2 / std::max(1e-6f, peakOf(out, out.size() / 4) ));
         if (i > out.size() / 2 - 512) during = std::max(during, d2);
     }
-    const float level = peakOf(out, out.size() * 3 / 4);
+    // The live preamp takes the new headroom back within milliseconds, so the
+    // level moves briefly: bound by the loudest the sine got, not the final one.
+    const float level = peakOf(out, out.size() / 2 - 512);
     // The second difference of a sine of amplitude A at w is A*w^2: allow for the louder level only.
     const float w = static_cast<float>(2.0 * kPi * 1000.0 / sr);
     CHECK(during <= level * w * w * 1.3f, "second difference %.5f vs %.5f expected", during, level * w * w);
@@ -255,52 +285,130 @@ void deviceHighPass() {
     CHECK(std::fabs(bluetooth1k + 0.3f) < 0.05f, "Bluetooth pad: %.3f dB", bluetooth1k);
 }
 
-void autoMorphsOver400ms() {
-    const int sr = 48000;
-    auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
-    float target[kNumBands] = {};
-    target[5] = 6.f;
-    engine->setAutoTargetGainsDb(target);
-    engine->setAutoMode(true);
-    std::vector<float> silence(static_cast<size_t>(sr / 5) * 2, 0.f);  // 200 ms
-    std::vector<float> scratch = silence;
-    engine->process(scratch.data(), SampleFormat::kFloat, sr / 5, scratch.data());
-    const float halfway = engine->designedBandGainDb(5);
-    CHECK(halfway > 2.f && halfway < 4.f, "after 200 ms: %.2f dB", halfway);
-    scratch = silence;
-    engine->process(scratch.data(), SampleFormat::kFloat, sr / 5, scratch.data());
-    scratch = silence;
-    engine->process(scratch.data(), SampleFormat::kFloat, sr / 20, scratch.data());
-    CHECK(std::fabs(engine->designedBandGainDb(5) - 6.f) < 0.01f, "after 450 ms: %.2f dB",
-          engine->designedBandGainDb(5));
+void autoRulesFollowTheTarget() {
+    for (auto device : {OutputDevice::kWiredHeadphones, OutputDevice::kPhoneSpeaker}) {
+        float target[kNumBands];
+        MobileEqEngine::targetCurveDb(device, target);
+        double power[kNumBands];
+        float out[kNumBands];
+        // Music that already sits on the target: nothing to do.
+        for (int b = 0; b < kNumBands; ++b) power[b] = std::pow(10.0, target[b] / 10.0);
+        MobileEqEngine::autoOffsetTargetDb(device, power, out);
+        for (int b = 0; b < kNumBands; ++b) CHECK(std::fabs(out[b]) < 0.05f, "on target, band %d: %.2f", b, out[b]);
+        // Thin sub-bass and air, muddy and harsh: every rule at once.
+        const float shape[kNumBands] = {-8.f, -8.f, 8.f, 8.f, 0.f, 0.f, 8.f, 8.f, -8.f, -8.f};
+        for (int b = 0; b < kNumBands; ++b) power[b] = std::pow(10.0, (target[b] + shape[b]) / 10.0);
+        MobileEqEngine::autoOffsetTargetDb(device, power, out);
+        const bool speaker = device == OutputDevice::kPhoneSpeaker;
+        for (int b : {0, 1}) {
+            if (speaker) CHECK(out[b] == 0.f, "speaker sub-bass never boosted, band %d: %.2f", b, out[b]);
+            else CHECK(out[b] > 2.f && out[b] <= 4.5f, "thin sub-bass lifted, band %d: %.2f", b, out[b]);
+        }
+        for (int b : {8, 9}) CHECK(out[b] > 2.f && out[b] <= 4.5f, "thin air lifted, band %d: %.2f", b, out[b]);
+        for (int b : {2, 3}) CHECK(out[b] < -2.f && out[b] >= -4.5f, "mud cut, band %d: %.2f", b, out[b]);
+        for (int b : {6, 7}) CHECK(out[b] < -2.f && out[b] >= -4.5f, "harshness cut, band %d: %.2f", b, out[b]);
+        for (int b : {4, 5}) CHECK(out[b] == 0.f, "the middle holds, band %d: %.2f", b, out[b]);
+        // The opposite: never cut sub-bass or air, never lift mud or harshness.
+        for (int b = 0; b < kNumBands; ++b) power[b] = std::pow(10.0, (target[b] - shape[b]) / 10.0);
+        MobileEqEngine::autoOffsetTargetDb(device, power, out);
+        for (int b : {0, 1, 8, 9}) CHECK(out[b] >= 0.f, "band %d only ever lifted: %.2f", b, out[b]);
+        for (int b : {2, 3, 6, 7}) CHECK(out[b] <= 0.f, "band %d only ever cut: %.2f", b, out[b]);
+        // A band that isn't there at all (an MP3's cut-off top) is left alone.
+        for (int b = 0; b < kNumBands; ++b) power[b] = std::pow(10.0, target[b] / 10.0);
+        power[9] = 0.0;
+        MobileEqEngine::autoOffsetTargetDb(device, power, out);
+        CHECK(out[9] == 0.f, "absent top not boosted: %.2f", out[9]);
+    }
 }
 
-void autoDucksHeavySubBass() {
+void feed(MobileEqEngine& engine, std::vector<float> audio) {
+    const int channels = engine.channels();
+    const size_t total = audio.size() / channels;
+    for (size_t at = 0; at < total; at += 4800) {
+        const int frames = static_cast<int>(std::min<size_t>(4800, total - at));
+        engine.process(audio.data() + at * channels, SampleFormat::kFloat, frames, audio.data() + at * channels);
+    }
+}
+
+void autoCalibratesLive() {
     const int sr = 48000;
     auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
-    float target[kNumBands] = {};
-    target[0] = 8.f;
-    target[1] = 8.f;
-    engine->setAutoTargetGainsDb(target);
     engine->setAutoMode(true);
-    // Quiet bass first: no ducking.
-    auto quiet = sine(sr, 2, 50.0, 0.1f, 1.0);
-    engine->process(quiet.data(), SampleFormat::kFloat, sr, quiet.data());
+    float gains[kNumBands] = {};
+    gains[5] = 3.f;  // a slider of the listener's: Auto adds to it, never replaces it
+    engine->setBandGainsDb(gains);
+    // White noise, against a -4.5 dB/octave target: thin at the bottom, harsh in the upper mids.
+    feed(*engine, whiteNoise(sr, 2, 6.0, 0.1f, 11));
+    float effective[kNumBands], offsets[kNumBands];
+    float bars[32], peaks[32];
+    const float preamp = engine->pollDspTelemetry(effective, bars, peaks, 32);
+    engine->liveAutoOffsetsDb(offsets);
+    CHECK(!engine->tonalFrozen(), "playing music is not frozen");
+    // 62 Hz is thin and lifted; white noise's 31 Hz octave sits so far under the
+    // target that it counts as absent, and absent bands are never boosted.
+    CHECK(offsets[1] > 2.f && offsets[0] >= 0.f, "sub-bass lifted: %.2f %.2f", offsets[0], offsets[1]);
+    CHECK(offsets[6] < -2.f && offsets[7] < -2.f, "upper mids tamed: %.2f %.2f", offsets[6], offsets[7]);
+    CHECK(offsets[4] == 0.f && offsets[5] == 0.f, "middle holds: %.2f %.2f", offsets[4], offsets[5]);
+    for (int b = 0; b < kNumBands; ++b) {
+        CHECK(offsets[b] >= -4.5f && offsets[b] <= 4.5f, "band %d offset %.2f within ±4.5", b, offsets[b]);
+        CHECK(std::fabs(effective[b] - std::clamp(gains[b] + offsets[b], -12.f, 12.f)) < 0.3f,
+              "band %d effective %.2f = slider %.1f + offset %.2f", b, effective[b], gains[b], offsets[b]);
+    }
+    CHECK(std::isfinite(preamp) && preamp <= 0.f, "live preamp %.2f", preamp);
+
+    // Silence: below -42 dBFS the tonal adaptation freezes and the offsets hold.
+    feed(*engine, whiteNoise(sr, 2, 3.0, 0.001f, 12));  // about -60 dBFS
+    float held[kNumBands];
+    engine->liveAutoOffsetsDb(held);
+    CHECK(engine->tonalFrozen(), "quiet passage freezes the adaptation");
+    for (int b = 0; b < kNumBands; ++b) {
+        CHECK(std::fabs(held[b] - offsets[b]) < 0.05f, "band %d held %.2f (was %.2f)", b, held[b], offsets[b]);
+    }
+
+    // Auto off: the offsets glide back to nothing.
+    engine->setAutoMode(false);
+    feed(*engine, whiteNoise(sr, 2, 6.0, 0.1f, 13));
+    engine->liveAutoOffsetsDb(offsets);
+    for (int b = 0; b < kNumBands; ++b) CHECK(std::fabs(offsets[b]) < 0.05f, "Auto off, band %d: %.2f", b, offsets[b]);
+
+    // On the phone speaker the same music gets no sub-bass boost.
+    auto speaker = engineAt(sr, 2, OutputDevice::kPhoneSpeaker);
+    speaker->setAutoMode(true);
+    feed(*speaker, whiteNoise(sr, 2, 6.0, 0.1f, 11));
+    speaker->liveAutoOffsetsDb(offsets);
+    CHECK(offsets[0] == 0.f && offsets[1] == 0.f, "speaker sub-bass: %.2f %.2f", offsets[0], offsets[1]);
+}
+
+void tamersDuckBassAndHarshness() {
+    const int sr = 48000;
+    auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
+    float gains[kNumBands] = {};
+    gains[0] = 8.f;
+    gains[1] = 8.f;
+    gains[7] = 6.f;
+    gains[8] = 6.f;
+    engine->setBandGainsDb(gains);
+    // Quiet bass: no ducking.
+    feed(*engine, sine(sr, 2, 50.0, 0.1f, 1.0));
     CHECK(engine->bassDuckDb() < 0.01f, "ducking on quiet bass: %.2f", engine->bassDuckDb());
     CHECK(std::fabs(engine->designedBandGainDb(1) - 8.f) < 0.01f, "62 Hz band at %.2f", engine->designedBandGainDb(1));
-    // A heavy 50 Hz line near -1 dBFS: ducks by about 3.3 dB, never more than 4.
-    auto loud = sine(sr, 2, 50.0, 0.9f, 0.5);
-    engine->process(loud.data(), SampleFormat::kFloat, sr / 2, loud.data());
+    // A heavy 50 Hz line near -1 dBFS: the bass boost comes back by up to 4 dB.
+    feed(*engine, sine(sr, 2, 50.0, 0.9f, 0.5));
     const float duck = engine->bassDuckDb();
-    CHECK(duck > 2.5f && duck <= 4.f, "ducking on heavy bass: %.2f", duck);
-    CHECK(std::fabs(engine->designedBandGainDb(0) - (8.f - duck)) < 0.02f, "31 Hz band at %.2f",
-          engine->designedBandGainDb(0));
+    CHECK(duck > 1.5f && duck <= 4.f, "ducking on heavy bass: %.2f", duck);
+    CHECK(std::fabs(engine->designedBandGainDb(0) - (8.f - duck)) < 0.02f, "31 Hz band at %.2f", engine->designedBandGainDb(0));
     CHECK(std::fabs(engine->designedBandGainDb(2)) < 0.01f, "125 Hz untouched: %.2f", engine->designedBandGainDb(2));
-    // Ducking needs Auto.
-    engine->setAutoMode(false);
-    auto again = sine(sr, 2, 50.0, 0.9f, 1.0);
-    engine->process(again.data(), SampleFormat::kFloat, sr, again.data());
-    CHECK(engine->bassDuckDb() < 0.05f, "ducking without Auto: %.2f", engine->bassDuckDb());
+    // Harsh sibilance around 5.6 kHz: the 4/8 kHz boost is tamed; quiet sibilance isn't.
+    feed(*engine, sine(sr, 2, 5657.0, 0.005f, 0.5));
+    CHECK(engine->harshDuckDb() < 0.01f, "tamer on quiet sibilance: %.2f", engine->harshDuckDb());
+    feed(*engine, sine(sr, 2, 5657.0, 0.5f, 0.5));
+    const float harsh = engine->harshDuckDb();
+    CHECK(harsh > 1.5f && harsh <= 4.f, "tamer on harsh sibilance: %.2f", harsh);
+    CHECK(std::fabs(engine->designedBandGainDb(7) - (6.f - harsh)) < 0.02f, "4 kHz band at %.2f", engine->designedBandGainDb(7));
+    CHECK(std::fabs(engine->designedBandGainDb(5)) < 0.01f, "1 kHz untouched: %.2f", engine->designedBandGainDb(5));
+    // The ceiling follows the output: -0.4 dBFS on Bluetooth.
+    auto bluetooth = engineAt(sr, 2, OutputDevice::kBluetoothA2dp);
+    CHECK(std::fabs(bluetooth->ceilingDb() + 0.4f) < 1e-4f, "Bluetooth ceiling %.2f", bluetooth->ceilingDb());
 }
 
 void convertsEveryFormat() {
@@ -348,6 +456,75 @@ void convertsEveryFormat() {
     bool finite = true;
     for (float v : out) finite &= std::isfinite(v);
     CHECK(finite, "NaN/Inf leaked into the output");
+}
+
+void corruptFramesNeverSilencePlayback() {
+    // A corrupt stretch in the middle of a song: NaN, infinities and absurd
+    // values, as a broken decoder frame might deliver. The output must stay
+    // finite and under the ceiling, and the music must come straight back:
+    // no silence that only a seek would end.
+    for (bool inPlace : {true, false}) {
+        const int sr = 48000;
+        auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
+        engine->setAutoMode(true);
+        float gains[kNumBands] = {6, 4, 2, 0, -2, 0, 2, 4, 6, 8};
+        engine->setBandGainsDb(gains);
+        std::vector<float> song = sine(sr, 2, 1000.0, 0.25f, 2.0);
+        const size_t corruptFrom = static_cast<size_t>(sr) * 2 / 2;  // at 0.5 s
+        for (size_t i = corruptFrom; i < corruptFrom + 4800; ++i) {
+            switch (i % 4) {
+                case 0: song[i] = std::nanf(""); break;
+                case 1: song[i] = INFINITY; break;
+                case 2: song[i] = -1e30f; break;
+                default: song[i] = 3e38f; break;
+            }
+        }
+        std::vector<float> out(song.size());
+        const int frames = static_cast<int>(song.size() / 2);
+        int written = 0;
+        for (int start = 0; start < frames; start += 480) {
+            const int count = std::min(480, frames - start);
+            float* in = song.data() + static_cast<size_t>(start) * 2;
+            float* dst = out.data() + static_cast<size_t>(written) * 2;
+            if (inPlace) {
+                const int produced = engine->process(in, SampleFormat::kFloat, count, in);
+                std::memcpy(dst, in, static_cast<size_t>(produced) * 2 * sizeof(float));
+                written += produced;
+            } else {
+                written += engine->process(in, SampleFormat::kFloat, count, dst);
+            }
+        }
+        bool finite = true;
+        for (int i = 0; i < written * 2; ++i) finite &= std::isfinite(out[i]);
+        CHECK(finite, "corrupt frames leaked non-finite output (in place %d)", inPlace);
+        const float ceiling = std::pow(10.f, engine->ceilingDb() / 20.f);
+        CHECK(peakOf(out) <= ceiling * 1.000001f, "corrupt frames broke the ceiling: %.3f", peakOf(out));
+        // The last half second: the sine is back at its level (the limiter and preamp recovered).
+        std::vector<float> tail(out.begin() + static_cast<long>(written * 2 - sr), out.begin() + written * 2);
+        CHECK(peakOf(tail) > 0.1f, "playback stayed quiet after the corrupt frames: %.3f", peakOf(tail));
+        CHECK(engine->sanitizedSamples() >= 4800, "repaired samples counted: %u", engine->sanitizedSamples());
+        CHECK(engine->healCount() == 0, "sanitized input never needs a heal: %u", engine->healCount());
+        float live[kNumBands];
+        engine->effectiveGainsDb(live);
+        for (float g : live) CHECK(std::isfinite(g), "live gains stay finite");
+        CHECK(std::isfinite(engine->targetPreampDb()), "preamp stays finite");
+    }
+}
+
+void selfHealsPoisonedState() {
+    const int sr = 48000;
+    auto engine = engineAt(sr, 2, OutputDevice::kWiredHeadphones);
+    float gains[kNumBands] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
+    engine->setBandGainsDb(gains);
+    run(*engine, sine(sr, 2, 440.0, 0.2f, 0.2));
+    engine->poisonStateForTest();
+    const auto out = run(*engine, sine(sr, 2, 440.0, 0.2f, 1.0));
+    bool finite = true;
+    for (float v : out) finite &= std::isfinite(v);
+    CHECK(finite, "poisoned state leaked into the output");
+    CHECK(engine->healCount() >= 1, "the heal ran: %u", engine->healCount());
+    std::vector<float> tail(out.end() - sr, out.end());
+    CHECK(peakOf(tail) > 0.1f, "sound came back after the heal: %.3f", peakOf(tail));
 }
 
 void sampleRateChangesReconfigure() {
@@ -422,11 +599,13 @@ void analyzerRunsConcurrently() {
         float bars[kMaxBars];
         float peaks[kMaxBars];
         while (!stop.load()) {
-            engine->pollSpectrum(bars, peaks, kMaxBars);
+            float live[kNumBands];
+            engine->pollDspTelemetry(live, bars, peaks, kMaxBars);
             float gains[kNumBands];
             for (float& g : gains) g = static_cast<float>(std::rand() % 25 - 12);
             engine->setBandGainsDb(gains);
-            engine->setOutputDevice(static_cast<OutputDevice>(std::rand() % 4));
+            engine->setOutputDeviceType(static_cast<OutputDevice>(std::rand() % 4));
+            engine->setAutoMode(std::rand() % 2 == 0);
         }
     });
     std::vector<float> block(1024 * 2);
@@ -448,7 +627,6 @@ void fastEnoughFor192k() {
     float gains[kNumBands] = {6, 4, 2, -2, 0, 3, -4, 5, 2, 6};
     engine->setBandGainsDb(gains);
     engine->setAutoMode(true);
-    engine->setAutoTargetGainsDb(gains);
     std::vector<float> block(4096 * 2);
     std::mt19937 random(3);
     std::uniform_real_distribution<float> noise(-0.5f, 0.5f);
@@ -472,15 +650,18 @@ void fastEnoughFor192k() {
 int main() {
     flatResponseIsTransparent();
     bandsHitTheirTargets();
-    autoPreampCompensates();
+    livePreampFollowsTheEnergy();
     levelGainAddsToThePreamp();
     neverClips();
     outputStaysAlignedAndComplete();
     slidersDoNotClick();
     deviceHighPass();
-    autoMorphsOver400ms();
-    autoDucksHeavySubBass();
+    autoRulesFollowTheTarget();
+    autoCalibratesLive();
+    tamersDuckBassAndHarshness();
     convertsEveryFormat();
+    corruptFramesNeverSilencePlayback();
+    selfHealsPoisonedState();
     sampleRateChangesReconfigure();
     spectrumFindsTheTone();
     analyzerRunsConcurrently();

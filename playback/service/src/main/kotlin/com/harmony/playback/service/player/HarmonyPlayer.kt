@@ -15,25 +15,29 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import com.harmony.core.eq.AudioOutputMonitor
 import com.harmony.core.eq.CustomEqAudioProcessor
+import com.harmony.core.eq.EqDebug
 import com.harmony.core.eq.HiResEqAudioSink
 import com.harmony.core.eq.OutputDeviceType
 import com.harmony.core.eq.OutputRoute
 import com.harmony.core.media.artwork.ArtworkCache
 import com.harmony.core.media.artwork.ArtworkProvider
-import com.harmony.core.model.EqAuto
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.Song
 import com.harmony.domain.playback.AudioLevels
 import com.harmony.domain.playback.EqLive
 import com.harmony.domain.playback.EqOutput
-import com.harmony.domain.playback.SpectrumSource
+import com.harmony.domain.playback.DspTelemetrySource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -51,7 +55,7 @@ import kotlinx.coroutines.launch
  *  - The equalizer: the native float engine from core:eq-engine
  *    ([CustomEqAudioProcessor]) running in a [HiResEqAudioSink], so 24-bit and
  *    hi-res files reach it whole. It also carries ReplayGain (as a level gain
- *    ahead of its limiter), Auto (a curve per song, see [EqAuto]), the
+ *    ahead of its limiter), Auto (live spectral auto-calibration, in the engine), the
  *    output-device protection ([AudioOutputMonitor]) and the analyser the
  *    screens poll through [AudioLevels].
  *  - Crossfade: two players taking turns, see [TwinPlayer]. Each has its own
@@ -81,14 +85,17 @@ class HarmonyPlayer(
     private var pitchCorrection: Boolean = true
     private var replayGainMode: ReplayGainMode = ReplayGainMode.OFF
     private var eq = EqSettings()
-    private var songCurves: Map<Long, List<Float>> = emptyMap()
 
-    /** Song metadata for the current queue, keyed by mediaId, for RG and Auto lookups. */
+    /** Song metadata for the current queue, keyed by mediaId, for RG lookup. */
     private val songsById = mutableMapOf<String, Song>()
 
     /** Error-recovery budgets. Touched only on the player's application thread. */
     private var retriesForCurrentItem = 0
     private var failedItemsInARow = 0
+
+    /** 200 ms hops past corrupt frames in the current item, and stall nudges; reset per item. */
+    private var hopsForCurrentItem = 0
+    private var nudgesForCurrentItem = 0
 
     /** Follows the output (speaker, wired, Bluetooth, USB DAC) for the engines. */
     private val outputMonitor: AudioOutputMonitor
@@ -98,17 +105,14 @@ class HarmonyPlayer(
     init {
         engines = listOf(buildEngine(handleAudioFocus = true), buildEngine(handleAudioFocus = false))
         player = TwinPlayer(engines[0].exo, engines[1].exo)
-        player.onActiveChanged = { publishEqStatus() }
 
         for (engine in engines) {
-            // Each player sets its own song's level and Auto curve, the
-            // waiting one too when it loads the next song, so it is ready
-            // before it is heard.
+            // Each player sets its own song's level, the waiting one too when
+            // it loads the next song, so it is ready before it is heard. Auto
+            // needs no telling: it listens to whatever plays, continuously.
             engine.exo.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     engine.equalizer.setLevelGainDb(replayGainDbFor(engine.exo.currentMediaItem))
-                    applyAutoCurve(engine)
-                    if (engine.exo === player.active) publishEqStatus()
                 }
             })
         }
@@ -121,6 +125,8 @@ class HarmonyPlayer(
         outputMonitor.start()
         onRouteChanged(outputMonitor.route.value)
         startAnalyser()
+        startEqStatus()
+        startStallWatchdog()
 
         player.addListener(object : Player.Listener {
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
@@ -133,6 +139,8 @@ class HarmonyPlayer(
                 // item calls prepare() without a transition, so the counter
                 // only resets when we genuinely move on.
                 retriesForCurrentItem = 0
+                hopsForCurrentItem = 0
+                nudgesForCurrentItem = 0
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -154,6 +162,7 @@ class HarmonyPlayer(
             setEqEnabled(false)
         }
         val exo = ExoPlayer.Builder(context, renderersFactory(equalizer))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(context, resilientExtractors()))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -197,6 +206,21 @@ class HarmonyPlayer(
                 "retries=$retriesForCurrentItem failedInARow=$failedItemsInARow",
             error,
         )
+        EqDebug.decoderError(error.errorCodeName, position, error.cause?.message)
+
+        // A corrupt frame in an offline file: hop 200 ms past it and play on,
+        // rather than retry the same spot (which fails again) and lose the
+        // whole song. A few hops per song at most; then the old budget applies.
+        val duration = player.duration
+        if (error.errorCode in CORRUPT_STRETCH_ERRORS && hopsForCurrentItem < MAX_HOPS_PER_ITEM &&
+            (duration == C.TIME_UNSET || position + CORRUPT_HOP_MS < duration)
+        ) {
+            hopsForCurrentItem++
+            EqDebug.decoderSkip(position, position + CORRUPT_HOP_MS)
+            player.seekTo(index, position + CORRUPT_HOP_MS)
+            player.prepare()
+            return
+        }
 
         if (failedItemsInARow >= MAX_FAILED_ITEMS_IN_A_ROW) {
             Log.e(TAG, "Giving up: $failedItemsInARow items failed in a row.")
@@ -233,8 +257,6 @@ class HarmonyPlayer(
         player.playWhenReady = playWhenReady
         player.prepare()
         applyReplayGainForCurrentItem()
-        for (engine in engines) applyAutoCurve(engine)
-        publishEqStatus()
     }
 
     fun addToQueue(song: Song) {
@@ -300,41 +322,24 @@ class HarmonyPlayer(
         eq = settings
         val gains = EqSettings.sanitize(settings.bandGainsDb).toFloatArray()
         for (engine in engines) {
+            // The sliders; with Auto on, the engine adds its live offsets to them.
             engine.equalizer.setBandGains(gains)
             engine.equalizer.setPreampDb(settings.preampDb)
             engine.equalizer.setEqEnabled(settings.enabled)
             engine.equalizer.setAutoMode(settings.enabled && settings.auto)
-            // Auto falls back to the listener's curve, so that one may have moved too.
-            if (settings.auto != before.auto || settings.bandGainsDb != before.bandGainsDb) applyAutoCurve(engine)
         }
         if (settings.bitPerfectUsb != before.bitPerfectUsb) applyBitPerfect()
-        publishEqStatus()
     }
 
-    /** The curves Auto saved for single songs; see [EqAuto]. */
-    fun setEqSongCurves(curves: Map<Long, List<Float>>) {
-        if (curves == songCurves) return
-        songCurves = curves
-        for (engine in engines) applyAutoCurve(engine)
-        publishEqStatus()
-    }
-
-    private fun autoCurveFor(item: MediaItem?) = item?.let {
-        val song = songsById[it.mediaId]
-        val genre = song?.genre ?: it.mediaMetadata.genre?.toString()
-        EqAuto.curveFor(it.mediaId.toLongOrNull(), genre, songCurves, eq.bandGainsDb)
-    }
-
-    /** Hands [engine] the curve for its song; with Auto on it morphs there over 400 ms. */
-    private fun applyAutoCurve(engine: Engine) {
-        val curve = autoCurveFor(engine.exo.currentMediaItem) ?: return
-        engine.equalizer.setAutoTargetGains(curve.gainsDb.toFloatArray())
-    }
-
-    private fun publishEqStatus() {
-        val item = player.active.currentMediaItem
-        val curve = if (eq.enabled && eq.auto) autoCurveFor(item) else null
-        EqLive.update { it.copy(songId = item?.mediaId?.toLongOrNull(), autoCurve = curve) }
+    /** Keeps the screen's hardware badge on the rate the playing engine runs at. */
+    private fun startEqStatus() {
+        scope.launch {
+            while (true) {
+                val rate = activeEngine.equalizer.sampleRate
+                if (rate != EqLive.status.value.sampleRate) EqLive.update { it.copy(sampleRate = rate) }
+                delay(STATUS_EVERY_MS)
+            }
+        }
     }
 
     // -- Output routing and bit-perfect USB -------------------------------------
@@ -380,15 +385,79 @@ class HarmonyPlayer(
     // -- Analyser ----------------------------------------------------------------
 
     /**
-     * Hands the screens the playing engine's analyser. They poll it once per
-     * frame on the main thread (AudioLevels.poll); the engines only feed it
-     * while a screen is watching.
+     * Hands the screens the playing engine's telemetry. They poll it once per
+     * frame on the main thread (AudioLevels.pollTelemetry: effective gains,
+     * FFT and live preamp in one native call); the engines only feed the
+     * analyser while a screen is watching.
      */
     private fun startAnalyser() {
-        AudioLevels.source = SpectrumSource { bars, peaks -> activeEngine.equalizer.pollSpectrum(bars, peaks) }
+        AudioLevels.source = DspTelemetrySource { gains, bars, peaks ->
+            activeEngine.equalizer.pollDspTelemetry(gains, bars, peaks)
+        }
         scope.launch {
             AudioLevels.watchers.collect { count ->
                 for (engine in engines) engine.equalizer.setAnalyzerEnabled(count > 0)
+            }
+        }
+    }
+
+    /**
+     * Extractors that cope with real-world offline files: constant-bitrate
+     * seeking for MP3/AAC/AMR files without a seek table (always, even where
+     * the length is unknown), and index seeking for MP3s whose VBR headers are
+     * missing or wrong, so a seek lands where it should instead of somewhere
+     * the extractor then can't sync from. The MP3 and FLAC extractors already
+     * resync past corrupt frames on their own.
+     */
+    private fun resilientExtractors(): DefaultExtractorsFactory = DefaultExtractorsFactory()
+        .setConstantBitrateSeekingEnabled(true)
+        .setConstantBitrateSeekingAlwaysEnabled(true)
+        .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
+
+    /**
+     * Playback that stands still with no error at all is what a stuck
+     * decoder, extractor or audio path looks like: a position that doesn't
+     * move while the player is supposed to play, until the listener seeks.
+     * Once a second this checks for exactly that and, after a few seconds,
+     * does what the listener would: seeks 200 ms on, which flushes the whole
+     * chain. Never while playback is suppressed (a call, lost focus), paused,
+     * or ended, and only a few times per song.
+     */
+    private fun startStallWatchdog() {
+        scope.launch {
+            var lastPosition = -1L
+            var lastIndex = -1
+            var stillSinceMs = 0L
+            while (true) {
+                delay(WATCHDOG_EVERY_MS)
+                val state = player.playbackState
+                val shouldPlay = player.playWhenReady &&
+                    player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE &&
+                    (state == Player.STATE_READY || state == Player.STATE_BUFFERING) &&
+                    player.mediaItemCount > 0
+                val index = player.currentMediaItemIndex
+                val position = player.currentPosition
+                if (!shouldPlay || index != lastIndex || position != lastPosition) {
+                    lastIndex = index
+                    lastPosition = position
+                    stillSinceMs = 0L
+                    continue
+                }
+                stillSinceMs += WATCHDOG_EVERY_MS
+                if (stillSinceMs < STALL_AFTER_MS || nudgesForCurrentItem >= MAX_NUDGES_PER_ITEM) continue
+                val duration = player.duration
+                val target = position + CORRUPT_HOP_MS
+                if (duration != C.TIME_UNSET && target >= duration) {
+                    if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                } else {
+                    player.seekTo(index, target)
+                }
+                nudgesForCurrentItem++
+                EqDebug.playbackStall(
+                    if (state == Player.STATE_BUFFERING) "buffering" else "ready, not advancing",
+                    position, stillSinceMs, target,
+                )
+                stillSinceMs = 0L
             }
         }
     }
@@ -409,6 +478,9 @@ class HarmonyPlayer(
             // present) before falling back to MediaCodec, for consistent
             // gapless behaviour across OEM codec implementations.
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            // A decoder that fails to start (or dies) hands over to the next one
+            // that can play the format, instead of failing the song.
+            setEnableDecoderFallback(true)
         }
 
     fun release() {
@@ -451,7 +523,6 @@ class HarmonyPlayer(
                 .setArtist(artist)
                 .setAlbumTitle(album)
                 .setAlbumArtist(albumArtist)
-                .setGenre(genre)
                 .setArtworkUri(outOfProcessArtworkUri(this))
                 .setArtworkData(
                     artworkUri?.let { artworkCache.bytes(id, userArtwork = it.endsWith("-user.img")) },
@@ -476,7 +547,20 @@ class HarmonyPlayer(
 
     private companion object {
         const val TAG = "HarmonyPlayback"
+        const val STATUS_EVERY_MS = 500L
         const val MAX_RETRIES_PER_ITEM = 1
+        const val CORRUPT_HOP_MS = 200L
+        const val MAX_HOPS_PER_ITEM = 10
+        const val WATCHDOG_EVERY_MS = 1_000L
+        const val STALL_AFTER_MS = 3_000L
+        const val MAX_NUDGES_PER_ITEM = 5
+
+        /** Errors that mean "this stretch of the file is bad", where hopping past it helps. */
+        val CORRUPT_STRETCH_ERRORS = setOf(
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
+        )
         const val MAX_FAILED_ITEMS_IN_A_ROW = 3
     }
 }

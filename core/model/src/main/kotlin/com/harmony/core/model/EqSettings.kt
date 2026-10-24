@@ -15,8 +15,9 @@ data class EqSettings(
     /** A preamp on top of the engine's automatic headroom, -12..+12 dB. */
     val preampDb: Float = 0f,
     /**
-     * Winamp's AUTO: every song gets its own curve (see [EqAuto]), morphed in
-     * over 400 ms as it starts, and the sub-bass boost backs off on heavy kicks.
+     * AUTO: live spectral auto-calibration. The engine measures the music's
+     * balance as it plays and adds live offsets (±4.5 dB) to [bandGainsDb]:
+     * thin sub-bass and air lifted, mud and harshness cut. Never from tags.
      */
     val auto: Boolean = false,
     /**
@@ -78,79 +79,8 @@ object EqPresets {
     }?.first
 }
 
-/** Where Auto took a song's curve from. */
-enum class EqAutoSource {
-    /** The listener shaped the curve while this song played with Auto on. */
-    SONG,
-
-    /** The preset for the song's genre. */
-    GENRE,
-
-    /** Nothing known about the song: the listener's own curve. */
-    MANUAL,
-}
-
-/** The curve Auto plays a song with, and why. */
-data class EqAutoCurve(
-    val gainsDb: List<Float>,
-    val source: EqAutoSource,
-    /** The preset's name for [EqAutoSource.GENRE]. */
-    val preset: String? = null,
-)
-
-/**
- * Winamp's AUTO button loaded the preset saved for each file. Harmony's does
- * the same, and when nothing was saved, picks the preset for the song's genre:
- *
- *  1. the curve saved for the song (moving a slider while Auto plays it saves one);
- *  2. the genre's preset;
- *  3. the listener's own curve.
- */
+/** Settings migrations for the equalizer. */
 object EqAuto {
-    /** How many songs keep a curve of their own; the oldest go first. */
-    const val MAX_SONG_CURVES = 500
-
-    fun curveFor(
-        songId: Long?,
-        genre: String?,
-        songCurves: Map<Long, List<Float>>,
-        manual: List<Float>,
-    ): EqAutoCurve {
-        songId?.let(songCurves::get)?.let { return EqAutoCurve(EqSettings.sanitize(it), EqAutoSource.SONG) }
-        presetForGenre(genre)?.let { name ->
-            EqPresets.named(name)?.let { return EqAutoCurve(it, EqAutoSource.GENRE, name) }
-        }
-        return EqAutoCurve(EqSettings.sanitize(manual), EqAutoSource.MANUAL)
-    }
-
-    /** The preset for a genre tag ("Alternative Rock", "Hip Hop/Rap", "Electronic; House"...), or null. */
-    fun presetForGenre(genre: String?): String? {
-        val g = genre?.lowercase()?.trim().orEmpty()
-        if (g.isEmpty()) return null
-        return GENRES.firstOrNull { (words, _) -> words.any { it in g } }?.second
-    }
-
-    // Checked in order: the more specific words first ("drum and bass" before "bass",
-    // "hip hop" before "pop", "soft rock" before "rock").
-    private val GENRES: List<Pair<List<String>, String>> = listOf(
-        listOf("spoken", "podcast", "audiobook", "speech", "comedy", "a cappella", "acapella") to "Vocal",
-        listOf("hip hop", "hip-hop", "hiphop", "rap", "trap", "r&b", "rnb", "grime", "drill") to "Hip-Hop",
-        listOf("classical", "orchestra", "symphon", "opera", "baroque", "chamber", "soundtrack", "score") to "Classical",
-        listOf("techno", "trance", "electronic", "electro", "dubstep", "drum and bass", "drum & bass", "dnb", "idm", "synthwave") to "Techno",
-        listOf("reggae", "dub", "dancehall") to "Reggae",
-        listOf("house", "dance", "disco", "edm", "eurodance") to "Dance",
-        listOf("soft rock", "yacht") to "Soft Rock",
-        listOf("rock", "metal", "punk", "grunge", "indie", "alternative", "emo", "hardcore") to "Rock",
-        listOf("ska") to "Ska",
-        listOf("jazz", "blues", "soul", "funk", "swing", "bossa") to "Jazz",
-        listOf("acoustic", "folk", "country", "singer-songwriter", "bluegrass") to "Acoustic",
-        listOf("ambient", "chill", "lounge", "new age", "lo-fi", "lofi", "easy listening") to "Soft",
-        listOf("latin", "reggaeton", "salsa", "party", "manele") to "Party",
-        listOf("live") to "Live",
-        listOf("vocal", "chanson", "gospel", "choir") to "Vocal",
-        listOf("pop") to "Pop",
-    )
-
     /**
      * Turns the old Winamp equalizer's sliders (60 Hz … 16 kHz, ±20 dB) into
      * these bands, so the sound a listener chose before survives the update.

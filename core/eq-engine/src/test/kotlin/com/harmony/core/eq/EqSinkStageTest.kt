@@ -177,4 +177,48 @@ class EqSinkStageTest {
         assertEquals(9_000_000L, sink.timestamps.first().first)
         assertEquals((7000 until 8000).toList(), sink.samples.subList(before, sink.samples.size))
     }
+
+    /** The old CustomEqAudioProcessor's flaw: takes whole frames only, and leaves a partial one behind. */
+    private class WholeFramesOnly : BaseAudioProcessor() {
+        override fun onConfigure(inputAudioFormat: AudioFormat) =
+            AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_FLOAT)
+
+        override fun queueInput(inputBuffer: ByteBuffer) {
+            val frames = inputBuffer.remaining() / inputAudioFormat.bytesPerFrame
+            if (frames == 0) return
+            val out = replaceOutputBuffer(frames * inputAudioFormat.channelCount * 4)
+            repeat(frames * inputAudioFormat.channelCount) { out.putFloat(inputBuffer.short.toFloat()) }
+            out.flip()
+        }
+    }
+
+    @Test
+    fun `a buffer ending mid-frame never freezes playback`() {
+        val sink = FakeSink(Random(7))
+        val stage = EqSinkStage(WholeFramesOnly(), supports = { true }, passthrough = { false }, downstream = sink)
+        val stereo = pcm16(48_000).buildUpon().setChannelCount(2).build()
+        stage.configure(stereo, 0, null)
+        var logged = 0
+        EqDebug.listener = { kind, _ -> if (kind == "PIPELINE_WEDGED") logged++ }
+        try {
+            // A decoder buffer of 100 stereo frames and half of one more: 402 bytes.
+            val odd = ByteBuffer.allocateDirect(402).order(ByteOrder.nativeOrder())
+            for (i in 0 until 201) odd.putShort(i.toShort())
+            odd.flip()
+            var guard = 0
+            while (!stage.handleBuffer(odd, 0, 1)) check(guard++ < 10_000) { "stuck on the odd buffer" }
+            // Then ordinary buffers: before the fix the pipeline never took another byte.
+            for (n in 0 until 20) {
+                val next = ByteBuffer.allocateDirect(400).order(ByteOrder.nativeOrder())
+                for (i in 0 until 200) next.putShort((1000 + n * 200 + i).toShort())
+                next.flip()
+                guard = 0
+                while (!stage.handleBuffer(next, 10_000L + n * 2_083, 1)) check(guard++ < 100) { "playback froze at buffer $n" }
+            }
+        } finally {
+            EqDebug.listener = null
+        }
+        assertTrue("the music after the odd buffer came through", sink.samples.contains(1000 + 19 * 200 + 199))
+        assertTrue("the wedge was logged", logged >= 1)
+    }
 }

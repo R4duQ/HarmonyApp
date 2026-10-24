@@ -46,16 +46,36 @@ internal object MobileEqNative {
 
     @JvmStatic external fun nativeSetBandGain(handle: Long, band: Int, gainDb: Float)
     @JvmStatic external fun nativeSetBandGains(handle: Long, gainsDb: FloatArray)
-    @JvmStatic external fun nativeSetAutoTargetGains(handle: Long, gainsDb: FloatArray)
     @JvmStatic external fun nativeSetEqEnabled(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetAutoMode(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetUserPreamp(handle: Long, preampDb: Float)
     @JvmStatic external fun nativeSetLevelGain(handle: Long, gainDb: Float)
-    @JvmStatic external fun nativeSetOutputDevice(handle: Long, device: Int)
+    @JvmStatic external fun nativeSetOutputDeviceType(handle: Long, deviceType: Int)
     @JvmStatic external fun nativeSetAnalyzerEnabled(handle: Long, enabled: Boolean)
     @JvmStatic external fun nativeSetSpectrumBarCount(handle: Long, bars: Int)
     @JvmStatic external fun nativeTargetPreampDb(handle: Long): Float
     @JvmStatic external fun nativeBassDuckDb(handle: Long): Float
+    @JvmStatic external fun nativeHarshDuckDb(handle: Long): Float
+    @JvmStatic external fun nativeTonalFrozen(handle: Long): Boolean
+
+    /** Times the engine healed itself from non-finite state (should stay 0). */
+    @JvmStatic external fun nativeHealCount(handle: Long): Int
+
+    /** Input samples that were NaN, infinite or beyond +24 dBFS, repaired before processing. */
+    @JvmStatic external fun nativeSanitizedSamples(handle: Long): Int
+    @JvmStatic external fun nativeLiveAutoOffsets(handle: Long, out: FloatArray)
+
+    /**
+     * The 60 fps snapshot: the ten effective band gains (sliders plus Auto's
+     * live offsets), the FFT bars and their peak dots, in one call through
+     * GetPrimitiveArrayCritical. Returns the live automatic preamp in dB.
+     */
+    @JvmStatic external fun nativePollDspTelemetry(
+        handle: Long,
+        effectiveGains10: FloatArray?,
+        fftMagnitudes32: FloatArray?,
+        fftPeaks32: FloatArray?,
+    ): Float
 
     /** Fills [bars] and [peaks] (0..1) and returns how many bars were written. */
     @JvmStatic external fun nativePollSpectrum(handle: Long, bars: FloatArray?, peaks: FloatArray?): Int

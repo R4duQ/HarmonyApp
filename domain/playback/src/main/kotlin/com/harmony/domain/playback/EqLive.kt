@@ -1,15 +1,13 @@
 package com.harmony.domain.playback
 
-import com.harmony.core.model.EqAutoCurve
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** What the equalizer engine is doing right now, for the Equalizer screen. */
 data class EqStatus(
-    /** The song playing and the curve Auto plays it with; null while Auto is off or nothing plays. */
-    val songId: Long? = null,
-    val autoCurve: EqAutoCurve? = null,
+    /** The rate the playing engine runs at, the source's own (0 before the first song). */
+    val sampleRate: Int = 0,
     /** Where the sound goes, as the engine sees it. */
     val output: EqOutput = EqOutput.PHONE_SPEAKER,
     /** The output device's own name, when it has one. */
@@ -24,7 +22,7 @@ data class EqStatus(
 enum class EqOutput(val label: String, val highPassHz: Int, val ceilingDb: Float) {
     PHONE_SPEAKER("Phone speaker", 90, -0.15f),
     WIRED_HEADPHONES("Wired", 18, -0.15f),
-    BLUETOOTH("Bluetooth", 24, -0.15f),
+    BLUETOOTH("Bluetooth", 24, -0.4f),
     USB_DAC("USB DAC", 10, -0.05f),
 }
 

@@ -60,6 +60,7 @@ internal class EqSinkStage(
     private var framesOut = 0L
     private var draining = false
     private var endOfStreamDrained = false
+    private var wedgedCalls = 0
 
     val hasPendingOutput: Boolean get() = output.hasRemaining()
 
@@ -96,13 +97,34 @@ internal class EqSinkStage(
         }
 
         if (baseTimeUs == C.TIME_UNSET) baseTimeUs = presentationTimeUs
+        val framesBefore = framesOut
+        var consumed = false
         while (buffer.hasRemaining()) {
             val before = buffer.position()
             pipeline.queueInput(buffer)
             if (!takeOutput()) return false  // the sink is full: the rest of the input waits
             if (buffer.position() == before) break  // the pipeline takes nothing more right now
+            consumed = true
         }
-        return !buffer.hasRemaining()
+        if (!buffer.hasRemaining()) {
+            wedgedCalls = 0
+            return true
+        }
+        // Not taken in full, yet the sink took everything we had: if the
+        // pipeline also took nothing and produced nothing, call after call, it
+        // is wedged. Left alone, the sink would offer this buffer forever and
+        // playback would freeze here until a seek flushed it. Flush it now
+        // instead, as the seek would, and carry on from this buffer.
+        if (!consumed && framesOut == framesBefore && !output.hasRemaining()) {
+            if (++wedgedCalls >= WEDGED_AFTER_CALLS) {
+                EqDebug.pipelineWedged(buffer.remaining(), presentationTimeUs)
+                wedgedCalls = 0
+                pipeline.flush()
+            }
+        } else {
+            wedgedCalls = 0
+        }
+        return false
     }
 
     /** At the end of the stream: true once everything we hold has gone down to the sink. */
@@ -119,6 +141,7 @@ internal class EqSinkStage(
     }
 
     fun flush() {
+        wedgedCalls = 0
         output = EMPTY
         draining = false
         endOfStreamDrained = false
@@ -234,5 +257,8 @@ internal class EqSinkStage(
     private companion object {
         val EMPTY: ByteBuffer = ByteBuffer.allocateDirect(0)
         const val MAX_DRAIN_STEPS = 64
+
+        /** Calls in a row with no progress at all before the pipeline counts as wedged. */
+        const val WEDGED_AFTER_CALLS = 3
     }
 }

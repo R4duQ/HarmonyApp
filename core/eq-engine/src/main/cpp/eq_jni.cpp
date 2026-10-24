@@ -2,8 +2,8 @@
 //
 // Zero garbage on every path that runs per buffer or per frame: audio moves
 // through direct ByteBuffers (no copies, no arrays), slider arrays are read
-// with GetFloatArrayRegion into stack memory, and the spectrum is written
-// into float arrays the caller allocated once. Nothing here allocates a Java
+// with GetPrimitiveArrayCritical into stack memory, and the telemetry is
+// written into float arrays the caller allocated once. Nothing here allocates a Java
 // object unless the caller misuses the API, in which case it throws.
 //
 // Methods are registered explicitly in JNI_OnLoad rather than found by name,
@@ -114,29 +114,47 @@ jint nativeDrain(JNIEnv* env, jclass, jlong handle, jobject output, jint outputO
     return engine->drain(reinterpret_cast<float*>(out), maxFrames);
 }
 
+// ---- Float arrays -------------------------------------------------------------------
+//
+// Arrays cross with GetPrimitiveArrayCritical: no copy on the way in or out
+// where the VM can pin, and no allocation. Nothing inside a critical section
+// calls back into the VM or does more than copy, so the GC is held for
+// microseconds at most; the engine work (the FFT) runs before it, into stack
+// memory.
+
+/** Copies [count] floats from [array] into [out]; false (and throws) if it's null or too short. */
+bool readFloats(JNIEnv* env, jfloatArray array, float* out, int count, const char* what) {
+    if (array == nullptr || env->GetArrayLength(array) < count) {
+        throwIllegalArgument(env, what);
+        return false;
+    }
+    void* data = env->GetPrimitiveArrayCritical(array, nullptr);
+    if (data == nullptr) return false;  // OutOfMemoryError pending
+    std::copy_n(static_cast<const float*>(data), count, out);
+    env->ReleasePrimitiveArrayCritical(array, data, JNI_ABORT);  // read only: nothing to copy back
+    return true;
+}
+
+/** Copies [count] floats from [values] into [array] (which must hold at least that many). */
+void writeFloats(JNIEnv* env, jfloatArray array, const float* values, int count) {
+    if (array == nullptr || count <= 0) return;
+    void* data = env->GetPrimitiveArrayCritical(array, nullptr);
+    if (data == nullptr) return;
+    std::copy_n(values, count, static_cast<float*>(data));
+    env->ReleasePrimitiveArrayCritical(array, data, 0);
+}
+
 // ---- Controls ------------------------------------------------------------------------
 
 void nativeSetBandGain(JNIEnv*, jclass, jlong handle, jint band, jfloat gainDb) {
     engineOf(handle)->setBandGainDb(band, gainDb);
 }
 
-bool readBands(JNIEnv* env, jfloatArray array, float* out) {
-    if (array == nullptr || env->GetArrayLength(array) < harmony::eq::kNumBands) {
-        throwIllegalArgument(env, "expected 10 band gains");
-        return false;
-    }
-    env->GetFloatArrayRegion(array, 0, harmony::eq::kNumBands, out);
-    return !env->ExceptionCheck();
-}
-
 void nativeSetBandGains(JNIEnv* env, jclass, jlong handle, jfloatArray gainsDb) {
     float gains[harmony::eq::kNumBands];
-    if (readBands(env, gainsDb, gains)) engineOf(handle)->setBandGainsDb(gains);
-}
-
-void nativeSetAutoTargetGains(JNIEnv* env, jclass, jlong handle, jfloatArray gainsDb) {
-    float gains[harmony::eq::kNumBands];
-    if (readBands(env, gainsDb, gains)) engineOf(handle)->setAutoTargetGainsDb(gains);
+    if (readFloats(env, gainsDb, gains, harmony::eq::kNumBands, "expected 10 band gains")) {
+        engineOf(handle)->setBandGainsDb(gains);
+    }
 }
 
 void nativeSetEqEnabled(JNIEnv*, jclass, jlong handle, jboolean enabled) {
@@ -155,12 +173,12 @@ void nativeSetLevelGain(JNIEnv*, jclass, jlong handle, jfloat gainDb) {
     engineOf(handle)->setLevelGainDb(gainDb);
 }
 
-void nativeSetOutputDevice(JNIEnv* env, jclass, jlong handle, jint device) {
+void nativeSetOutputDeviceType(JNIEnv* env, jclass, jlong handle, jint device) {
     if (device < 0 || device > static_cast<jint>(OutputDevice::kUsbDacHiRes)) {
         throwIllegalArgument(env, "unknown output device");
         return;
     }
-    engineOf(handle)->setOutputDevice(static_cast<OutputDevice>(device));
+    engineOf(handle)->setOutputDeviceType(static_cast<OutputDevice>(device));
 }
 
 void nativeSetAnalyzerEnabled(JNIEnv*, jclass, jlong handle, jboolean enabled) {
@@ -175,7 +193,60 @@ jfloat nativeTargetPreampDb(JNIEnv*, jclass, jlong handle) { return engineOf(han
 
 jfloat nativeBassDuckDb(JNIEnv*, jclass, jlong handle) { return engineOf(handle)->bassDuckDb(); }
 
-// ---- Spectrum (UI thread, 60 fps) ------------------------------------------------------
+jfloat nativeHarshDuckDb(JNIEnv*, jclass, jlong handle) { return engineOf(handle)->harshDuckDb(); }
+
+jint nativeHealCount(JNIEnv*, jclass, jlong handle) {
+    return static_cast<jint>(engineOf(handle)->healCount() & 0x7FFFFFFF);
+}
+
+jint nativeSanitizedSamples(JNIEnv*, jclass, jlong handle) {
+    return static_cast<jint>(engineOf(handle)->sanitizedSamples() & 0x7FFFFFFF);
+}
+
+jboolean nativeTonalFrozen(JNIEnv*, jclass, jlong handle) {
+    return engineOf(handle)->tonalFrozen() ? JNI_TRUE : JNI_FALSE;
+}
+
+void nativeLiveAutoOffsets(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    if (out == nullptr || env->GetArrayLength(out) < harmony::eq::kNumBands) {
+        throwIllegalArgument(env, "expected room for 10 bands");
+        return;
+    }
+    float values[harmony::eq::kNumBands];
+    engineOf(handle)->liveAutoOffsetsDb(values);
+    writeFloats(env, out, values, harmony::eq::kNumBands);
+}
+
+// ---- Telemetry (UI thread, 60 fps) -------------------------------------------------------
+
+/**
+ * The one call a 60 fps UI makes: the effective gains of the ten bands
+ * (sliders plus Auto's live offsets), the FFT bars and their peak dots.
+ * Returns the live automatic preamp in dB. Any array may be null.
+ */
+jfloat nativePollDspTelemetry(JNIEnv* env, jclass, jlong handle, jfloatArray effectiveGains10,
+                              jfloatArray fftMagnitudes, jfloatArray fftPeaks) {
+    float gains[harmony::eq::kNumBands];
+    float bars[harmony::eq::kMaxBars];
+    float peaks[harmony::eq::kMaxBars];
+    if (effectiveGains10 != nullptr && env->GetArrayLength(effectiveGains10) < harmony::eq::kNumBands) {
+        throwIllegalArgument(env, "expected room for 10 band gains");
+        return 0.f;
+    }
+    int capacity = harmony::eq::kMaxBars;
+    if (fftMagnitudes != nullptr) capacity = std::min<int>(capacity, env->GetArrayLength(fftMagnitudes));
+    if (fftPeaks != nullptr) capacity = std::min<int>(capacity, env->GetArrayLength(fftPeaks));
+    const bool wantsSpectrum = fftMagnitudes != nullptr || fftPeaks != nullptr;
+    MobileEqEngine* engine = engineOf(handle);
+    const float preampDb = engine->pollDspTelemetry(effectiveGains10 != nullptr ? gains : nullptr,
+                                                    wantsSpectrum ? bars : nullptr,
+                                                    wantsSpectrum ? peaks : nullptr, capacity);
+    const int count = wantsSpectrum ? std::min(capacity, engine->spectrumBarCount()) : 0;
+    writeFloats(env, effectiveGains10, gains, harmony::eq::kNumBands);
+    writeFloats(env, fftMagnitudes, bars, count);
+    writeFloats(env, fftPeaks, peaks, count);
+    return preampDb;
+}
 
 jint nativePollSpectrum(JNIEnv* env, jclass, jlong handle, jfloatArray bars, jfloatArray peaks) {
     float barValues[harmony::eq::kMaxBars];
@@ -184,13 +255,11 @@ jint nativePollSpectrum(JNIEnv* env, jclass, jlong handle, jfloatArray bars, jfl
     if (bars != nullptr) capacity = std::min<int>(capacity, env->GetArrayLength(bars));
     if (peaks != nullptr) capacity = std::min<int>(capacity, env->GetArrayLength(peaks));
     const int count = engineOf(handle)->pollSpectrum(barValues, peakValues, capacity);
-    if (bars != nullptr) env->SetFloatArrayRegion(bars, 0, count, barValues);
-    if (peaks != nullptr) env->SetFloatArrayRegion(peaks, 0, count, peakValues);
+    writeFloats(env, bars, barValues, count);
+    writeFloats(env, peaks, peakValues, count);
     return count;
 }
 
-// The NDK declares JNINativeMethod with const char*, desktop JDKs with char*:
-// this table builds with both (the host build runs the Kotlin tests).
 #define HARMONY_JNI_METHOD(name, signature) \
     { const_cast<char*>(#name), const_cast<char*>(signature), reinterpret_cast<void*>(name) }
 
@@ -205,16 +274,21 @@ const JNINativeMethod kMethods[] = {
     HARMONY_JNI_METHOD(nativeDrain, "(JLjava/nio/ByteBuffer;II)I"),
     HARMONY_JNI_METHOD(nativeSetBandGain, "(JIF)V"),
     HARMONY_JNI_METHOD(nativeSetBandGains, "(J[F)V"),
-    HARMONY_JNI_METHOD(nativeSetAutoTargetGains, "(J[F)V"),
     HARMONY_JNI_METHOD(nativeSetEqEnabled, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetAutoMode, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetUserPreamp, "(JF)V"),
     HARMONY_JNI_METHOD(nativeSetLevelGain, "(JF)V"),
-    HARMONY_JNI_METHOD(nativeSetOutputDevice, "(JI)V"),
+    HARMONY_JNI_METHOD(nativeSetOutputDeviceType, "(JI)V"),
     HARMONY_JNI_METHOD(nativeSetAnalyzerEnabled, "(JZ)V"),
     HARMONY_JNI_METHOD(nativeSetSpectrumBarCount, "(JI)V"),
     HARMONY_JNI_METHOD(nativeTargetPreampDb, "(J)F"),
     HARMONY_JNI_METHOD(nativeBassDuckDb, "(J)F"),
+    HARMONY_JNI_METHOD(nativeHarshDuckDb, "(J)F"),
+    HARMONY_JNI_METHOD(nativeTonalFrozen, "(J)Z"),
+    HARMONY_JNI_METHOD(nativeHealCount, "(J)I"),
+    HARMONY_JNI_METHOD(nativeSanitizedSamples, "(J)I"),
+    HARMONY_JNI_METHOD(nativeLiveAutoOffsets, "(J[F)V"),
+    HARMONY_JNI_METHOD(nativePollDspTelemetry, "(J[F[F[F)F"),
     HARMONY_JNI_METHOD(nativePollSpectrum, "(J[F[F)I"),
 };
 

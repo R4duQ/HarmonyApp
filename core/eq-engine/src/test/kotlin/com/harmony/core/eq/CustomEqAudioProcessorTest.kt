@@ -100,6 +100,34 @@ class CustomEqAudioProcessorTest {
     }
 
     @Test
+    fun `odd-sized buffers are always taken in full, partial frames carried over`() {
+        processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
+        processor.flush()
+        // The DAC's 10 Hz high-pass leaves 1 kHz where it was (the speaker's 90 Hz one shifts its phase).
+        processor.setOutputDeviceType(OutputDeviceType.USB_DAC_HIRES)
+        val frames = 9_600
+        val input = pcm16Sine(frames, 2, 48_000, 1000.0, 0.25)
+        // 1001 bytes a time: a 16-bit stereo frame is 4 bytes, so most chunks end mid-frame.
+        // runThrough loops until the input is gone, so a processor that left bytes behind would hang here.
+        val out = runThrough(input, chunkBytes = 1001)
+        assertEquals("every frame accounted for", frames * 2, out.size)
+        val reference = FloatArray(frames) { input.getShort(it * 4) / 32768f }
+        for (i in frames / 2 until frames step 97) assertEquals("frame $i", reference[i], out[i * 2], 5e-3f)
+
+        // A single byte at a time, too: nothing is ever left in the caller's buffer.
+        processor.flush()
+        val tiny = pcm16Sine(64, 2, 48_000, 1000.0, 0.25)
+        while (tiny.hasRemaining()) {
+            val one = tiny.duplicate().order(ByteOrder.nativeOrder())
+            one.limit(one.position() + 1)
+            processor.queueInput(one)
+            assertFalse("byte left behind", one.hasRemaining())
+            tiny.position(one.position())
+            processor.output
+        }
+    }
+
+    @Test
     fun `flat EQ keeps the signal where it was`() {
         processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
         processor.flush()
@@ -143,6 +171,34 @@ class CustomEqAudioProcessorTest {
         runThrough(pcm16Sine(4_800, 2, 48_000, 440.0, 0.5), chunkBytes = 4096)
         assertEquals(64, processor.pollSpectrum(bars, peaks))
         assertTrue(bars.all { it in 0f..1f } && peaks.all { it in 0f..1f })
+    }
+
+    @Test
+    fun `Auto calibrates live and the telemetry reports it in one call`() {
+        processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
+        processor.flush()
+        processor.setOutputDeviceType(OutputDeviceType.WIRED_HEADPHONES)
+        processor.setAutoMode(true)
+        processor.setBandGains(FloatArray(10).also { it[5] = 2f })
+        // Three seconds of a muddy 250 Hz hum: Auto hears too much of it and takes it down.
+        runThrough(pcm16Sine(144_000, 2, 48_000, 250.0, 0.3), chunkBytes = 4096)
+        val offsets = FloatArray(10)
+        processor.liveAutoOffsets(offsets)
+        assertTrue("250 Hz cut: ${offsets.toList()}", offsets[3] < -1f)
+        assertTrue("within ±4.5: ${offsets.toList()}", offsets.all { it in -4.5f..4.5f })
+        assertEquals("the middle holds", 0f, offsets[5])
+
+        val effective = FloatArray(10)
+        val bars = FloatArray(32)
+        val peaks = FloatArray(32)
+        val preamp = processor.pollDspTelemetry(effective, bars, peaks)
+        assertTrue("preamp $preamp", preamp.isFinite() && preamp <= 0f)
+        assertEquals("slider plus offset", 2f + offsets[5], effective[5], 0.3f)
+        assertEquals("slider plus offset", offsets[3], effective[3], 0.3f)
+        assertTrue(bars.all { it in 0f..1f } && peaks.all { it in 0f..1f })
+        assertFalse("music is playing", processor.tonalFrozen())
+        // Null arrays are fine: just the preamp.
+        assertEquals(preamp, processor.pollDspTelemetry(null, null, null), 0.5f)
     }
 
     @Test

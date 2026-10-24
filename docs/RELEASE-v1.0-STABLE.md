@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **137**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 136), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **138**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 137), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -106,21 +106,40 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   they used. Your curve is carried over to the new bands.
   - *Ten bands*: 31 Hz to 16 kHz, ±12 dB each, a shelf at each end and peaks between them that narrow
     as they rise so neighbours don't pile up, plus a preamp.
-  - *Never clips*: the engine takes back 65 % of the loudest point of your curve as headroom, moves every
+  - *Never clips*: the engine makes its own headroom as you boost (see *Live preamp*), moves every
     change smoothly so dragging a slider never clicks, then a soft saturator and a 2 ms look-ahead
-    limiter keep peaks under −0.15 dBFS.
+    limiter keep peaks under −0.15 dBFS (−0.4 dBFS on Bluetooth, −0.05 dBFS on a USB DAC).
   - *Knows where it plays*: phone speaker, wired, Bluetooth or USB DAC. It filters out what that output
     can't play (below 90 Hz on the phone speaker, 24 Hz on Bluetooth, which also gets a little extra
     room for its codec, 18 Hz wired and 10 Hz on a DAC).
-  - *AUTO*: like Winamp's, it loads each song's own curve as the song starts and blends it in over
-    400 ms: the curve you shaped for that song (move a slider while Auto plays it and the song keeps
-    it), otherwise the preset for its genre (rock, pop, hip-hop, dance, classical, jazz…). Heavy kicks
-    pull the deepest bass boost back by up to 4 dB so it doesn't turn muddy.
-  - *Spectrum*: the analyser in the Winamp window now comes from the engine's own FFT at 60 frames a
-    second, timed to what you hear. The Now Playing visualiser uses it too.
+  - *AUTO LIVE*: Auto works only from what the music sounds like right now, never from tags or
+    genres. The engine hears the music in the ten bands (about the last 1.2 seconds) and compares
+    its balance with a target for the output (a warm −4.5 dB/octave curve on headphones, Bluetooth
+    and DACs; a midrange curve on the phone speaker). It lifts thin sub-bass and air by up to 4.5 dB
+    and takes out boxy mid-bass and harsh upper mids by up to 4.5 dB, gliding on top of your
+    sliders. In silence and quiet intros it holds still, so it never lifts noise. Heavy kicks pull
+    the bass boost back and sharp sibilance the 4–8 kHz boost, within milliseconds.
+  - *Live preamp*: the headroom the EQ takes follows the music: a big bass boost only lowers the
+    level while there is bass to boost, so vocals and acoustic passages stay as loud as they can.
+  - *Live window*: one 60 fps display with the 32-bar spectrum behind ten sliders. Each slider has
+    your thumb and a glowing "ghost" thumb that moves on its own to where the engine actually is,
+    with a curve through each; EQ ON, AUTO LIVE, the live preamp, FLAT and a badge for the output
+    (for example USB DAC • 96kHz / 32-bit Float) sit on top.
+  - *Spectrum*: it comes from the engine's own FFT at 60 frames a second, timed to what you hear. The
+    Now Playing visualiser uses it too.
   - *Bit-perfect USB* (Android 14 and newer, with a USB DAC): a switch to send the file to the DAC
     untouched instead of equalizing it.
   - ReplayGain now runs inside the engine, ahead of its limiter, so lifting a quiet record can't clip.
+- **No more freezes at a bad spot in a song.**
+  - Some files made playback stop or go silent at the same moment every time, until you seeked past it. Each cause is fixed:
+    - a decoder buffer that ended mid-frame was never taken, and now always is;
+    - corrupt samples (NaN, infinities, absurd values) are repaired before the EQ;
+    - the engine heals itself if anything non-finite ever reaches its filters.
+  - A corrupt frame now makes playback hop 200 ms past it instead of failing the song.
+  - A decoder that fails hands over to another one.
+  - MP3s without a proper seek table seek accurately.
+  - If playback ever stands still for 3 seconds while it should be playing, it is nudged on by itself.
+  - Developers can see each of these in Logcat under `EQ_DEBUG`.
 - **New mini player.** The bar above the navigation is now a card with the record half out of
   it, turning while the music plays, coasting to a stop on pause and spinning on to the next
   song. It shows where the music is playing (AirPods, phone speaker, car…), the song, a
