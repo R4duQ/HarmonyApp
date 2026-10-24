@@ -117,13 +117,41 @@ class PlaybackConnection @Inject constructor(
     private var localReplayGain: ReplayGainMode = ReplayGainMode.OFF
     private var localPitchCorrection: Boolean = true
 
+    /**
+     * Harmony's own screen has asked for the player in this process
+     * (MainActivity.onStart). Restoring the last queue is for someone
+     * opening the app: done without one (WorkManager's library analysis, a
+     * service restart), it left a paused session holding a queue, which
+     * Media3 shows as a playback notification nobody asked for.
+     */
+    @Volatile private var uiPresent = false
+
+    /**
+     * False once the app has been swiped away: from then on nothing in this
+     * process reconnects to the service on its own (a queue update, a
+     * settings command), only the app being opened again does. A reconnect
+     * rebuilt the session, restored the queue and brought the notification
+     * straight back.
+     */
+    @Volatile private var reconnectAllowed = true
+
+    /** The last queue was restored on the current connection (at most once per connection). */
+    private var restoredThisConnection = false
+
     init {
-        ensureConnected()
+        // Connect early so the player's state is known in the background
+        // (the analysis waits for playback to stop; Android Auto may be the
+        // only client) — but without restoring a queue, see [uiPresent].
+        connect()
         // Output route changes (headphones plugged in, Bluetooth connected)
         // arrive independently of any player event, so they need their own
         // trigger to reach the UI.
         scope.launch {
-            audioOutputMonitor.output.collect { syncState() }
+            audioOutputMonitor.output.collect {
+                syncState()
+                // A car that attaches finds the last queue, as it did before.
+                controller?.takeIf { audioOutputMonitor.carConnected }?.let { maybeRestore(it) }
+            }
         }
         // Likewise moving the music to a computer and back (Harmony Connect).
         scope.launch {
@@ -134,12 +162,28 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
-    /** Reconnect on an explicit user action or Activity return, not after a task dismissal. */
+    /**
+     * The app's screen wants the player (MainActivity.onStart): connect if
+     * needed, restore the last queue (paused) if the player is empty, and
+     * allow reconnecting again after a swipe-away.
+     */
     fun ensureConnected() {
+        uiPresent = true
+        reconnectAllowed = true
+        val c = controller
+        if (c != null && c.isConnected) {
+            scope.launch { maybeRestore(c) }
+            return
+        }
+        connect()
+    }
+
+    private fun connect() {
         if (controller?.isConnected == true || connectionJob?.isActive == true) return
         connectionJob = scope.launch {
             kotlinx.coroutines.yield()
             var built: MediaController? = null
+            var pending: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
             try {
                 val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
                 val connected = kotlinx.coroutines.withTimeout(10_000) {
@@ -153,7 +197,7 @@ class PlaybackConnection @Inject constructor(
                                     _playerState.value = _playerState.value.copy(isPlaying = false, isBuffering = false)
                                 }
                             }
-                        }).buildAsync().await()
+                        }).buildAsync().also { pending = it }.await()
                 }
                 built = connected
                 check(connected.isConnected)
@@ -162,19 +206,27 @@ class PlaybackConnection @Inject constructor(
                 onTrackTransition(connected.currentMediaItem?.mediaId)
                 tickerJob?.cancel()
                 tickerJob = startPositionTicker()
-                if (connected.mediaItemCount == 0) restoreLastPlaybackState(connected)
+                restoredThisConnection = false
+                maybeRestore(connected)
                 connected.shuffleModeEnabled = localShuffleMode == ShuffleMode.RANDOM
                 persistentCommands.forEach { (action, args) ->
                     connected.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args)
                 }
                 syncState()
             } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                // A connection given up on (cancelled by a swipe-away, or timed
+                // out) must not stay bound: releaseFuture releases the
+                // controller if it connected, or cancels the attempt if not.
+                // Otherwise the binding outlives it and keeps the service up.
                 if (controller === built) controller = null
+                pending?.let(MediaController::releaseFuture)
+                if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
                 tickerJob?.cancel()
                 built?.release()
                 android.util.Log.w("HarmonyPlayback", "Could not connect to playback service", error)
-                android.widget.Toast.makeText(context, "Playback could not connect. Tap Play to retry.", android.widget.Toast.LENGTH_LONG).show()
+                if (uiPresent) {
+                    android.widget.Toast.makeText(context, "Playback could not connect. Tap Play to retry.", android.widget.Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -188,12 +240,27 @@ class PlaybackConnection @Inject constructor(
      * the connection the next time the Activity starts.
      */
     fun releaseConnection() {
+        // First, so nothing still running in this process (a connection being
+        // built, a queue update, a settings command) can bind the service
+        // again a moment after it was told to stop.
+        reconnectAllowed = false
+        uiPresent = false
+        connectionJob?.cancel()
+        connectionJob = null
         val c = controller ?: return
         controller = null
         onTrackTransition(null)
         tickerJob?.cancel()
         _playerState.value = _playerState.value.copy(isPlaying = false, isBuffering = false)
         c.release()
+    }
+
+    /** Restores the last queue into an empty player, when someone is there for it (see [uiPresent]). */
+    private suspend fun maybeRestore(c: MediaController) {
+        if (restoredThisConnection || c.mediaItemCount != 0) return
+        if (!uiPresent && !audioOutputMonitor.carConnected) return
+        restoredThisConnection = true
+        restoreLastPlaybackState(c)
     }
 
     private suspend fun restoreLastPlaybackState(c: MediaController) {
@@ -419,7 +486,7 @@ class PlaybackConnection @Inject constructor(
     // -- Queue ---------------------------------------------------------------
 
     override suspend fun setQueue(songs: List<Song>, startIndex: Int, playWhenReady: Boolean) {
-        val c = awaitController()
+        val c = controllerOrNull() ?: return
         songCache.clear()
         songs.forEach { songCache[it.id.toString()] = it }
         c.setMediaItems(songs.map(::toMediaItem), if (songs.isEmpty()) 0 else startIndex.coerceIn(songs.indices), 0L)
@@ -429,7 +496,7 @@ class PlaybackConnection @Inject constructor(
 
     override suspend fun addToQueue(song: Song) {
         songCache[song.id.toString()] = song
-        awaitController().addMediaItem(toMediaItem(song))
+        controllerOrNull()?.addMediaItem(toMediaItem(song))
     }
 
     /**
@@ -446,11 +513,11 @@ class PlaybackConnection @Inject constructor(
     override suspend fun addToQueueAll(songs: List<Song>) {
         if (songs.isEmpty()) return
         songs.forEach { songCache[it.id.toString()] = it }
-        awaitController().addMediaItems(songs.map(::toMediaItem))
+        controllerOrNull()?.addMediaItems(songs.map(::toMediaItem))
     }
 
     override suspend fun addNext(song: Song) {
-        val c = awaitController()
+        val c = controllerOrNull() ?: return
         songCache[song.id.toString()] = song
         val currentId = c.currentMediaItem?.mediaId
         if (currentId != playNextAnchorId) {
@@ -464,19 +531,19 @@ class PlaybackConnection @Inject constructor(
     }
 
     override suspend fun removeQueueRange(fromIndex: Int, toIndexExclusive: Int) {
-        val c = awaitController()
+        val c = controllerOrNull() ?: return
         val from = fromIndex.coerceIn(0, c.mediaItemCount)
         val to = toIndexExclusive.coerceIn(from, c.mediaItemCount)
         if (to > from) c.removeMediaItems(from, to)
     }
 
     override suspend fun removeFromQueue(index: Int) {
-        val c = awaitController()
+        val c = controllerOrNull() ?: return
         if (index in 0 until c.mediaItemCount) c.removeMediaItem(index)
     }
 
     override suspend fun removeSongsByUri(uris: Set<String>) {
-        val c = awaitController()
+        val c = controllerOrNull() ?: return
         for (index in c.mediaItemCount - 1 downTo 0) {
             val item = c.getMediaItemAt(index)
             if (item.localConfiguration?.uri?.toString() in uris || songCache[item.mediaId]?.uri in uris) c.removeMediaItem(index)
@@ -488,13 +555,13 @@ class PlaybackConnection @Inject constructor(
     }
 
     override suspend fun moveQueueItem(from: Int, to: Int) {
-        val c = awaitController()
+        val c = controllerOrNull() ?: return
         if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount) c.moveMediaItem(from, to)
     }
 
     // -- Transport ----------------------------------------------------------
 
-    override fun play() { scope.launch { awaitController().play() } }
+    override fun play() { scope.launch { controllerOrNull()?.play() } }
     override fun pause() { controller?.pause() }
     override fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
     override fun skipToNext() { controller?.seekToNextMediaItem() }
@@ -577,13 +644,20 @@ class PlaybackConnection @Inject constructor(
 
     // -- Helpers ------------------------------------------------------------
 
-    private suspend fun awaitController(): MediaController {
-        if (controller?.isConnected != true) {
-            ensureConnected()
-            connectionJob?.join()
-        }
+    /**
+     * The connected controller, connecting first if that is allowed; null
+     * when playback is closed (after a swipe-away, until the app is opened
+     * again) or the service could not be reached. Callers then do nothing,
+     * rather than throwing into whoever asked (a CancellationException here
+     * used to end the coroutine that called, Smart Shuffle's collector
+     * included).
+     */
+    private suspend fun controllerOrNull(): MediaController? {
+        controller?.takeIf { it.isConnected }?.let { return it }
+        if (!reconnectAllowed) return null
+        connect()
+        connectionJob?.join()
         return controller?.takeIf { it.isConnected }
-            ?: throw kotlinx.coroutines.CancellationException("Playback connection unavailable")
     }
 
     private fun sendCustom(action: String, args: Bundle) {
@@ -598,7 +672,8 @@ class PlaybackConnection @Inject constructor(
         // taking effect later if the user happened to touch that setting
         // again in the same session.
         scope.launch {
-            awaitController().sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args)
+            // Kept in persistentCommands either way: a later connection replays it.
+            controllerOrNull()?.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args)
         }
     }
 

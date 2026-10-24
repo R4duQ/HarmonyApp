@@ -36,6 +36,13 @@ data class UserSettings(
     val amoledDark: Boolean = false,
     val dynamicColors: Boolean = true,
     val chargingOnlyAnalysis: Boolean = false,
+    /**
+     * Swiping Harmony away from Recents while music plays: false (the
+     * default, "strict close") stops playback and removes the notification;
+     * true ("smart close") keeps playing in the background, and only a
+     * paused player is closed.
+     */
+    val keepPlayingAfterSwipe: Boolean = false,
     val crossfadeSeconds: Int = 0,
     val replayGainMode: ReplayGainMode = ReplayGainMode.OFF,
     val eq: EqSettings = EqSettings(),
@@ -65,6 +72,7 @@ class SettingsRepository @Inject constructor(
         val AMOLED = booleanPreferencesKey("amoled_dark")
         val DYNAMIC = booleanPreferencesKey("dynamic_colors")
         val CHARGING_ONLY = booleanPreferencesKey("charging_only_analysis")
+        val KEEP_PLAYING_AFTER_SWIPE = booleanPreferencesKey("keep_playing_after_swipe")
         val CROSSFADE = intPreferencesKey("crossfade_seconds")
         val REPLAYGAIN = stringPreferencesKey("replaygain_mode")
         val EQ_ENABLED = booleanPreferencesKey("eq_enabled")
@@ -98,6 +106,7 @@ class SettingsRepository @Inject constructor(
             amoledDark = p[Keys.AMOLED] ?: false,
             dynamicColors = p[Keys.DYNAMIC] ?: true,
             chargingOnlyAnalysis = p[Keys.CHARGING_ONLY] ?: false,
+            keepPlayingAfterSwipe = p[Keys.KEEP_PLAYING_AFTER_SWIPE] ?: false,
             crossfadeSeconds = (p[Keys.CROSSFADE] ?: 0).coerceIn(0, 12),
             replayGainMode = p[Keys.REPLAYGAIN]
                 ?.let { runCatching { ReplayGainMode.valueOf(it) }.getOrNull() }
@@ -165,6 +174,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setAmoledDark(on: Boolean) = edit { it[Keys.AMOLED] = on }
     suspend fun setDynamicColors(on: Boolean) = edit { it[Keys.DYNAMIC] = on }
     suspend fun setChargingOnlyAnalysis(on: Boolean) = edit { it[Keys.CHARGING_ONLY] = on }
+
+    suspend fun setKeepPlayingAfterSwipe(on: Boolean) = edit { it[Keys.KEEP_PLAYING_AFTER_SWIPE] = on }
     suspend fun setCrossfadeSeconds(seconds: Int) = edit { it[Keys.CROSSFADE] = seconds.coerceIn(0, 12) }
     suspend fun setReplayGainMode(mode: ReplayGainMode) = edit { it[Keys.REPLAYGAIN] = mode.name }
     suspend fun setEnergySlider(value: Float?) = edit { it[Keys.ENERGY] = value ?: -1f }
