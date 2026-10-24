@@ -22,22 +22,19 @@ import com.harmony.core.eq.OutputDeviceType
 import com.harmony.core.eq.OutputRoute
 import com.harmony.core.media.artwork.ArtworkCache
 import com.harmony.core.media.artwork.ArtworkProvider
-import com.harmony.core.model.EqAuto
-import com.harmony.core.model.EqAutoCurve
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.Song
 import com.harmony.domain.playback.AudioLevels
 import com.harmony.domain.playback.EqLive
 import com.harmony.domain.playback.EqOutput
-import com.harmony.domain.playback.SpectrumSource
+import com.harmony.domain.playback.DspTelemetrySource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * Owner of the two [ExoPlayer]s behind [player] and everything that must be
@@ -54,7 +51,7 @@ import kotlin.math.roundToInt
  *  - The equalizer: the native float engine from core:eq-engine
  *    ([CustomEqAudioProcessor]) running in a [HiResEqAudioSink], so 24-bit and
  *    hi-res files reach it whole. It also carries ReplayGain (as a level gain
- *    ahead of its limiter), Auto (it listens to each song, see [EqAuto]), the
+ *    ahead of its limiter), Auto (live spectral auto-calibration, in the engine), the
  *    output-device protection ([AudioOutputMonitor]) and the analyser the
  *    screens poll through [AudioLevels].
  *  - Crossfade: two players taking turns, see [TwinPlayer]. Each has its own
@@ -74,11 +71,7 @@ class HarmonyPlayer(
     private class Engine(
         val exo: ExoPlayer,
         val equalizer: CustomEqAudioProcessor,
-    ) {
-        /** The song Auto is listening to on this engine, and whether it was heard before. */
-        var songId: String? = null
-        var remembered = false
-    }
+    )
 
     private val engines: List<Engine>
 
@@ -88,15 +81,6 @@ class HarmonyPlayer(
     private var pitchCorrection: Boolean = true
     private var replayGainMode: ReplayGainMode = ReplayGainMode.OFF
     private var eq = EqSettings()
-
-    /**
-     * What Auto heard of each recently played song (octave-band levels), so a
-     * song played again is corrected from its first second. Shared by both
-     * engines; main thread only.
-     */
-    private val toneMemory = object : LinkedHashMap<String, FloatArray>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FloatArray>?) = size > TONE_MEMORY_SONGS
-    }
 
     /** Song metadata for the current queue, keyed by mediaId, for RG lookup. */
     private val songsById = mutableMapOf<String, Song>()
@@ -115,13 +99,12 @@ class HarmonyPlayer(
         player = TwinPlayer(engines[0].exo, engines[1].exo)
 
         for (engine in engines) {
-            // Each player sets its own song's level and starts Auto listening
-            // to it, the waiting one too when it loads the next song, so it is
-            // ready before it is heard.
+            // Each player sets its own song's level, the waiting one too when
+            // it loads the next song, so it is ready before it is heard. Auto
+            // needs no telling: it listens to whatever plays, continuously.
             engine.exo.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     engine.equalizer.setLevelGainDb(replayGainDbFor(engine.exo.currentMediaItem))
-                    startAutoTrack(engine, mediaItem?.mediaId)
                 }
             })
         }
@@ -312,9 +295,8 @@ class HarmonyPlayer(
         eq = settings
         val gains = EqSettings.sanitize(settings.bandGainsDb).toFloatArray()
         for (engine in engines) {
+            // The sliders; with Auto on, the engine adds its live offsets to them.
             engine.equalizer.setBandGains(gains)
-            // Under Auto the listener's curve stays the base; listening adds to it.
-            engine.equalizer.setAutoTargetGains(gains)
             engine.equalizer.setPreampDb(settings.preampDb)
             engine.equalizer.setEqEnabled(settings.enabled)
             engine.equalizer.setAutoMode(settings.enabled && settings.auto)
@@ -322,47 +304,12 @@ class HarmonyPlayer(
         if (settings.bitPerfectUsb != before.bitPerfectUsb) applyBitPerfect()
     }
 
-    /**
-     * [engine] moved to song [id]: remember what Auto heard of the last one,
-     * and have it listen to this one, from what it learned before if it has
-     * heard it.
-     */
-    private fun startAutoTrack(engine: Engine, id: String?) {
-        val levels = FloatArray(EqSettings.BAND_COUNT)
-        val heard = engine.equalizer.songLevels(levels)
-        val previous = engine.songId
-        if (previous != null && heard >= EqAuto.REMEMBER_AFTER_SECONDS && levels.any { it.isFinite() }) {
-            toneMemory[previous] = levels
-        }
-        val known = id?.let(toneMemory::get)
-        engine.songId = id
-        engine.remembered = known != null
-        engine.equalizer.startTrack(known)
-    }
-
-    /** Shows the screen what Auto plays for the song playing, a few times a second. */
+    /** Keeps the screen's hardware badge on the rate the playing engine runs at. */
     private fun startEqStatus() {
         scope.launch {
-            val curve = FloatArray(EqSettings.BAND_COUNT)
-            val correction = FloatArray(EqSettings.BAND_COUNT)
-            val levels = FloatArray(EqSettings.BAND_COUNT)
             while (true) {
-                val engine = activeEngine
-                val songId = player.active.currentMediaItem?.mediaId?.toLongOrNull()
-                val auto = if (eq.enabled && eq.auto && songId != null) {
-                    engine.equalizer.autoCurve(curve)
-                    engine.equalizer.listenCorrection(correction)
-                    val heard = engine.equalizer.songLevels(levels)
-                    EqAutoCurve(
-                        gainsDb = curve.map { (it * 10f).roundToInt() / 10f },
-                        correctionDb = correction.map { (it * 10f).roundToInt() / 10f },
-                        heardSeconds = heard.toInt().toFloat(),
-                        remembered = engine.remembered,
-                    )
-                } else {
-                    null
-                }
-                EqLive.update { it.copy(songId = songId, autoCurve = auto) }
+                val rate = activeEngine.equalizer.sampleRate
+                if (rate != EqLive.status.value.sampleRate) EqLive.update { it.copy(sampleRate = rate) }
                 delay(STATUS_EVERY_MS)
             }
         }
@@ -411,12 +358,15 @@ class HarmonyPlayer(
     // -- Analyser ----------------------------------------------------------------
 
     /**
-     * Hands the screens the playing engine's analyser. They poll it once per
-     * frame on the main thread (AudioLevels.poll); the engines only feed it
-     * while a screen is watching.
+     * Hands the screens the playing engine's telemetry. They poll it once per
+     * frame on the main thread (AudioLevels.pollTelemetry: effective gains,
+     * FFT and live preamp in one native call); the engines only feed the
+     * analyser while a screen is watching.
      */
     private fun startAnalyser() {
-        AudioLevels.source = SpectrumSource { bars, peaks -> activeEngine.equalizer.pollSpectrum(bars, peaks) }
+        AudioLevels.source = DspTelemetrySource { gains, bars, peaks ->
+            activeEngine.equalizer.pollDspTelemetry(gains, bars, peaks)
+        }
         scope.launch {
             AudioLevels.watchers.collect { count ->
                 for (engine in engines) engine.equalizer.setAnalyzerEnabled(count > 0)
@@ -506,8 +456,7 @@ class HarmonyPlayer(
 
     private companion object {
         const val TAG = "HarmonyPlayback"
-        const val STATUS_EVERY_MS = 250L
-        const val TONE_MEMORY_SONGS = 2_000
+        const val STATUS_EVERY_MS = 500L
         const val MAX_RETRIES_PER_ITEM = 1
         const val MAX_FAILED_ITEMS_IN_A_ROW = 3
     }

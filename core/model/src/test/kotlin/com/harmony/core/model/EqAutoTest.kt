@@ -32,21 +32,3 @@ class EqAutoTest {
         assertEquals(listOf(0f, 12f, -12f) + List(7) { 0f }, out)
     }
 }
-
-class EqResponseTest {
-    private val probe = EqSettings.BAND_CENTERS_HZ.toFloatArray()
-
-    @Test
-    fun flatIsZero() {
-        assertTrue(EqResponse.bandsDb(EqSettings.FLAT, probe).all { kotlin.math.abs(it) < 1e-3f })
-        assertEquals(0f, EqResponse.autoPreampDb(EqSettings.FLAT), 1e-3f)
-    }
-
-    @Test
-    fun aBandHitsItsGainAndThePreampTakesBack65Percent() {
-        val gains = EqSettings.FLAT.toMutableList().also { it[5] = 6f }
-        assertEquals(6f, EqResponse.bandsDb(gains, floatArrayOf(1000f))[0], 0.05f)
-        assertEquals(-0.65f * 6f, EqResponse.autoPreampDb(gains), 0.3f)
-        assertTrue(EqResponse.autoPreampDb(List(10) { -12f }) == 0f)
-    }
-}

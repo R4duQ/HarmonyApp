@@ -146,31 +146,31 @@ class CustomEqAudioProcessorTest {
     }
 
     @Test
-    fun `Auto listens to the song through JNI`() {
+    fun `Auto calibrates live and the telemetry reports it in one call`() {
         processor.configure(AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT))
         processor.flush()
-        processor.setAutoTargetGains(FloatArray(10))
+        processor.setOutputDeviceType(OutputDeviceType.WIRED_HEADPHONES)
         processor.setAutoMode(true)
-        processor.startTrack(null)
-        // Two seconds of a 125 Hz hum: Auto hears a song all in one band and wants it less.
-        runThrough(pcm16Sine(96_000, 2, 48_000, 125.0, 0.3), chunkBytes = 4096)
-        val levels = FloatArray(10)
-        val heard = processor.songLevels(levels)
-        assertTrue("heard $heard s", heard in 1.5f..2.2f)
-        assertTrue("125 Hz loudest: ${levels.toList()}", levels.indices.maxBy { if (levels[it].isNaN()) -1e9f else levels[it] } == 2)
-        val correction = FloatArray(10)
-        processor.listenCorrection(correction)
-        assertTrue("125 Hz cut: ${correction.toList()}", correction[2] < 0f)
-        val curve = FloatArray(10)
-        processor.autoCurve(curve)
-        assertTrue(curve.all { it.isFinite() && it in -12f..12f })
+        processor.setBandGains(FloatArray(10).also { it[5] = 2f })
+        // Three seconds of a muddy 250 Hz hum: Auto hears too much of it and takes it down.
+        runThrough(pcm16Sine(144_000, 2, 48_000, 250.0, 0.3), chunkBytes = 4096)
+        val offsets = FloatArray(10)
+        processor.liveAutoOffsets(offsets)
+        assertTrue("250 Hz cut: ${offsets.toList()}", offsets[3] < -1f)
+        assertTrue("within ±4.5: ${offsets.toList()}", offsets.all { it in -4.5f..4.5f })
+        assertEquals("the middle holds", 0f, offsets[5])
 
-        // Heard before: corrected at once.
-        processor.flush()
-        processor.startTrack(levels)
-        runThrough(pcm16Sine(4_800, 2, 48_000, 1000.0, 0.0), chunkBytes = 4096)
-        processor.listenCorrection(correction)
-        assertTrue("remembered: ${correction.toList()}", correction[2] < 0f)
+        val effective = FloatArray(10)
+        val bars = FloatArray(32)
+        val peaks = FloatArray(32)
+        val preamp = processor.pollDspTelemetry(effective, bars, peaks)
+        assertTrue("preamp $preamp", preamp.isFinite() && preamp <= 0f)
+        assertEquals("slider plus offset", 2f + offsets[5], effective[5], 0.3f)
+        assertEquals("slider plus offset", offsets[3], effective[3], 0.3f)
+        assertTrue(bars.all { it in 0f..1f } && peaks.all { it in 0f..1f })
+        assertFalse("music is playing", processor.tonalFrozen())
+        // Null arrays are fine: just the preamp.
+        assertEquals(preamp, processor.pollDspTelemetry(null, null, null), 0.5f)
     }
 
     @Test

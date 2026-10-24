@@ -50,7 +50,7 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     var bitPerfectPassthrough: Boolean = false
 
     private var formatCode = 0
-    private var configuredRate = 0
+    @Volatile private var configuredRate = 0
     private var configuredChannels = 0
     private var tailWritten = false
     private var heapInputCopy: ByteBuffer = EMPTY_DIRECT
@@ -70,35 +70,14 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     fun setEqEnabled(enabled: Boolean) = MobileEqNative.nativeSetEqEnabled(checkedHandle(), enabled)
 
     /**
-     * Winamp-style Auto: the engine listens to each song in octave bands and
-     * plays [setAutoTargetGains] plus the correction for what it hears,
-     * morphing to every new target over 400 ms, with dynamic bass.
+     * Auto: live spectral auto-calibration. The engine's analysis bank measures
+     * the music's balance as it plays (about 1.2 s) against the output's target
+     * curve, and live offsets of up to ±4.5 dB lift thin sub-bass and air and
+     * take out mud and harshness, on top of the sliders. Never from tags.
      */
     fun setAutoMode(enabled: Boolean) = MobileEqNative.nativeSetAutoMode(checkedHandle(), enabled)
 
-    /**
-     * A new song starts (call it on each track change): Auto listens to it
-     * afresh. Pass what [songLevels] reported for this song when it was heard
-     * before, and its correction applies at once.
-     */
-    fun startTrack(knownLevelsDb: FloatArray?) = MobileEqNative.nativeStartTrack(checkedHandle(), knownLevelsDb)
-
-    /** The song's octave-band levels as heard so far (dB, NaN where none) into [out]; returns the seconds heard. */
-    fun songLevels(out: FloatArray): Float = MobileEqNative.nativeSongLevels(checkedHandle(), out)
-
-    /** What listening adds to the listener's curve, dB per band, into [out]. */
-    fun listenCorrection(out: FloatArray) = MobileEqNative.nativeListenCorrection(checkedHandle(), out)
-
-    /** The curve Auto plays right now, dB per band, into [out]. */
-    fun autoCurve(out: FloatArray) = MobileEqNative.nativeAutoCurve(checkedHandle(), out)
-
-    /** The listener's curve under Auto; listening adds its correction on top. */
-    fun setAutoTargetGains(gainsDb: FloatArray) {
-        require(gainsDb.size >= BAND_COUNT) { "Expected $BAND_COUNT gains" }
-        MobileEqNative.nativeSetAutoTargetGains(checkedHandle(), gainsDb)
-    }
-
-    /** A manual preamp on top of the automatic compensation, -24..+12 dB. */
+    /** A manual preamp on top of the live automatic headroom, -24..+12 dB. */
     fun setPreampDb(preampDb: Float) = MobileEqNative.nativeSetUserPreamp(checkedHandle(), preampDb)
 
     /**
@@ -109,7 +88,7 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
 
     /** Where the sound goes; [AudioOutputMonitor] calls this on every routing change. */
     fun setOutputDeviceType(device: OutputDeviceType) =
-        MobileEqNative.nativeSetOutputDevice(checkedHandle(), device.engineCode)
+        MobileEqNative.nativeSetOutputDeviceType(checkedHandle(), device.engineCode)
 
     /** Stop feeding the spectrum analyzer while nothing shows it. */
     fun setAnalyzerEnabled(enabled: Boolean) = MobileEqNative.nativeSetAnalyzerEnabled(checkedHandle(), enabled)
@@ -118,17 +97,39 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     fun setSpectrumBarCount(bars: Int) = MobileEqNative.nativeSetSpectrumBarCount(checkedHandle(), bars)
 
     /**
-     * For a 60 fps UI: fills [bars] and [peaks] (allocate both once, at least
+     * The one call a 60 fps UI makes, garbage-free: fills [effectiveGains]
+     * (10: the sliders plus Auto's live offsets, ducking included), [bars] and
+     * [peaks] (32: the FFT, 0..1, ballistics applied); any may be null.
+     * Returns the live automatic preamp in dB (headroom, Bluetooth pad and
+     * the listener's preamp). Never blocks the audio thread.
+     */
+    fun pollDspTelemetry(effectiveGains: FloatArray?, bars: FloatArray?, peaks: FloatArray?): Float =
+        MobileEqNative.nativePollDspTelemetry(checkedHandle(), effectiveGains, bars, peaks)
+
+    /** Auto's live offset for each band right now, dB, into [out] (10 long). */
+    fun liveAutoOffsets(out: FloatArray) = MobileEqNative.nativeLiveAutoOffsets(checkedHandle(), out)
+
+    /** How far the harshness tamer is pulling the 4/8 kHz boost down right now, in dB. */
+    fun currentHarshDuckDb(): Float = MobileEqNative.nativeHarshDuckDb(checkedHandle())
+
+    /** Whether Auto's tonal adaptation is frozen (the music is below -42 dBFS). */
+    fun tonalFrozen(): Boolean = MobileEqNative.nativeTonalFrozen(checkedHandle())
+
+    /** The rate the engine runs at (the source's own; 0 before the first track). */
+    val sampleRate: Int get() = configuredRate
+
+    /**
+     * The spectrum alone: fills [bars] and [peaks] (allocate both once, at least
      * the bar count long) with 0..1 heights, ballistics already applied, and
      * returns the number of bars. Garbage-free; never blocks the audio thread.
      */
     fun pollSpectrum(bars: FloatArray, peaks: FloatArray?): Int =
         MobileEqNative.nativePollSpectrum(checkedHandle(), bars, peaks)
 
-    /** The automatic preamp being applied, in dB. */
+    /** The whole preamp being applied, in dB: live headroom, Bluetooth pad, the listener's and ReplayGain. */
     fun currentPreampDb(): Float = MobileEqNative.nativeTargetPreampDb(checkedHandle())
 
-    /** How far Auto's dynamic bass is pulling the 31/62 Hz boost down right now, in dB. */
+    /** How far the dynamic bass is pulling the 31/62 Hz boost down right now, in dB. */
     fun currentBassDuckDb(): Float = MobileEqNative.nativeBassDuckDb(checkedHandle())
 
     /** Frees the native engine. Call once the player is released; the processor is unusable after. */

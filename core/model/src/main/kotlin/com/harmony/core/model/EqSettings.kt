@@ -15,9 +15,9 @@ data class EqSettings(
     /** A preamp on top of the engine's automatic headroom, -12..+12 dB. */
     val preampDb: Float = 0f,
     /**
-     * AUTO: the engine listens to each song and adds a correction for what it
-     * hears to [bandGainsDb] (see [EqAuto]); the sub-bass boost also backs off
-     * on heavy kicks.
+     * AUTO: live spectral auto-calibration. The engine measures the music's
+     * balance as it plays and adds live offsets (±4.5 dB) to [bandGainsDb]:
+     * thin sub-bass and air lifted, mud and harshness cut. Never from tags.
      */
     val auto: Boolean = false,
     /**
@@ -79,33 +79,8 @@ object EqPresets {
     }?.first
 }
 
-/** What Auto is playing the current song with, for the screen. */
-data class EqAutoCurve(
-    /** The curve playing now: the listener's own plus [correctionDb]. */
-    val gainsDb: List<Float>,
-    /** What listening to the song adds, dB per band. */
-    val correctionDb: List<Float>,
-    /** Seconds of the song Auto has heard (silence doesn't count). */
-    val heardSeconds: Float,
-    /** The song was heard before, so its correction applied from the first second. */
-    val remembered: Boolean,
-)
-
-/**
- * Auto listens: the native engine hears each song in the equalizer's octave
- * bands, compares its tone with a typical well-mastered record and evens part
- * of the difference out (a boomy song loses some bass, a dull one gets some
- * air), fading in over the song's first [SETTLE_SECONDS] and morphing to each
- * new curve over 400 ms. A song heard before starts with what was learned
- * about it.
- */
+/** Settings migrations for the equalizer. */
 object EqAuto {
-    /** Heard this long, a song's correction applies in full. */
-    const val SETTLE_SECONDS = 8f
-
-    /** A song heard at least this long is remembered for next time. */
-    const val REMEMBER_AFTER_SECONDS = 20f
-
     /**
      * Turns the old Winamp equalizer's sliders (60 Hz … 16 kHz, ±20 dB) into
      * these bands, so the sound a listener chose before survives the update.
