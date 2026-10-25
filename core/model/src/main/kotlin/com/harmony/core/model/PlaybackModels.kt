@@ -56,6 +56,15 @@ data class PlayerState(
      * after the first one.
      */
     val advancedAutomatically: Boolean = false,
+    /**
+     * Bumps each time the app replaces the whole queue (a list started:
+     * an album, a playlist, a search result), and only then. Moving within
+     * the queue (next, previous, a tap on a queued song) and queue edits
+     * (play next, Smart Shuffle's appends) leave it alone, so Smart Shuffle
+     * can tell "the user chose a new list" from "the user moved around in
+     * this one" without guessing from how the song changed.
+     */
+    val queueGeneration: Int = 0,
     /** Where audio is currently being routed (speaker / wired / Bluetooth…). */
     val audioOutput: AudioOutput = AudioOutput(),
     /**

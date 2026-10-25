@@ -103,6 +103,12 @@ class PlaybackConnection @Inject constructor(
     /** See PlayerState.advancedAutomatically. */
     private var lastAdvanceWasAutomatic = false
 
+    /** See PlayerState.queueGeneration: bumped by [setQueue] only. */
+    private var queueGeneration = 0
+
+    private val _externalShuffleRequests = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    override val externalShuffleRequests: kotlinx.coroutines.flow.Flow<Unit> = _externalShuffleRequests
+
     private var playNextAnchorId: String? = null
     private var playNextRunLength = 0
     private val pendingLookups = mutableSetOf<String>()
@@ -208,7 +214,8 @@ class PlaybackConnection @Inject constructor(
                 tickerJob = startPositionTicker()
                 restoredThisConnection = false
                 maybeRestore(connected)
-                connected.shuffleModeEnabled = localShuffleMode == ShuffleMode.RANDOM
+                // Never ExoPlayer's shuffle: Harmony orders the queue itself (see setShuffleMode).
+                connected.shuffleModeEnabled = false
                 persistentCommands.forEach { (action, args) ->
                     connected.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args)
                 }
@@ -298,6 +305,16 @@ class PlaybackConnection @Inject constructor(
             }
             tickListenTime()
             syncState()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            // Someone outside the app (a Bluetooth or notification shuffle
+            // button, a watch) switched on the player's own shuffle. It would
+            // play a hidden order behind the queue Harmony shows, so it goes
+            // straight back off and the request is handed to Smart Shuffle.
+            if (!shuffleModeEnabled) return
+            controller?.shuffleModeEnabled = false
+            _externalShuffleRequests.tryEmit(Unit)
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -477,6 +494,7 @@ class PlaybackConnection @Inject constructor(
             upcomingSong = upcomingSong,
             playNextCount = playNextCount,
             advancedAutomatically = lastAdvanceWasAutomatic,
+            queueGeneration = queueGeneration,
             audioOutput = connect.state.value.active
                 ?.let { com.harmony.core.model.AudioOutput(com.harmony.core.model.AudioOutputType.COMPUTER, it.name) }
                 ?: audioOutputMonitor.output.value,
@@ -489,6 +507,8 @@ class PlaybackConnection @Inject constructor(
         val c = controllerOrNull() ?: return
         songCache.clear()
         songs.forEach { songCache[it.id.toString()] = it }
+        // A new list: the one and only place the generation moves (Smart Shuffle hands over on it).
+        queueGeneration++
         c.setMediaItems(songs.map(::toMediaItem), if (songs.isEmpty()) 0 else startIndex.coerceIn(songs.indices), 0L)
         c.playWhenReady = playWhenReady
         c.prepare()
@@ -537,6 +557,21 @@ class PlaybackConnection @Inject constructor(
         if (to > from) c.removeMediaItems(from, to)
     }
 
+    override suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>) {
+        val c = controllerOrNull() ?: return
+        songs.forEach { songCache[it.id.toString()] = it }
+        val from = fromIndex.coerceIn(0, c.mediaItemCount)
+        val to = toIndexExclusive.coerceIn(from, c.mediaItemCount)
+        // One Media3 operation: the timeline changes once, the song playing
+        // (always before [from]) never stops, and there is no window in which
+        // the queue is shorter than it should be.
+        when {
+            to > from && songs.isNotEmpty() -> c.replaceMediaItems(from, to, songs.map(::toMediaItem))
+            to > from -> c.removeMediaItems(from, to)
+            songs.isNotEmpty() -> c.addMediaItems(from, songs.map(::toMediaItem))
+        }
+    }
+
     override suspend fun removeFromQueue(index: Int) {
         val c = controllerOrNull() ?: return
         if (index in 0 until c.mediaItemCount) c.removeMediaItem(index)
@@ -581,10 +616,13 @@ class PlaybackConnection @Inject constructor(
 
     override fun setShuffleMode(mode: ShuffleMode) {
         localShuffleMode = mode
-        // RANDOM maps to ExoPlayer's shuffle order; SMART/JOURNEY are queue
-        // strategies driven by domain-shuffle in Phase 7 and keep native
-        // shuffle off (successors are chosen explicitly).
-        controller?.shuffleModeEnabled = mode == ShuffleMode.RANDOM
+        // Every mode keeps ExoPlayer's own shuffle OFF. SmartQueueManager
+        // physically orders the queue for RANDOM as for SMART and JOURNEY, so
+        // the player plays exactly the order the queue screen shows. With
+        // native shuffle on, Media3's DefaultShuffleOrder placed every added
+        // song (play next included) at a random position, and every new list
+        // got a new hidden order.
+        controller?.shuffleModeEnabled = false
         syncState()
     }
 

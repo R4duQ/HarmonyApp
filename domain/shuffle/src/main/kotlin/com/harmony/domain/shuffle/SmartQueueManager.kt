@@ -1,6 +1,7 @@
 package com.harmony.domain.shuffle
 
 import com.harmony.core.model.MoodFilter
+import com.harmony.core.model.PlayerState
 import com.harmony.core.model.QueuedDecision
 import com.harmony.core.model.SessionEvent
 import com.harmony.core.model.ShuffleBrainTelemetry
@@ -25,44 +26,55 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
 
 /**
- * Runs Smart Shuffle and Journey on the player's queue, with the
- * [ShuffleBrain] (the native SmartShuffleEngine and its Diagnostic Brain)
- * choosing the songs.
+ * Orders the player's queue for every shuffle mode, with the [ShuffleBrain]
+ * (the native SmartShuffleEngine and its Diagnostic Brain) choosing the
+ * Smart Shuffle and Journey songs.
  *
- * **Rolling queue.** The player's queue always holds the next songs before
- * they are needed, so gapless playback, a Bluetooth "next" with the app's UI
- * gone and the queue screen all keep working. When fewer than [REFILL_BELOW]
- * songs are left ahead, the brain builds a batch up to [QUEUE_TARGET] in one
- * pass: scored, sampled (Efraimidis-Spirakis), dithered against artist
- * clumps, chained for smooth transitions and audited.
+ * **One order, played as shown.** ExoPlayer's own shuffle is never on (see
+ * PlaybackConnection.setShuffleMode): RANDOM is a physical shuffle of the
+ * upcoming songs done here, SMART and JOURNEY append the brain's picks, and
+ * the player always plays the queue's linear order, the order the queue
+ * screen shows.
  *
- * **Live feedback.** Every move to another song arrives as a [PlayOutcome]:
- * a play past half pulls the session vibe vector S_t toward the song, a fast
- * skip under 20% pushes it away and re-ranks the generated tail at once, a
- * song picked by hand (or swiped in as Play next) anchors S_t on itself.
+ * **The queue is stable.** Indices 0..current (what was played and what
+ * plays) are never rewritten, so Previous always goes back to the exact
+ * songs just heard. Moving around never rebuilds anything:
  *
- * **What it never touches.** Songs the user queued (the Play next run, songs
- * added to the end) are kept through every re-rank; switching Smart Shuffle
- * off puts the original running order back.
+ *  - a song ending, or Next after more than 20%: the queue stays as it is;
+ *    when fewer than [REFILL_BELOW] songs are left ahead, a few picks are
+ *    appended at the very end, up to [QUEUE_TARGET];
+ *  - Previous: seekToPrevious into the history, nothing else;
+ *  - a tap on a queued song: seekTo(index), nothing else (a song the brain
+ *    didn't pick anchors the session vibe on it, without touching the queue);
+ *  - a fast skip under 20% (Smart Shuffle): after a [RERANK_DEBOUNCE_MS]
+ *    pause (so a burst of Nexts is one re-rank, not three), only the
+ *    generated picks from current + 2 on are replaced, in one
+ *    replaceMediaItems, so the song playing and the next one (already
+ *    loaded for the crossfade) never change.
+ *
+ * Only a NEW list (an album or playlist started, [PlayerState.queueGeneration])
+ * hands over: the session anchors on the chosen song and Smart Shuffle
+ * continues after it. Songs the user queued (the Play next run, songs added
+ * to the end) are never replaced; switching shuffle off puts the original
+ * running order back.
+ *
+ * **Re-entrancy.** The manager's own queue writes change the player state,
+ * which this manager listens to. While a write is in progress
+ * ([isMutatingQueue]) those changes are not acted on; once it ends, the
+ * latest state is looked at once.
  *
  * **Telemetry.** [telemetry] carries S_t, the last audit and the reason for
  * every upcoming pick, for ShuffleBrainDebugOverlay; each queue update is
  * also written to Logcat as a table (tag SHUFFLE_BRAIN).
- *
- * Exclusion per batch: the recently-played window, everything in the queue and
- * the last [SESSION_MEMORY] picks. If the brain is unavailable or returns too
- * few songs, random library picks fill the gap, so playback never stalls.
  */
 @Singleton
 class SmartQueueManager @Inject constructor(
@@ -96,38 +108,55 @@ class SmartQueueManager @Inject constructor(
         _debugOverlayVisible.value = visible
     }
 
-    /** Serializes brain calls and queue writes, so a burst of events can't double-append. */
+    /** Serializes brain calls and queue writes, so a burst of events can't double-append. Not reentrant. */
     private val mutex = Mutex()
-    private val sessionPicks = ArrayDeque<Long>()
     private var managerScope: CoroutineScope? = null
     private var configRefreshJob: Job? = null
     private val random = Random(System.nanoTime())
+
+    /**
+     * The re-entrancy guard: depth of queue writes this manager has in
+     * progress. Read and written on the manager's scope (the main thread).
+     */
+    private var mutationDepth = 0
+
+    /** True while this manager is writing the queue; its own changes are not reacted to. */
+    val isMutatingQueue: Boolean get() = mutationDepth > 0
+
+    /**
+     * Ids of the songs this manager put into the CURRENT queue: the only ones
+     * a re-rank may replace. Cleared when the user starts a new list.
+     */
+    private val generated = LinkedHashSet<Long>()
+
+    /** Recent picks across queues, so a new batch doesn't repeat them (bounded by [SESSION_MEMORY]). */
+    private val sessionPicks = ArrayDeque<Long>()
 
     /** Why each song this manager queued was picked, by song id (bounded). */
     private val decisions = object : LinkedHashMap<Long, QueuedDecision>(64, 0.75f, false) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, QueuedDecision>?) = size > 200
     }
 
-    /** After a fast skip: the generated tail that was dropped, for the brain's Check 2. */
-    private var pendingReplacedTail: List<Long>? = null
+    /** The pending fast-skip re-rank (debounced). */
+    private var reRankJob: Job? = null
+
+    /** The song left by a tap on a queued song: its outcome teaches the brain but re-ranks nothing. */
+    private var manualJumpFromSongId: Long? = null
 
     private var journeyAnchorSongId: Long? = null
 
-    /** Last user-selected song already handed over to Smart Shuffle. */
-    private var lastHandoverSongId: Long? = null
-
     /**
-     * The queue exactly as the user chose it, captured before Smart Shuffle
-     * trimmed the linear tail, so switching shuffle OFF can put the original
-     * running order back.
+     * The queue exactly as the user chose it, captured before shuffling
+     * changed the upcoming part, so switching shuffle OFF can put the
+     * original running order back.
      */
     private var preShuffleQueue: List<Song>? = null
 
-    /** Previous shuffle mode, to detect the ON -> OFF transition. */
+    /** Shuffle mode as of the previous signal (null before the first). */
     private var lastShuffleMode: ShuffleMode? = null
 
-    /** Shuffle mode as of the previous signal, for the handover (see [handOverToSmartShuffle]). */
-    private var lastHandoverMode: ShuffleMode? = null
+    /** Queue generation as of the previous signal (null before the first: that one is the baseline). */
+    private var lastGeneration: Int? = null
 
     /** Last song reported to the brain as started, so each start is counted once. */
     private var lastStartedSongId: Long? = null
@@ -142,8 +171,11 @@ class SmartQueueManager @Inject constructor(
         val size: Int,
         val currentSongId: Long?,
         val playNextCount: Int,
-        val advancedAutomatically: Boolean,
+        val generation: Int,
     )
+
+    private fun PlayerState.toSignal() =
+        QueueSignal(shuffleMode, queueIndex, queue.size, currentSong?.id, playNextCount, queueGeneration)
 
     fun start(scope: CoroutineScope) {
         managerScope = scope
@@ -158,27 +190,15 @@ class SmartQueueManager @Inject constructor(
         }
         scope.launch {
             playback.playerState
-                .map {
-                    QueueSignal(
-                        it.shuffleMode,
-                        it.queueIndex,
-                        it.queue.size,
-                        it.currentSong?.id,
-                        it.playNextCount,
-                        it.advancedAutomatically,
-                    )
-                }
+                .map { it.toSignal() }
                 .distinctUntilChanged()
                 .collect { signal ->
-                    endJourneyIfUserNavigatedAway(signal.currentSongId)
-                    restoreOriginalOrderIfLeavingSmart(signal)
-                    handOverToSmartShuffle(signal)
-                    boostOnSwipe(signal)
-                    noteTrackStarted(signal.currentSongId)
-                    if (signal.mode == ShuffleMode.SMART || signal.mode == ShuffleMode.JOURNEY) {
-                        maybeTopUp(signal.mode, signal.index, signal.size)
+                    // Our own writes: looked at once, when they are done (see mutateQueue).
+                    if (isMutatingQueue) {
+                        publishUpcoming()
+                        return@collect
                     }
-                    publishUpcoming()
+                    react(signal)
                 }
         }
         scope.launch {
@@ -187,61 +207,158 @@ class SmartQueueManager @Inject constructor(
         scope.launch {
             _config.collect { config -> mutex.withLock { runCatching { brain.applyConfig(config) } } }
         }
+        scope.launch {
+            // A Bluetooth/notification shuffle button: the same as the app's own.
+            playback.externalShuffleRequests.collect { toggleShuffle() }
+        }
+    }
+
+    /** Everything a change of the player's state can call for, in order. */
+    private suspend fun react(signal: QueueSignal) {
+        endJourneyIfUserNavigatedAway(signal.currentSongId)
+        onModeTransition(signal)
+        handOverOnNewQueue(signal)
+        boostOnSwipe(signal)
+        noteTrackStarted(signal.currentSongId)
+        val mode = playback.playerState.value.shuffleMode
+        if (mode == ShuffleMode.SMART || mode == ShuffleMode.JOURNEY) {
+            maybeTopUp(mode, signal.index, signal.size)
+        }
+        publishUpcoming()
+    }
+
+    /**
+     * Runs one of this manager's queue writes with the re-entrancy guard up:
+     * the state changes it causes are not reacted to while it runs, and the
+     * resulting state is looked at once afterwards (launched, so it never
+     * runs inside a caller's [mutex]).
+     */
+    private suspend fun <T> mutateQueue(block: suspend () -> T): T {
+        mutationDepth++
+        try {
+            return block()
+        } finally {
+            mutationDepth--
+            if (mutationDepth == 0) {
+                managerScope?.launch { if (!isMutatingQueue) react(playback.playerState.value.toSignal()) }
+            }
+        }
+    }
+
+    /** A queue write from outside the [mutex]. */
+    private suspend fun writeQueue(block: suspend () -> Unit) = mutex.withLock { mutateQueue(block) }
+
+    // -- Transport (PlayerViewModel's buttons and the queue sheet) ------------------------
+
+    /** Next: the queue stays as it is; a fast skip re-ranks the tail later (see [onPlayOutcome]). */
+    fun skipToNext() = playback.skipToNext()
+
+    /** Previous: back into the history (or to the start of the song), never a queue change. */
+    fun skipToPrevious() {
+        // Going back undoes the intent of a skip still waiting to re-rank.
+        reRankJob?.cancel()
+        playback.skipToPrevious()
+    }
+
+    /**
+     * A tap on a song in the queue: a seek to it, nothing else. A song the
+     * brain didn't pick (one the user queued, or one of the original list)
+     * anchors the session vibe on it; the queue itself is not touched.
+     */
+    fun playQueueItem(index: Int) {
+        val state = playback.playerState.value
+        val target = state.queue.getOrNull(index) ?: return
+        if (index == state.queueIndex) {
+            playback.seekTo(0)
+            return
+        }
+        // A jump forward reports the song left as a (fast) skip: it teaches, but must not re-rank.
+        manualJumpFromSongId = state.currentSong?.id?.takeIf { index > state.queueIndex }
+        reRankJob?.cancel()
+        playback.skipToQueueItem(index)
+        if (state.shuffleMode == ShuffleMode.SMART && target.id !in generated) {
+            val scope = managerScope ?: return
+            scope.launch {
+                val event = mutex.withLock { runCatching { brain.onManualSelect(target.id) }.getOrDefault(SessionEvent.NONE) }
+                publish(lastEvent = event)
+            }
+        }
     }
 
     // -- Feedback -----------------------------------------------------------------------
 
     /**
      * A song was left. Past half: S_t moves toward it. Under 20% (a fast
-     * skip): S_t is pushed away and the generated tail re-ranked, so the next
-     * songs reflect the skip right away instead of four songs later.
-     * Stepping back is not a verdict on the song and teaches nothing.
+     * skip): S_t is pushed away and, after a pause, the generated tail is
+     * re-ranked. Stepping back, and a tap ahead in the queue, re-rank nothing.
      */
     private suspend fun onPlayOutcome(outcome: PlayOutcome) {
         if (outcome.movedBackward) return
+        val jumped = outcome.songId == manualJumpFromSongId
+        if (jumped) manualJumpFromSongId = null
         val event = mutex.withLock {
             runCatching {
                 brain.onPlaybackOutcome(
                     songId = outcome.songId,
                     fraction = outcome.fraction,
                     atMillis = outcome.atMillis,
-                    shufflePick = outcome.songId in sessionPicks,
+                    shufflePick = outcome.songId in generated,
                 )
             }.getOrDefault(SessionEvent.NONE)
         }
-        if (event == SessionEvent.FAST_SKIP && playback.playerState.value.shuffleMode == ShuffleMode.SMART) {
-            reRankAfterSkip(outcome.songId)
+        if (event == SessionEvent.FAST_SKIP && !jumped && playback.playerState.value.shuffleMode == ShuffleMode.SMART) {
+            scheduleReRank(afterSkip = true)
         }
         publish(lastEvent = event)
     }
 
     /**
-     * Drops the generated tail behind the song now playing (never the user's
-     * own queued songs), remembering it for the brain's Check 2; the queue
-     * change refills it under the repelled S_t.
+     * Debounces re-ranks: a burst of Nexts (or a slider dragged) restarts the
+     * wait, so the tail is rebuilt once, against the song finally reached.
+     * A re-rank scheduled before the user started a new list is dropped.
      */
-    private suspend fun reRankAfterSkip(skippedId: Long) {
-        // The outcome can arrive a beat before the player state shows the next song.
-        withTimeoutOrNull(SKIP_SETTLE_MS) {
-            playback.playerState.first { it.currentSong?.id != skippedId }
-        } ?: return
-        mutex.withLock {
-            val state = playback.playerState.value
-            // Only a skip to the next entry re-ranks; a song picked from
-            // elsewhere is the handover's job (it anchors S_t on the pick).
-            if (state.queue.getOrNull(state.queueIndex - 1)?.id != skippedId) return
-            val generated = state.queue.indices
-                .filter { it > state.queueIndex && state.queue[it].id in sessionPicks }
-            if (generated.isEmpty()) return
-            pendingReplacedTail = generated.map { state.queue[it].id }
-            generated.sortedDescending().forEach { playback.removeFromQueue(it) }
+    private fun scheduleReRank(afterSkip: Boolean, debounceMs: Long = RERANK_DEBOUNCE_MS) {
+        val scope = managerScope ?: return
+        val generation = playback.playerState.value.queueGeneration
+        reRankJob?.cancel()
+        reRankJob = scope.launch {
+            delay(debounceMs)
+            if (playback.playerState.value.queueGeneration != generation) return@launch
+            reRankTail(afterSkip)
         }
+    }
+
+    /**
+     * Replaces the generated picks after the protected head with a new brain
+     * batch, in one replaceMediaItems. The protected head: the song playing,
+     * the next one (loaded for gapless/crossfade) and the whole Play next run.
+     * Songs the user queued that sat among the picks are kept, in front.
+     */
+    private suspend fun reRankTail(afterSkip: Boolean) = mutex.withLock {
+        val state = playback.playerState.value
+        if (state.shuffleMode != ShuffleMode.SMART) return@withLock
+        val current = state.currentSong ?: return@withLock
+        val index = state.queueIndex
+        val from = (index + 1 + maxOf(1, state.playNextCount)).coerceAtMost(state.queue.size)
+        val tail = state.queue.subList(from, state.queue.size)
+        val replaced = tail.filter { it.id in generated }.map { it.id }
+        if (replaced.isEmpty()) return@withLock
+        val kept = tail.filter { it.id !in generated }
+        val prefixIds = state.queue.subList(index + 1, from).map { it.id } + kept.map { it.id }
+        val need = (QUEUE_TARGET - prefixIds.size).coerceAtLeast(0)
+        val exclude = buildExcludeSet(state.queue.subList(0, from).map { it.id } + kept.map { it.id }).toMutableSet()
+        val (picks, plan) = pickSongs(current, prefixIds, need, exclude, if (afterSkip) replaced else emptyList())
+        replaced.forEach(generated::remove)
+        picks.forEach { generated.add(it.id) }
+        mutateQueue { playback.replaceQueueRange(from, state.queue.size, kept + picks) }
+        publish(lastEvent = null, plan = plan)
+        brainLog.write(ShuffleBrainLogFormatter.format(_telemetry.value, if (afterSkip) "re-rank" else "refresh"))
     }
 
     /**
      * The swipe boost: a song swiped in as Play next under Smart Shuffle is
      * an explicit choice, so S_t anchors on it and the generated tail behind
-     * the Play next run is re-ranked around it.
+     * the Play next run is re-ranked around it (the run itself is kept).
      */
     private suspend fun boostOnSwipe(signal: QueueSignal) {
         val grew = signal.currentSongId != null &&
@@ -254,7 +371,7 @@ class SmartQueueManager @Inject constructor(
         val newest = state.queue.getOrNull(state.queueIndex + signal.playNextCount) ?: return
         val event = mutex.withLock { runCatching { brain.onManualSelect(newest.id) }.getOrDefault(SessionEvent.NONE) }
         publish(lastEvent = event)
-        dropGeneratedTail(ShuffleMode.SMART)
+        scheduleReRank(afterSkip = false, debounceMs = SWIPE_RERANK_DEBOUNCE_MS)
     }
 
     /** Each newly started song goes to the brain once (Markov habits, S_t seeding). */
@@ -265,45 +382,129 @@ class SmartQueueManager @Inject constructor(
         if (event != SessionEvent.NONE) publish(lastEvent = event)
     }
 
+    // -- A new list -------------------------------------------------------------------------
+
+    /**
+     * The user started a new list (the queue generation moved). In Smart
+     * Shuffle the session anchors on the chosen song and the list's linear
+     * tail (after the Play next run) makes way for the brain's picks; in
+     * RANDOM the list is shuffled physically, the chosen song first.
+     * Nothing else (next, previous, a tap in the queue) ever gets here.
+     */
+    private suspend fun handOverOnNewQueue(signal: QueueSignal) {
+        val previous = lastGeneration
+        lastGeneration = signal.generation
+        if (previous == null || previous == signal.generation) return
+        // The picks belonged to the old queue.
+        generated.clear()
+        reRankJob?.cancel()
+        val state = playback.playerState.value
+        when (state.shuffleMode) {
+            ShuffleMode.OFF -> preShuffleQueue = null
+            ShuffleMode.RANDOM -> {
+                preShuffleQueue = state.queue
+                shuffleNewList(state)
+            }
+            ShuffleMode.SMART, ShuffleMode.JOURNEY -> {
+                if (state.shuffleMode == ShuffleMode.JOURNEY) finishJourney()
+                preShuffleQueue = state.queue
+                val id = state.currentSong?.id ?: return
+                // The manual pick boost: S_t = normalize(0.85 v + 0.15 S_t-1).
+                val event = mutex.withLock { runCatching { brain.onManualSelect(id) }.getOrDefault(SessionEvent.NONE) }
+                publish(lastEvent = event)
+                val keepThrough = state.queueIndex + state.playNextCount
+                if (state.queue.size - 1 > keepThrough) {
+                    writeQueue { playback.removeQueueRange(keepThrough + 1, state.queue.size) }
+                }
+            }
+        }
+    }
+
+    /** RANDOM, new list: the chosen song, then every other song of the list in a random order. */
+    private suspend fun shuffleNewList(state: PlayerState) {
+        val index = state.queueIndex
+        if (index < 0 || state.queue.size < 2) return
+        val others = state.queue.filterIndexed { i, _ -> i != index }.shuffled(random)
+        writeQueue {
+            // A fresh list has no history: the songs before the chosen one join the shuffle.
+            if (index > 0) playback.removeQueueRange(0, index)
+            playback.replaceQueueRange(1, Int.MAX_VALUE, others)
+        }
+    }
+
+    /** Ends a running journey the moment the user plays something that isn't part of it. */
+    private fun endJourneyIfUserNavigatedAway(currentSongId: Long?) {
+        if (_journey.value == null || currentSongId == null) return
+        val belongsToJourney = currentSongId == journeyAnchorSongId || currentSongId in generated
+        if (!belongsToJourney) finishJourney()
+    }
+
     // -- Mode changes ---------------------------------------------------------------------
 
     /**
-     * Leaving Smart Shuffle (for OFF or RANDOM) puts the user's original
-     * running order back, without touching the song playing: only the
-     * upcoming part of the queue is rewritten. Songs the user queued while
-     * Smart Shuffle was on (the Play next run, songs added to the end) are
-     * kept, at the front of what's coming.
+     * Shuffle mode transitions that rewrite the upcoming songs (never the
+     * song playing or the history):
+     *
+     *  - leaving Smart Shuffle/Journey or RANDOM for OFF: the original running
+     *    order comes back;
+     *  - Smart Shuffle/Journey to RANDOM: the original songs come back, shuffled;
+     *  - OFF to RANDOM: the upcoming songs are shuffled in place.
+     *
+     * Turning Smart Shuffle on is [onShuffleActivated] (called by [chooseShuffleMode]).
      */
-    private suspend fun restoreOriginalOrderIfLeavingSmart(signal: QueueSignal) {
-        val mode = signal.mode
+    private suspend fun onModeTransition(signal: QueueSignal) {
+        val mode = playback.playerState.value.shuffleMode
         val previous = lastShuffleMode
         lastShuffleMode = mode
-        val wasSmart = previous == ShuffleMode.SMART || previous == ShuffleMode.JOURNEY
-        if (!wasSmart) {
-            // Shuffle was already off: any snapshot still held is stale.
-            if (mode == ShuffleMode.OFF || mode == ShuffleMode.RANDOM) preShuffleQueue = null
+        if (previous == null || previous == mode) {
+            if (previous == null && mode == ShuffleMode.OFF) preShuffleQueue = null
             return
         }
-        if (mode != ShuffleMode.OFF && mode != ShuffleMode.RANDOM) return
+        val wasSmart = previous == ShuffleMode.SMART || previous == ShuffleMode.JOURNEY
+        val isSmart = mode == ShuffleMode.SMART || mode == ShuffleMode.JOURNEY
+        if (wasSmart && !isSmart) {
+            // The session ends with Smart Shuffle; habits stay.
+            reRankJob?.cancel()
+            mutex.withLock { runCatching { brain.resetSession() } }
+            publish(lastEvent = SessionEvent.NONE)
+        }
+        when {
+            mode == ShuffleMode.OFF && (wasSmart || previous == ShuffleMode.RANDOM) -> restoreOriginalOrder(signal, shuffle = false)
+            mode == ShuffleMode.RANDOM && wasSmart -> restoreOriginalOrder(signal, shuffle = true)
+            mode == ShuffleMode.RANDOM && previous == ShuffleMode.OFF -> shuffleUpcomingInPlace()
+        }
+    }
 
-        // The session ends with Smart Shuffle; habits stay.
-        mutex.withLock { runCatching { brain.resetSession() } }
-        publish(lastEvent = SessionEvent.NONE)
-
-        val original = preShuffleQueue ?: return
+    /**
+     * Puts the user's original running order back after the song playing
+     * ([shuffle]: in a random order, for RANDOM). Songs the user queued
+     * while shuffling (the Play next run, songs added to the end) are kept,
+     * at the front of what's coming.
+     */
+    private suspend fun restoreOriginalOrder(signal: QueueSignal, shuffle: Boolean) {
+        val original = preShuffleQueue
+        if (!shuffle) preShuffleQueue = null
+        if (original == null) {
+            generated.clear()
+            return
+        }
         val state = playback.playerState.value
         val currentId = state.currentSong?.id
         val position = original.indexOfFirst { it.id == currentId }
-        val tail = if (position >= 0) original.drop(position + 1) else original
+        if (position < 0) {
+            // Another list plays now (started from a car, say): nothing of the old one to restore.
+            generated.clear()
+            if (shuffle) preShuffleQueue = null
+            return
+        }
+        val tail = original.drop(position + 1)
 
         // User-queued songs: the Play next run (counted) and songs added to
         // the end (recognised by elimination: not in the snapshot, not a pick).
         val originalIds = original.mapTo(HashSet()) { it.id }
         val currentTail = state.queue.drop(state.queueIndex + 1)
         val queuedByUser = currentTail.take(signal.playNextCount) +
-            currentTail.drop(signal.playNextCount).filter {
-                it.id !in originalIds && it.id !in sessionPicks
-            }
+            currentTail.drop(signal.playNextCount).filter { it.id !in originalIds && it.id !in generated }
 
         // A kept song that also sits in the restored order plays where the
         // user put it, not twice: one occurrence is dropped from the tail.
@@ -312,60 +513,20 @@ class SmartQueueManager @Inject constructor(
             val duplicate = restored.indexOfFirst { it.id == queued.id }
             if (duplicate >= 0) restored.removeAt(duplicate)
         }
-
-        preShuffleQueue = null
-        lastHandoverSongId = null
-        sessionPicks.clear()
-        if (restored.isEmpty() && queuedByUser.isEmpty()) return
-        playback.removeQueueRange(state.queueIndex + 1, state.queue.size)
-        if (queuedByUser.isNotEmpty()) playback.addToQueueAll(queuedByUser)
-        if (restored.isNotEmpty()) playback.addToQueueAll(restored)
+        val ordered = if (shuffle) restored.shuffled(random) else restored
+        generated.clear()
+        if (ordered.isEmpty() && queuedByUser.isEmpty() && currentTail.isEmpty()) return
+        writeQueue { playback.replaceQueueRange(state.queueIndex + 1, state.queue.size, queuedByUser + ordered) }
     }
 
-    /**
-     * When Smart Shuffle is on and the user starts a song from a list (an
-     * album, a playlist), the queue becomes that whole list, and the
-     * rolling top-up would never get a turn. So a NEW song chosen by hand
-     * drops the linear tail (keeping the Play next run), anchors S_t on the
-     * chosen song, and Smart Shuffle continues from there.
-     *
-     * Not for: switching shuffle on (a mode change, handled by
-     * [onShuffleActivated]), our own picks, or rolling into the next entry.
-     */
-    private suspend fun handOverToSmartShuffle(signal: QueueSignal) {
-        val previousMode = lastHandoverMode
-        lastHandoverMode = signal.mode
-        if (signal.mode != ShuffleMode.SMART) return
-        val id = signal.currentSongId ?: return
-        if (previousMode != ShuffleMode.SMART) {
-            lastHandoverSongId = id
-            if (preShuffleQueue == null) preShuffleQueue = playback.playerState.value.queue
-            return
-        }
-        if (id in sessionPicks) return
-        if (id == lastHandoverSongId) return
-        if (signal.advancedAutomatically) {
-            lastHandoverSongId = id
-            return
-        }
-        val keepThrough = signal.index + signal.playNextCount
-        val lastIndex = signal.size - 1
-        lastHandoverSongId = id
-        preShuffleQueue = playback.playerState.value.queue
-        sessionPicks.clear()
-        // The manual pick boost: S_t = normalize(0.85 v + 0.15 S_t-1).
-        val event = mutex.withLock { runCatching { brain.onManualSelect(id) }.getOrDefault(SessionEvent.NONE) }
-        publish(lastEvent = event)
-        if (lastIndex > keepThrough) {
-            playback.removeQueueRange(keepThrough + 1, signal.size)
-        }
-    }
-
-    /** Ends a running journey the moment the user plays something that isn't part of it. */
-    private fun endJourneyIfUserNavigatedAway(currentSongId: Long?) {
-        if (_journey.value == null || currentSongId == null) return
-        val belongsToJourney = currentSongId == journeyAnchorSongId || currentSongId in sessionPicks
-        if (!belongsToJourney) finishJourney()
+    /** OFF to RANDOM: the songs after the Play next run, shuffled where they are. */
+    private suspend fun shuffleUpcomingInPlace() {
+        val state = playback.playerState.value
+        preShuffleQueue = state.queue
+        val from = (state.queueIndex + 1 + state.playNextCount).coerceAtMost(state.queue.size)
+        val tail = state.queue.drop(from)
+        if (tail.size < 2) return
+        writeQueue { playback.replaceQueueRange(from, state.queue.size, tail.shuffled(random)) }
     }
 
     // -- Controls (the Smart Shuffle sheet) ---------------------------------------------
@@ -439,40 +600,58 @@ class SmartQueueManager @Inject constructor(
     private fun ensureShuffleActive(): Boolean {
         val current = playback.playerState.value.shuffleMode
         if (current == ShuffleMode.SMART || current == ShuffleMode.JOURNEY) return false
-        playback.setShuffleMode(ShuffleMode.SMART)
-        onShuffleActivated()
+        activate(ShuffleMode.SMART)
         return true
     }
 
     /**
-     * Called on a real transition INTO Smart Shuffle or Journey. A new
-     * session starts (S_t reseeds from the song playing), the queue is
-     * snapshotted for the restore, and the linear tail after the Play next
-     * run is dropped so the rolling top-up takes over.
+     * Turns Smart Shuffle on (or restarts it: a fresh session from the song
+     * playing), as "Start Mix" on Home does.
      */
-    fun onShuffleActivated() {
+    fun activateSmartShuffle() {
+        onShuffleModeChosen(ShuffleMode.SMART)
+        activate(ShuffleMode.SMART)
+    }
+
+    /**
+     * A real transition INTO Smart Shuffle or Journey. The re-entrancy guard
+     * goes up BEFORE the mode changes, so the top-up can't append to the old
+     * linear queue in between. Then a new session starts (S_t reseeds from
+     * the song playing), the queue is snapshotted for the restore, and the
+     * linear tail after the Play next run is dropped so the rolling top-up
+     * takes over. The song playing and the history are untouched.
+     */
+    private fun activate(mode: ShuffleMode) {
+        val scope = managerScope
+        if (scope == null) {
+            playback.setShuffleMode(mode)
+            return
+        }
+        mutationDepth++
+        playback.setShuffleMode(mode)
         val state = playback.playerState.value
         if (preShuffleQueue == null) preShuffleQueue = state.queue
-        state.currentSong?.id?.let { lastHandoverSongId = it }
-        val scope = managerScope ?: return
         val current = state.currentSong?.id
-        scope.launch {
-            mutex.withLock {
-                runCatching {
-                    brain.resetSession()
-                    if (current != null) brain.onTrackStarted(current)
-                }
-            }
-            publish(lastEvent = SessionEvent.SEEDED)
-        }
         // The linear tail runs from after the Play next run up to the first
-        // song this manager queued: the top-up may already have appended a
-        // batch by the time this runs, and that batch stays.
+        // song this manager queued (a batch already appended stays).
         val firstFree = (state.queueIndex + 1 + state.playNextCount).coerceAtMost(state.queue.size)
-        val firstPick = (firstFree until state.queue.size).firstOrNull { state.queue[it].id in sessionPicks }
+        val firstPick = (firstFree until state.queue.size).firstOrNull { state.queue[it].id in generated }
             ?: state.queue.size
-        if (firstFree >= firstPick) return
-        scope.launch { playback.removeQueueRange(firstFree, firstPick) }
+        scope.launch {
+            try {
+                mutex.withLock {
+                    runCatching {
+                        brain.resetSession()
+                        if (current != null) brain.onTrackStarted(current)
+                    }
+                    if (firstFree < firstPick) mutateQueue { playback.removeQueueRange(firstFree, firstPick) }
+                }
+                publish(lastEvent = SessionEvent.SEEDED)
+            } finally {
+                mutationDepth--
+                if (mutationDepth == 0) react(playback.playerState.value.toSignal())
+            }
+        }
     }
 
     /** Debounce continuous sliders so one finger drag causes one queue refresh, not dozens. */
@@ -485,26 +664,14 @@ class SmartQueueManager @Inject constructor(
         }
     }
 
-    private fun refreshUpcomingQueue() = dropGeneratedTail(ShuffleMode.SMART, ShuffleMode.JOURNEY)
-
-    /**
-     * Removes the not-yet-played songs THIS manager queued, leaving the
-     * user's own alone; the shorter queue refills under the new settings.
-     * Ids stay in [sessionPicks], so the new picks really are different.
-     */
-    private fun dropGeneratedTail(vararg activeIn: ShuffleMode) {
-        val scope = managerScope ?: return
-        val state = playback.playerState.value
-        if (state.shuffleMode !in activeIn) return
-        val autoAddedAhead = state.queue.indices
-            .filter { it > state.queueIndex && state.queue[it].id in sessionPicks }
-            .sortedDescending()
-        if (autoAddedAhead.isEmpty()) return
-        scope.launch { autoAddedAhead.forEach { playback.removeFromQueue(it) } }
+    /** New settings: the generated tail is re-ranked under them (the protected head stays). */
+    private fun refreshUpcomingQueue() {
+        if (playback.playerState.value.shuffleMode != ShuffleMode.SMART) return
+        scheduleReRank(afterSkip = false, debounceMs = 0L)
     }
 
     /** Regenerate only the generated Smart Shuffle tail (the Regenerate button). */
-    fun regenerateSmartQueue() = dropGeneratedTail(ShuffleMode.SMART)
+    fun regenerateSmartQueue() = refreshUpcomingQueue()
 
     // -- Journey (Sonic Adventure) ------------------------------------------------------
 
@@ -523,8 +690,7 @@ class SmartQueueManager @Inject constructor(
         )
         _journeyMood.value = mood
         journeyAnchorSongId = current.id
-        playback.setShuffleMode(ShuffleMode.JOURNEY)
-        onShuffleActivated()
+        activate(ShuffleMode.JOURNEY)
         return true
     }
 
@@ -552,15 +718,16 @@ class SmartQueueManager @Inject constructor(
 
     /**
      * Picks a shuffle mode. Ends any running journey FIRST, and only a real
-     * switch INTO Smart Shuffle clears the linear queue.
+     * switch INTO Smart Shuffle clears the linear queue. The upcoming-order
+     * rewrites of the other transitions follow from the state change
+     * ([onModeTransition]).
      */
     fun chooseShuffleMode(mode: ShuffleMode) {
         val wasSmart = playback.playerState.value.shuffleMode.let {
             it == ShuffleMode.SMART || it == ShuffleMode.JOURNEY
         }
         onShuffleModeChosen(mode)
-        playback.setShuffleMode(mode)
-        if (mode == ShuffleMode.SMART && !wasSmart) onShuffleActivated()
+        if (mode == ShuffleMode.SMART && !wasSmart) activate(mode) else playback.setShuffleMode(mode)
     }
 
     fun onShuffleModeChosen(mode: ShuffleMode) {
@@ -569,12 +736,14 @@ class SmartQueueManager @Inject constructor(
 
     // -- Filling the queue ----------------------------------------------------------------
 
+    /** Appends picks at the very end when fewer than [REFILL_BELOW] are left ahead. Never reorders. */
     private suspend fun maybeTopUp(mode: ShuffleMode, queueIndex: Int, queueSize: Int) {
         val refillBelow = if (mode == ShuffleMode.JOURNEY) JOURNEY_LOOKAHEAD else REFILL_BELOW
         if (queueSize - queueIndex - 1 >= refillBelow) return
         mutex.withLock {
-            // Re-check under the lock; state may have moved.
+            // Re-check under the lock; state (the mode included) may have moved while waiting.
             val state = playback.playerState.value
+            if (state.shuffleMode != mode) return
             val current = state.currentSong ?: return
             val ahead = state.queue.size - state.queueIndex - 1
             if (ahead >= refillBelow) return
@@ -587,21 +756,40 @@ class SmartQueueManager @Inject constructor(
         }
     }
 
-    /** One brain batch up to [QUEUE_TARGET], random picks for whatever it could not supply. */
+    /** One brain batch topping the queue up to [QUEUE_TARGET], appended at the end. */
     private suspend fun fillSmart(current: Song, prefix: List<Long>, ahead: Int, exclude: MutableSet<Long>) {
         val need = QUEUE_TARGET - ahead
         if (need <= 0) return
-        val replaced = pendingReplacedTail.orEmpty()
-        pendingReplacedTail = null
+        val (songs, plan) = pickSongs(current, prefix, need, exclude, replacedTail = emptyList())
+        if (songs.isEmpty()) return
+        songs.forEach { generated.add(it.id) }
+        mutateQueue { playback.addToQueueAll(songs) }
+        publish(lastEvent = null, plan = plan)
+        brainLog.write(ShuffleBrainLogFormatter.format(_telemetry.value, "queue"))
+    }
+
+    /**
+     * Up to [need] songs from the brain after [prefixIds], random library
+     * picks for whatever it could not supply, so playback never stalls.
+     * Records why each was picked and remembers them as session picks.
+     */
+    private suspend fun pickSongs(
+        current: Song,
+        prefixIds: List<Long>,
+        need: Int,
+        exclude: MutableSet<Long>,
+        replacedTail: List<Long>,
+    ): Pair<List<Song>, QueuePlan> {
+        if (need <= 0) return emptyList<Song>() to QueuePlan.EMPTY
         val plan = if (brain.available) {
             runCatching {
                 brain.prepare()
                 brain.generate(
                     QueueRequest(
                         currentSongId = current.id,
-                        prefixIds = prefix,
+                        prefixIds = prefixIds,
                         excludeIds = exclude,
-                        replacedTail = replaced,
+                        replacedTail = replacedTail,
                         count = need,
                         seed = random.nextLong(),
                     ),
@@ -613,7 +801,7 @@ class SmartQueueManager @Inject constructor(
 
         val byId = library.songsByIds(plan.songIds).associateBy { it.id }
         // A pick whose row cannot be loaded is skipped; the random valve below fills its slot.
-        val songs = plan.songIds.distinct().mapNotNull { byId[it] }.toMutableList()
+        val songs = plan.songIds.distinct().mapNotNull { byId[it] }.filter { it.id !in prefixIds }.toMutableList()
         songs.forEach { exclude.add(it.id) }
         var attempts = 0
         while (songs.size < need && attempts < MAX_FALLBACK_ATTEMPTS) {
@@ -622,18 +810,13 @@ class SmartQueueManager @Inject constructor(
             exclude.add(id)
             library.songById(id)?.let { songs += it }
         }
-        if (songs.isEmpty()) return
-
         val traces = plan.traces.associateBy { it.trackId }
         songs.forEach { song ->
             traces[song.id]?.let { decisions[song.id] = QueuedDecision(it, song.title, song.artist) }
-            sessionPicks.add(song.id)
+            sessionPicks.addLast(song.id)
         }
         while (sessionPicks.size > SESSION_MEMORY) sessionPicks.removeFirst()
-        playback.addToQueueAll(songs)
-
-        publish(lastEvent = null, plan = plan)
-        brainLog.write(ShuffleBrainLogFormatter.format(_telemetry.value, if (replaced.isEmpty()) "queue" else "re-rank"))
+        return songs.take(need) to plan
     }
 
     /** Journey steps, one song at a time; arriving hands back to Smart Shuffle. */
@@ -662,8 +845,9 @@ class SmartQueueManager @Inject constructor(
             val song = library.songById(id) ?: continue
             _journey.value = state.copy(step = state.step + 1)
             plan.traces.firstOrNull()?.let { decisions[id] = QueuedDecision(it, song.title, song.artist) }
-            playback.addToQueue(song)
-            sessionPicks.add(id)
+            generated.add(id)
+            mutateQueue { playback.addToQueue(song) }
+            sessionPicks.addLast(id)
             while (sessionPicks.size > SESSION_MEMORY) sessionPicks.removeFirst()
             previous = id
             ahead++
@@ -718,11 +902,11 @@ class SmartQueueManager @Inject constructor(
     }
 
     private fun playingDecision(): QueuedDecision? =
-        playback.playerState.value.currentSong?.id?.let { decisions[it] }
+        playback.playerState.value.currentSong?.id?.takeIf { it in generated }?.let { decisions[it] }
 
     private fun upcomingDecisions(): List<QueuedDecision> {
         val state = playback.playerState.value
-        return state.queue.drop(state.queueIndex + 1).mapNotNull { decisions[it.id] }
+        return state.queue.drop(state.queueIndex + 1).filter { it.id in generated }.mapNotNull { decisions[it.id] }
     }
 
     private data class SmartPreset(val familiarity: Float, val discovery: Float, val variety: Float) {
@@ -737,16 +921,23 @@ class SmartQueueManager @Inject constructor(
     }
 
     companion object {
-        /** The rolling queue: refill when fewer than [REFILL_BELOW] songs are left, up to [QUEUE_TARGET]. */
-        const val QUEUE_TARGET = 8
-        const val REFILL_BELOW = 4
+        /**
+         * The rolling lookahead: when fewer than [REFILL_BELOW] songs are left
+         * ahead, picks are appended at the end up to [QUEUE_TARGET] (so two or
+         * three at a time while listening, never a rebuild).
+         */
+        const val QUEUE_TARGET = 12
+        const val REFILL_BELOW = 10
 
         /** A journey is queued a step at a time, so it can end the moment the user leaves it. */
         const val JOURNEY_LOOKAHEAD = 4
         const val SESSION_MEMORY = 50
+
+        /** How long a burst of fast skips may run before the tail is re-ranked once. */
+        const val RERANK_DEBOUNCE_MS = 400L
+        private const val SWIPE_RERANK_DEBOUNCE_MS = 150L
         private const val MAX_FALLBACK_ATTEMPTS = QUEUE_TARGET * 3
         private const val CONFIG_REFRESH_DEBOUNCE_MS = 220L
-        private const val SKIP_SETTLE_MS = 1_500L
 
         fun temperatureForVariety(variety: Float): Float =
             (0.06f + variety.coerceIn(0f, 1f) * 0.58f).coerceIn(0.06f, 0.64f)
