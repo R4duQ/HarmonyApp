@@ -28,7 +28,13 @@ fun Artwork(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 8.dp,
+    /** Drawn instead of the music note when there is no artwork (the Cyber-Glass waveform, say). */
+    fallback: (@Composable () -> Unit)? = null,
 ) {
+    if (artworkUri == null && fallback != null) {
+        Box(modifier.clip(RoundedCornerShape(cornerRadius)), contentAlignment = Alignment.Center) { fallback() }
+        return
+    }
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(cornerRadius))

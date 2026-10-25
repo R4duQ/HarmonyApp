@@ -355,8 +355,11 @@ class SmartQueueManagerQueueTest {
         assertTrue(t.hasSession)
         assertTrue("table logged", logged.any { it.startsWith("+-- SHUFFLE BRAIN") })
         assertTrue("top 5 rows", logged.count { it.startsWith("| ") && "Vibe Match" in it } >= 5)
+        assertNull("the seed song was not a pick", c.telemetry.value.nowPlaying)
         p.skipAfter(0.9f); advanceUntilIdle()
         assertEquals("the playing song leaves the list", ids(p).drop(p.idx + 1), c.telemetry.value.upcoming.map { it.trace.trackId })
+        assertEquals("and explains itself as now playing", p.q[p.idx].id, c.telemetry.value.nowPlaying?.trace?.trackId)
+        assertEquals(90, c.telemetry.value.nowPlaying?.vibeMatchPct)
     }
 
     @Test

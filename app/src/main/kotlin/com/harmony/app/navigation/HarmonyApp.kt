@@ -177,8 +177,9 @@ fun HarmonyApp(
     // duration makes the change read as part of the screen opening.
     val targetPalette = when {
         currentRoute == Routes.NOW_PLAYING -> lavenderPalette()
-        currentRoute == Routes.LIBRARY ||
-            currentRoute?.startsWith("artist/") == true ||
+        // The library wears Cyber-Glass in dark theme; its detail pages keep amber.
+        currentRoute == Routes.LIBRARY -> com.harmony.core.ui.component.libraryPalette()
+        currentRoute?.startsWith("artist/") == true ||
             currentRoute?.startsWith("album/") == true -> amberPalette()
         currentRoute == Routes.PLAYLISTS ||
             currentRoute == Routes.SPOTIFY_TRANSFER ||
