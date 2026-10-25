@@ -11,6 +11,9 @@ update over any of them. Library, playlists and settings are kept.
 - `Harmony-v1.0-mornye-arm64-v8a.apk`: the same app for phones, with downloads running on
   Mornye 5.2.5 instead (see below). Try it if you want the newer download runtime.
 - `Harmony-v1.0-x86_64.apk`: for the Android emulator only (stable build).
+- `Harmony-v1.0-iOS-unsigned.ipa`: Harmony for iPhone (iOS 16 or newer), unsigned. Install it
+  from Windows or a Mac with Sideloadly or AltStore, which sign it with your Apple ID; with a
+  free Apple ID it is signed again every 7 days. See `ios/INSTALARE-iOS.md`.
 
 The two phone APKs are the same app with the same version, so either one installs over
 the other, in both directions, and keeps your library, playlists and settings. Only the
