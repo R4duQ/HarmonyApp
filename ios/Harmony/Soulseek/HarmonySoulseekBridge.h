@@ -95,7 +95,12 @@ typedef NS_ENUM(NSInteger, HarmonySlskSearchMode) {
 - (void)cancelSearch:(uint32_t)searchId;
 
 - (uint32_t)download:(HarmonySlskCandidate *)candidate patient:(BOOL)patient fileName:(nullable NSString *)fileName;
+/** Stops a download and deletes the bytes received. */
 - (void)cancelTransfer:(uint32_t)transferId;
+/** Stops a download and keeps the bytes received: downloading the same file again resumes there. */
+- (void)pauseTransfer:(uint32_t)transferId;
+/** Deletes what a paused download of [candidate] left behind. */
+- (void)discardPartialForCandidate:(HarmonySlskCandidate *)candidate NS_SWIFT_NAME(discardPartial(for:));
 @end
 
 NS_ASSUME_NONNULL_END

@@ -564,6 +564,29 @@ void engineEndToEnd() {
           "denied download ended");
     check(e.stage == TransferStage::Failed && e.message.find("denied") != std::string::npos, "denial reported: %s", e.message.c_str());
 
+    // A pause keeps the partial file for a later resume; cancelling the paused download deletes it.
+    Candidate fromCarol = fromAlice;
+    fromCarol.username = "carol";  // no address and never pierces: the download waits for her
+    fromCarol.filename = "x\\Carol - Tune.flac";
+    fromCarol.leafName = "Carol - Tune.flac";
+    fromCarol.size = 123456;
+    const std::string carolPartial = base + "/partial/" + md5Hex("carol - tune.flac|123456") + ".part";
+    {
+        std::ofstream out(carolPartial, std::ios::binary);
+        out << std::string(1000, 'z');
+    }
+    const auto exists = [](const std::string& path) { return std::ifstream(path).good(); };
+    const uint32_t fifth = engine.download(fromCarol, true, "");
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    engine.cancelTransfer(fifth, true);
+    check(recorder.waitFor([fifth](const Event& x) { return x.kind == Event::Kind::Transfer && x.transferId == fifth && x.stage >= TransferStage::Done; }, &e, 15),
+          "paused download ended");
+    check(e.stage == TransferStage::Cancelled && e.message == "Paused", "pause reported: %s", e.message.c_str());
+    check(exists(carolPartial), "a pause keeps the partial file");
+    engine.discardPartial(fromCarol);
+    for (int i = 0; i < 100 && exists(carolPartial); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(!exists(carolPartial), "discarding the paused download deletes its partial file");
+
     engine.stop();
     server.shutdown();
     alice.shutdown();

@@ -62,7 +62,15 @@ extension HarmonySlskStage {
 
 /// A Soulseek transfer as the UI shows it.
 struct SoulseekTransfer: Identifiable, Equatable {
+    /// Harmony's own id: it stays the same through pauses, resumes and retries.
     let id: UInt32
+    /// The engine's id for the attempt running now (nil while waiting or paused).
+    var engineId: UInt32?
+    let candidate: HarmonySlskCandidate
+    let patient: Bool
+    let fileName: String?
+    /// What the download knows about the song (a playlist import), for its tags.
+    var known: KnownTrackInfo?
     var title: String
     var username: String
     var stage: HarmonySlskStage
@@ -72,11 +80,36 @@ struct SoulseekTransfer: Identifiable, Equatable {
     var queuePlace: Int = 0
     var message: String = ""
     var path: String?
+    /// Waiting for one of the [SoulseekService.maxConcurrent] transfer slots.
+    var waitingForSlot = false
+    var paused = false
+    /// Paused by the background guard when iOS took the time back; resumed on its own.
+    var suspended = false
+    var failedAt: Date?
+    var automaticRetries = 0
     /// Being measured for Smart Shuffle / measured and in the library.
     var indexing = false
     var indexed = false
 
     var fraction: Double { total > 0 ? min(1, Double(bytes) / Double(total)) : 0 }
+
+    /// Holds or waits for a slot, or is paused by the guard (it will come back).
+    var isActive: Bool {
+        waitingForSlot || suspended || (engineId != nil && !paused && !stage.isFinished)
+    }
+
+    /// Uses one of the slots: connecting, asking, transferring, verifying (a peer's queue doesn't count).
+    var holdsSlot: Bool {
+        engineId != nil && !paused && !stage.isFinished && stage != .queued
+    }
+
+    /// "HI-RES", "FLAC", "MP3 320", "M4A".
+    var formatBadge: String {
+        let ext = candidate.fileExtension.uppercased()
+        if candidate.bitDepth >= 24 || candidate.sampleRate > 48_000 { return "HI-RES" }
+        if ext == "MP3", candidate.bitrateKbps > 0 { return "MP3 \(candidate.bitrateKbps)" }
+        return ext.isEmpty ? "AUDIO" : ext
+    }
 }
 
 /// How a download ended.
@@ -117,7 +150,13 @@ final class SoulseekService: ObservableObject {
 
     private let bridge: HarmonySoulseekBridge
     private let proxy = SoulseekDelegateProxy()
+    /// Transfers running at once; the rest wait their turn.
+    static let maxConcurrent = 3
+
     private var uiSearchId: UInt32 = 0
+    private var nextTransferId: UInt32 = 1
+    /// After the network came back, a transfer that fails is retried once on its own until this moment.
+    private var autoRetryUntil: Date?
     private var searchWaiters: [UInt32: CheckedContinuation<[HarmonySlskCandidate], Never>] = [:]
     private var transferWaiters: [UInt32: CheckedContinuation<SoulseekOutcome, Never>] = [:]
     private var connectWaiters: [CheckedContinuation<Bool, Never>] = []
@@ -192,14 +231,24 @@ final class SoulseekService: ObservableObject {
 
     // MARK: - Downloads
 
-    /// Starts a download the UI follows in [transfers].
+    /// Transfers that are running, waiting for a slot, or will come back after a suspension.
+    var activeTransferCount: Int { transfers.filter(\.isActive).count }
+
+    /**
+     * Queues a download the UI follows in [transfers]; it starts as soon as
+     * one of the [maxConcurrent] slots is free. Returns Harmony's id for it.
+     */
     @discardableResult
     func startDownload(_ candidate: HarmonySlskCandidate, title: String? = nil, patient: Bool = true,
-                       fileName: String? = nil) -> UInt32 {
-        let id = bridge.download(candidate, patient: patient, fileName: fileName)
-        let transfer = SoulseekTransfer(id: id, title: title ?? (candidate.leafName as NSString).deletingPathExtension,
-                                        username: candidate.username, stage: .connectingPeer, total: candidate.size)
+                       fileName: String? = nil, known: KnownTrackInfo? = nil) -> UInt32 {
+        let id = nextTransferId
+        nextTransferId += 1
+        let transfer = SoulseekTransfer(id: id, candidate: candidate, patient: patient, fileName: fileName, known: known,
+                                        title: title ?? (candidate.leafName as NSString).deletingPathExtension,
+                                        username: candidate.username, stage: .connectingPeer, total: candidate.size,
+                                        waitingForSlot: true)
         transfers.insert(transfer, at: 0)
+        pump()
         return id
     }
 
@@ -213,19 +262,129 @@ final class SoulseekService: ObservableObject {
         }
     }
 
+    /// Starts waiting transfers while slots are free (oldest first).
+    private func pump() {
+        guard isConnected else { return }
+        var free = Self.maxConcurrent - transfers.filter(\.holdsSlot).count
+        for index in transfers.indices.reversed() where free > 0 && transfers[index].waitingForSlot {
+            let t = transfers[index]
+            transfers[index].engineId = bridge.download(t.candidate, patient: t.patient, fileName: t.fileName)
+            transfers[index].waitingForSlot = false
+            transfers[index].stage = .connectingPeer
+            transfers[index].message = ""
+            free -= 1
+        }
+    }
+
+    /// Stops a transfer and keeps its bytes; Resume continues from there.
+    func pause(_ transferId: UInt32) {
+        guard let index = transfers.firstIndex(where: { $0.id == transferId }) else { return }
+        let t = transfers[index]
+        if t.waitingForSlot {
+            transfers[index].waitingForSlot = false
+            transfers[index].paused = true
+            transfers[index].bytesPerSecond = 0
+        } else if let engineId = t.engineId, !t.stage.isFinished, !t.paused {
+            transfers[index].paused = true
+            transfers[index].bytesPerSecond = 0
+            bridge.pauseTransfer(engineId)
+        }
+    }
+
+    /// A paused transfer goes back in line for a slot.
+    func resume(_ transferId: UInt32) {
+        guard let index = transfers.firstIndex(where: { $0.id == transferId }), transfers[index].paused else { return }
+        transfers[index].paused = false
+        transfers[index].suspended = false
+        requeue(index)
+    }
+
+    /// A failed transfer tries the same source again, from the bytes it already has.
+    func retry(_ transferId: UInt32) {
+        guard let index = transfers.firstIndex(where: { $0.id == transferId }),
+              transfers[index].stage == .failed || (transfers[index].stage == .cancelled && !transfers[index].paused) else { return }
+        transfers[index].failedAt = nil
+        requeue(index)
+    }
+
+    private func requeue(_ index: Int) {
+        transfers[index].engineId = nil
+        transfers[index].waitingForSlot = true
+        transfers[index].stage = .connectingPeer
+        transfers[index].message = ""
+        transfers[index].bytesPerSecond = 0
+        pump()
+        if !isConnected { Task { _ = await ensureConnected() } }
+    }
+
     func cancel(_ transferId: UInt32) {
-        bridge.cancelTransfer(transferId)
+        guard let index = transfers.firstIndex(where: { $0.id == transferId }) else { return }
+        let t = transfers[index]
+        if t.waitingForSlot || t.paused {
+            if t.paused { bridge.discardPartial(for: t.candidate) }
+            transfers[index].waitingForSlot = false
+            transfers[index].paused = false
+            transfers[index].suspended = false
+            transfers[index].stage = .cancelled
+            transfers[index].bytesPerSecond = 0
+            transferWaiters.removeValue(forKey: transferId)?.resume(returning: .cancelled)
+        } else if let engineId = t.engineId {
+            bridge.cancelTransfer(engineId)
+        }
     }
 
     func clearFinished() {
-        transfers.removeAll { $0.stage.isFinished }
+        transfers.removeAll { $0.stage.isFinished && !$0.paused && !$0.indexing }
     }
 
-    /// Adds a finished download to the library and measures its vector.
+    /// iOS is about to suspend Harmony: every running transfer stops cleanly, keeping its bytes.
+    func suspendForBackground() {
+        for index in transfers.indices where transfers[index].holdsSlot || transfers[index].stage == .queued {
+            transfers[index].suspended = true
+            if let engineId = transfers[index].engineId, !transfers[index].paused {
+                transfers[index].paused = true
+                bridge.pauseTransfer(engineId)
+            }
+        }
+    }
+
+    /// Back from a suspension: what the guard paused carries on.
+    func resumeSuspended() {
+        for index in transfers.indices where transfers[index].suspended {
+            transfers[index].suspended = false
+            transfers[index].paused = false
+            requeue(index)
+        }
+    }
+
+    /**
+     * The network came back (Wi-Fi to cellular, a tunnel): sign in again and
+     * retry, once, what failed while it was gone.
+     */
+    func networkRestored(lostAt: Date) {
+        // Sockets on the old network may only fail later: keep retrying those for a minute.
+        autoRetryUntil = Date().addingTimeInterval(60)
+        Task {
+            guard await ensureConnected() else { return }
+            for index in transfers.indices {
+                guard transfers[index].stage == .failed, let failedAt = transfers[index].failedAt,
+                      failedAt >= lostAt.addingTimeInterval(-10), transfers[index].automaticRetries < 1 else { continue }
+                transfers[index].automaticRetries += 1
+                transfers[index].failedAt = nil
+                requeue(index)
+            }
+            pump()
+        }
+    }
+
+    /// Adds a finished download to the library: tags, the song, its 24-D vector.
     func addToLibrary(transferId: UInt32, path: String, known: KnownTrackInfo? = nil) {
         setIndexing(transferId, indexing: true, indexed: false)
+        let fallback = transfers.first(where: { $0.id == transferId }).map { "\($0.title)" }
         Task {
-            let indexed = (try? await LibraryIngest.shared.ingest(fileAt: URL(fileURLWithPath: path), source: "Soulseek", known: known)) != nil
+            let file = URL(fileURLWithPath: path)
+            let indexed = (try? await DownloadPostProcessor.finish(file: file, source: "Soulseek", known: known,
+                                                                   fallbackName: fallback)) != nil
             setIndexing(transferId, indexing: false, indexed: indexed)
         }
     }
@@ -246,6 +405,7 @@ final class SoulseekService: ObservableObject {
             connectWaiters.removeAll()
             for waiter in waiters { waiter.resume(returning: status == .connected) }
         }
+        if status == .connected { pump() }
     }
 
     fileprivate func searchUpdated(_ id: UInt32, results: [HarmonySlskCandidate], done: Bool, peers: Int, files: Int) {
@@ -262,21 +422,41 @@ final class SoulseekService: ObservableObject {
         }
     }
 
-    fileprivate func transferUpdated(_ id: UInt32, stage: HarmonySlskStage, bytes: UInt64, total: UInt64,
+    fileprivate func transferUpdated(_ engineId: UInt32, stage: HarmonySlskStage, bytes: UInt64, total: UInt64,
                                      speed: Double, queuePlace: Int, message: String, path: String?, queued: Bool) {
-        if let index = transfers.firstIndex(where: { $0.id == id }) {
-            transfers[index].stage = stage
-            transfers[index].bytes = bytes
-            if total > 0 { transfers[index].total = total }
-            transfers[index].bytesPerSecond = speed
-            transfers[index].queuePlace = queuePlace
-            if !message.isEmpty || stage.isFinished { transfers[index].message = message }
-            if let path { transfers[index].path = path }
+        guard let index = transfers.firstIndex(where: { $0.engineId == engineId }) else { return }
+        let id = transfers[index].id
+        if transfers[index].paused {
+            // The engine confirms a pause: the bytes stay for Resume, nobody is told it ended.
+            if stage.isFinished {
+                transfers[index].stage = .cancelled
+                transfers[index].message = transfers[index].suspended ? "Paused while Harmony was in the background" : "Paused"
+                transfers[index].bytesPerSecond = 0
+                pump()
+            }
+            return
         }
+        transfers[index].stage = stage
+        if bytes > 0 || stage != .connectingPeer { transfers[index].bytes = bytes }
+        if total > 0 { transfers[index].total = total }
+        transfers[index].bytesPerSecond = speed
+        transfers[index].queuePlace = queuePlace
+        if !message.isEmpty || stage.isFinished { transfers[index].message = message }
+        if let path { transfers[index].path = path }
+        if stage == .queued { pump() }
         guard stage.isFinished else { return }
+        if stage == .failed {
+            transfers[index].failedAt = Date()
+            if let until = autoRetryUntil, Date() < until, transfers[index].automaticRetries < 1 {
+                transfers[index].automaticRetries += 1
+                requeue(index)
+                return
+            }
+        }
+        pump()
         guard let waiter = transferWaiters.removeValue(forKey: id) else {
-            // Started from the search screen: it goes straight into the library.
-            if stage == .done, let path { addToLibrary(transferId: id, path: path) }
+            // Started from the search screen (or retried): it goes straight into the library.
+            if stage == .done, let path { addToLibrary(transferId: id, path: path, known: transfers[index].known) }
             return
         }
         switch stage {

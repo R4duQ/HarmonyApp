@@ -1107,7 +1107,7 @@ struct Engine::Impl {
         d.expected = candidate.size;
         // The partial is named by content (leaf + size), so another peer's copy of the same file resumes it.
         makeDirectories(config.partialDirectory);
-        d.partialPath = config.partialDirectory + "/" + md5Hex(lowerKey(candidate.leafName) + "|" + std::to_string(candidate.size)) + ".part";
+        d.partialPath = partialPathFor(candidate);
         d.finalBase = sanitizeFileName(fileName.empty() ? stripExtension(candidate.leafName) : fileName);
         d.lastProgress = nowMs();
         auto [it, inserted] = downloads.emplace(id, std::move(d));
@@ -1139,6 +1139,18 @@ struct Engine::Impl {
             dl.lastKnock = now;
             setStage(dl, TransferStage::Requested);
         });
+    }
+
+    std::string partialPathFor(const Candidate& candidate) const {
+        return config.partialDirectory + "/" + md5Hex(lowerKey(candidate.leafName) + "|" + std::to_string(candidate.size)) + ".part";
+    }
+
+    void doDiscardPartial(const Candidate& candidate) {
+        const std::string path = partialPathFor(candidate);
+        for (const auto& [id, other] : downloads) {
+            if (other.partialPath == path && other.stage < TransferStage::Done) return;
+        }
+        std::remove(path.c_str());
     }
 
     bool findOtherActive(const Download& d) const {
@@ -1229,15 +1241,15 @@ struct Engine::Impl {
         emitTransfer(d, std::string(), path);
     }
 
-    void doCancel(uint32_t id) {
+    void doCancel(uint32_t id, bool keepPartial) {
         auto it = downloads.find(id);
         if (it == downloads.end() || it->second.stage >= TransferStage::Done) return;
         Download& d = it->second;
         releaseFile(d);
-        std::remove(d.partialPath.c_str());
+        if (!keepPartial && !findOtherActive(d)) std::remove(d.partialPath.c_str());
         d.stage = TransferStage::Cancelled;
         d.speed = 0;
-        emitTransfer(d, "Cancelled");
+        emitTransfer(d, keepPartial ? "Paused" : "Cancelled");
     }
 
     // ---- Timers ---------------------------------------------------------------------------------
@@ -1387,8 +1399,12 @@ uint32_t Engine::download(const Candidate& candidate, bool patient, const std::s
     return id;
 }
 
-void Engine::cancelTransfer(uint32_t transferId) {
-    impl_->post([this, transferId] { impl_->doCancel(transferId); });
+void Engine::cancelTransfer(uint32_t transferId, bool keepPartial) {
+    impl_->post([this, transferId, keepPartial] { impl_->doCancel(transferId, keepPartial); });
+}
+
+void Engine::discardPartial(const Candidate& candidate) {
+    impl_->post([this, candidate] { impl_->doDiscardPartial(candidate); });
 }
 
 }  // namespace harmony::slsk

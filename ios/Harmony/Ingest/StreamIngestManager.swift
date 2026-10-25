@@ -118,6 +118,12 @@ final class StreamIngestManager: ObservableObject {
         update(id) { $0.stage = .cancelled; $0.bytesPerSecond = 0 }
     }
 
+    /// Forgets one finished job (a retry replaces it with a new one).
+    func clear(_ id: UUID) {
+        jobs.removeAll { $0.id == id && !$0.stage.isActive }
+        persist()
+    }
+
     func clearFinished() {
         jobs.removeAll { !$0.stage.isActive }
         persist()
@@ -192,18 +198,11 @@ final class StreamIngestManager: ObservableObject {
                 file: file, into: HarmonyPaths.linkDownloads, baseName: job.title, lossless: losslessStorage,
                 progress: { [weak self] fraction in self?.update(id) { $0.stageProgress = fraction } })
 
-            // Files without a title tag get one from their name, so the library doesn't show "Unknown".
-            let existing = await LibraryIngest.readTags(prepared.url)
-            if existing.title == nil {
-                update(id) { $0.stage = .tagging }
-                let (artist, title) = LibraryIngest.splitArtistTitle(job.title)
-                try? await IosNativeAudioTranscoder.shared.writeTags(
-                    AudioTagValues(title: title, artist: artist, comment: "Downloaded with Harmony"), to: prepared.url)
-            }
-
-            let trackId = try await LibraryIngest.shared.ingest(fileAt: prepared.url, source: "Link", onIndexing: { [weak self] in
-                self?.update(id) { $0.stage = .indexing }
-            })
+            // Tags (from the file's name when it has none), the library, the 24-D vector.
+            update(id) { $0.stage = .tagging }
+            let trackId = try await DownloadPostProcessor.finish(
+                file: prepared.url, source: "Link", known: nil, fallbackName: job.title,
+                onIndexing: { [weak self] in self?.update(id) { $0.stage = .indexing } })
             update(id) { job in
                 job.stage = .done
                 job.trackId = trackId

@@ -110,7 +110,14 @@ public:
      * [fileName]: the finished file's name without extension (empty: the peer's).
      */
     uint32_t download(const Candidate& candidate, bool patient, const std::string& fileName);
-    void cancelTransfer(uint32_t transferId);
+    /**
+     * Stops a download. [keepPartial]: a pause, the bytes received stay for
+     * a later download of the same file (from any peer) to resume; the event
+     * says "Paused". Without it the partial file is deleted.
+     */
+    void cancelTransfer(uint32_t transferId, bool keepPartial = false);
+    /** Deletes what a paused download of [candidate] left, unless a download is using it. */
+    void discardPartial(const Candidate& candidate);
 
     ConnectionStatus status() const { return status_.load(); }
 

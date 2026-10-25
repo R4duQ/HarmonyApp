@@ -22,18 +22,22 @@ struct HarmonyApp: App {
 }
 
 struct RootView: View {
+    @ObservedObject private var transferGuard = IosBackgroundTransferGuard.shared
+
     var body: some View {
         TabView {
             LibraryScreen()
                 .tabItem { Label("Library", systemImage: "music.note.list") }
             DownloadsScreen()
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
+                .badge(transferGuard.activeDownloads)
             EngineCheckView()
                 .tabItem { Label("Engine", systemImage: "cpu") }
         }
         .tint(CyberGlassColors.cyan)
         .task {
             HarmonyAudioController.shared.start()
+            IosBackgroundTransferGuard.shared.start()
             IosMusicLibraryManager.shared.start()
             LibraryIngest.shared.indexMissingVectors()
         }

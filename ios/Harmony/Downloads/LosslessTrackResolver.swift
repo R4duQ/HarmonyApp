@@ -188,15 +188,11 @@ final class LosslessTrackResolver: ObservableObject {
                 SoulseekService.shared.setIndexing(transfer, indexing: false, indexed: ok)
             }
         }
-        var tags = AudioTagValues(title: track.title, artist: track.artist, album: track.album, isrc: track.isrc)
-        if let cover = track.coverArtURL {
-            tags.cover = try? await URLSession.shared.data(from: cover).0
-        }
-        try? await IosNativeAudioTranscoder.shared.writeTags(tags, to: file)
         let known = KnownTrackInfo(title: track.title, artist: track.artist, album: track.album, isrc: track.isrc,
                                    durationMs: track.durationMs, coverArtURL: track.coverArtURL)
         do {
-            let id = try await LibraryIngest.shared.ingest(fileAt: file, source: "Soulseek", known: known)
+            // Tagged with the playlist's metadata and cover, added, and measured for Smart Shuffle.
+            let id = try await DownloadPostProcessor.finish(file: file, source: "Soulseek", known: known, fallbackName: nil)
             if items.indices.contains(index) { items[index].trackId = id }
             set(index, .done)
         } catch {
