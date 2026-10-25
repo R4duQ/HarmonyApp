@@ -101,24 +101,24 @@ final class HarmonyAudioController: NSObject, ObservableObject {
 
     // MARK: Published state
 
-    @Published internal(set) var queue: [QueueEntry] = []
+    @Published var queue: [QueueEntry] = []
     /// Index of the song playing (or paused) in [queue]; -1 when empty.
-    @Published internal(set) var currentIndex = -1
-    @Published internal(set) var isPlaying = false
+    @Published var currentIndex = -1
+    @Published var isPlaying = false
     /// Seconds into the song, refreshed four times a second.
-    @Published internal(set) var position: Double = 0
-    @Published internal(set) var duration: Double = 0
-    @Published internal(set) var shuffleMode: ShuffleMode = .off
-    @Published internal(set) var repeatMode: RepeatMode = .off
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
+    @Published var shuffleMode: ShuffleMode = .off
+    @Published var repeatMode: RepeatMode = .off
     @Published private(set) var route: OutputRoute = .speaker
     @Published private(set) var format: HarmonyTrackFormat?
     @Published var equalizer: EqualizerSettings {
         didSet { applyEqualizer(); saveEqualizer() }
     }
     /// Why each Smart Shuffle pick was made, by song id.
-    @Published internal(set) var decisions: [Int64: ShuffleDecision] = [:]
-    @Published internal(set) var lastAudit: ShuffleAuditSummary?
-    @Published internal(set) var lastEvent: HarmonyShuffleEvent = .none
+    @Published var decisions: [Int64: ShuffleDecision] = [:]
+    @Published var lastAudit: ShuffleAuditSummary?
+    @Published var lastEvent: HarmonyShuffleEvent = .none
     @Published var lastError: String?
 
     var currentEntry: QueueEntry? { queue.indices.contains(currentIndex) ? queue[currentIndex] : nil }

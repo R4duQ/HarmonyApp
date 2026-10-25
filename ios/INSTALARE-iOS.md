@@ -35,9 +35,22 @@ Următoarele module adaugă playerul complet peste acest nucleu.
 
 ## Muzica ta
 
-Aplicația apare în **Files → On My iPhone → Harmony**: copiază muzica acolo,
-sau (din modulele următoare) alege orice folder din Files, iar Harmony îl
-păstrează accesibil și după repornire.
+Tab-ul **Library** arată toate melodiile, cu căutare și un player jos.
+
+- **Files › On My iPhone › Harmony**: copiază muzica acolo. Harmony o găsește
+  singur la pornire.
+- **Orice alt folder din Files** (iCloud Drive, un stick USB, folderul altei
+  aplicații): butonul de foldere din Library › **Add a folder from Files**.
+  Harmony citește folderul pe loc, fără să copieze fișierele, și îl păstrează
+  accesibil și după repornire. Melodiile din iCloud care nu sunt încă pe
+  telefon sunt cerute de la iCloud și apar la următoarea citire.
+- Atinge o melodie ca s-o pornești. Apăsare lungă: **Play next**,
+  **Add to queue** sau **Smart Mix from here**.
+- Butonul de shuffle are trei moduri: Off, Random și Smart Shuffle. Coada
+  rămâne cum o vezi: Next, Previous sau atingerea unei melodii din coadă doar
+  se mută în ea, iar Smart Shuffle adaugă melodii noi doar la capăt.
+- Pe un DAC USB, Harmony cere rata melodiei (până la 192 kHz), ca fișierele
+  hi-res să ajungă la DAC fără conversie de rată.
 
 Smart Shuffle măsoară fiecare melodie (vectorul 24D). Cu aplicația deschisă,
 o face pe loc. Ce rămâne nemăsurat termină iOS singur, cu Harmony închis, de
