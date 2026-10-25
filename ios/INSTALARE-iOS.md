@@ -20,10 +20,39 @@ iar tu o instalezi de pe Windows cu Sideloadly sau AltStore.
 Cu un Apple ID gratuit, aplicația trebuie re-semnată la 7 zile (Sideloadly sau
 AltStore o pot reîmprospăta automat).
 
-## 3. Ce face acest prim build
+## 3. Aplicația
 
-La pornire rulează pe iPhone exact motoarele C++ din aplicația Android
-(`core/eq-engine` și `core/dsp-native`), fără copii:
+Jos e o bară de navigare plutitoare, din sticlă mată, cu cinci secțiuni:
+**Home**, **Library**, **Playlists**, **Discover** și **Downloads** (cu
+numărul de descărcări active). Deasupra ei stă mini-player-ul: vinilul
+copertei iese din card și se învârte cât cântă muzica. Atinge-l sau trage-l
+în sus ca să deschizi **Now Playing**. Trage-l stânga/dreapta pentru melodia
+următoare/anterioară.
+
+- **Home**: melodia curentă, Smart Mix, biblioteca pe scurt, ce ai adăugat
+  recent, Equalizer și Engine diagnostics.
+- **Library**: căutare, Songs / Albums / Artists, pagini de album și artist.
+  Apăsare lungă pe o melodie: Play next, Add to queue, Add to playlist,
+  Smart Mix from here.
+- **Playlists**: playlisturile tale. Le creezi, le redenumești, le reordonezi
+  și scoți melodii din ele. Playlisturile importate în Downloads apar aici
+  singure, după ce s-au găsit melodiile.
+- **Discover**: melodii care sună ca cea care cântă (după vectorul 24D),
+  ce asculți cel mai des, favorite uitate, ce n-ai ascultat niciodată, hi-res.
+- **Now Playing**: shuffle (Off, Random, Smart Shuffle), repeat, coada
+  (istoric, reordonare, ștergere, de ce a fost aleasă fiecare melodie),
+  Regenerate, egalizatorul și **HUD-ul Diagnostic Brain** (iconița cu
+  creierul). HUD-ul arată vectorul de vibe S_t în 24 de bare, cele 5
+  auto-verificări, motivele alegerilor și un buton de self-test.
+- **Egalizatorul** (60 fps): spectru de 32 de bare cu puncte de vârf și 10
+  slidere. Fiecare slider are degetul tău și un deget „fantomă”, care arată
+  ce aplică motorul acum (cu Auto și atenuarea pe lovituri). EQ ON, AUTO LIVE,
+  FLAT, preamp și valorile live.
+
+## 4. Diagnostic: motoarele C++
+
+Din Home › Engine diagnostics rulează pe iPhone exact motoarele C++ din
+aplicația Android (`core/eq-engine` și `core/dsp-native`), fără copii:
 
 - **Equalizer (MobileEqEngine)**: fiecare ieșire (difuzor, căști, Bluetooth,
   USB DAC) la 44,1 / 48 / 96 / 192 kHz, toate benzile +12 dB, Auto pornit,
