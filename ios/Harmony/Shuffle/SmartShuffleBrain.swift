@@ -103,11 +103,11 @@ actor SmartShuffleBrain {
     func load(_ snapshot: ShuffleLibrarySnapshot) -> Int {
         let count = snapshot.ids.count
         let loaded = engine.setLibrary(
-            withIds: Self.data(snapshot.ids), vectors: Self.data(snapshot.vectors),
+            ids: Self.data(snapshot.ids), vectors: Self.data(snapshot.vectors),
             qualities: Self.data(snapshot.qualities), artists: Self.data(snapshot.artists),
             albums: Self.data(snapshot.albums), count: count
         )
-        engine.setTrackStats(withCompleted: Self.data(snapshot.completed), skipped: Self.data(snapshot.skipped),
+        engine.setTrackStats(completed: Self.data(snapshot.completed), skipped: Self.data(snapshot.skipped),
                                           lastPlayed: Self.data(snapshot.lastPlayedMs), count: count)
         if !snapshot.transitions.isEmpty {
             engine.addTransitions(from: Self.data(snapshot.transitions.map(\.from)),
@@ -161,7 +161,7 @@ actor SmartShuffleBrain {
             ShuffleDecision(
                 trackId: trace.trackId, reasonTag: trace.reasonTag, vibePct: trace.vibePct,
                 markovPct: trace.markovPct, affinityPct: trace.affinityPct, explorationPct: trace.explorationPct,
-                cosine: trace.cosine, smoothness: trace.smoothness, zone: trace.zone, realVector: trace.vectorQuality == 2
+                cosine: trace.cosine, smoothness: trace.smoothness, zone: trace.zoneName, realVector: trace.vectorQuality == 2
             )
         }
         let report = engine.lastAudit

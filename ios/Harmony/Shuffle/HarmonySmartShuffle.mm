@@ -62,7 +62,7 @@ NSString *const kCheckNames[kAuditChecks] = {
         _cosine = trace.cosineSimilarity;
         _smoothness = trace.transitionSmoothnessScore;
         _cooldown = trace.recencyPenaltyMultiplier;
-        _zone = trace.zone >= 0 ? @(SmartShuffleEngine::zoneWord(trace.zone)) : @"";
+        _zoneName = trace.zone >= 0 ? @(SmartShuffleEngine::zoneWord(trace.zone)) : @"";
         _reasonTag = ToString(trace.primaryReasonTag);
         _vectorQuality = static_cast<NSInteger>(trace.quality);
     }

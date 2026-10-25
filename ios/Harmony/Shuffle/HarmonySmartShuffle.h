@@ -41,7 +41,7 @@ typedef NS_ENUM(NSInteger, HarmonyShuffleEvent) {
 /** 1 = no recency cooldown. */
 @property (nonatomic, readonly) float cooldown;
 /** "Bass", "Warm", "Vocal", "Bright" or "Air". */
-@property (nonatomic, readonly, copy) NSString *zone;
+@property (nonatomic, readonly, copy) NSString *zoneName;
 /** "94% Bass/Vibe Match", "Markov Favorite Transition", "Bandit Rediscovery Gem"… */
 @property (nonatomic, readonly, copy) NSString *reasonTag;
 /** 2 = a real 24-D measurement, 1 = estimated, 0 = none. */
@@ -88,31 +88,36 @@ typedef NS_ENUM(NSInteger, HarmonyShuffleEvent) {
                      qualities:(NSData *)qualities
                        artists:(NSData *)artists
                         albums:(NSData *)albums
-                         count:(NSInteger)count;
+                         count:(NSInteger)count
+    NS_SWIFT_NAME(setLibrary(ids:vectors:qualities:artists:albums:count:));
 
 /** Listening history in library order: completed and skipped plays (int32), last played (int64 ms). */
 - (void)setTrackStatsWithCompleted:(NSData *)completed
                            skipped:(NSData *)skipped
                         lastPlayed:(NSData *)lastPlayedMs
-                             count:(NSInteger)count;
+                             count:(NSInteger)count
+    NS_SWIFT_NAME(setTrackStats(completed:skipped:lastPlayed:count:));
 
 /** Markov habits: [count] "to after from" transitions (int64, int64, float32), added to what is known. */
-- (void)addTransitionsFrom:(NSData *)from to:(NSData *)to weights:(NSData *)weights count:(NSInteger)count;
+- (void)addTransitionsFrom:(NSData *)from to:(NSData *)to weights:(NSData *)weights count:(NSInteger)count
+    NS_SWIFT_NAME(addTransitions(from:to:weights:count:));
 
-- (HarmonyShuffleEvent)trackStarted:(int64_t)trackId;
+- (HarmonyShuffleEvent)trackStarted:(int64_t)trackId NS_SWIFT_NAME(trackStarted(_:));
 /** A song ended or was left after [fraction] of it. [shufflePick]: Smart Shuffle had queued it. */
 - (HarmonyShuffleEvent)playbackOutcome:(int64_t)trackId
                               fraction:(float)fraction
                               atMillis:(int64_t)atMillis
-                           shufflePick:(BOOL)shufflePick;
-- (HarmonyShuffleEvent)manualSelect:(int64_t)trackId;
+                           shufflePick:(BOOL)shufflePick
+    NS_SWIFT_NAME(playbackOutcome(_:fraction:atMillis:shufflePick:));
+- (HarmonyShuffleEvent)manualSelect:(int64_t)trackId NS_SWIFT_NAME(manualSelect(_:));
 - (void)resetSession;
 @property (nonatomic, readonly) BOOL hasSession;
 /** S_t: 24 values (zeros before the first song). */
 @property (nonatomic, readonly, copy) NSArray<NSNumber *> *sessionVector;
 
 /** The Markov transition the last outcome taught (to persist it). */
-- (BOOL)lastLearnedTransitionFrom:(int64_t *)from to:(int64_t *)to delta:(float *)delta;
+- (BOOL)lastLearnedTransitionFrom:(int64_t *)from to:(int64_t *)to delta:(float *)delta
+    NS_SWIFT_NAME(lastLearnedTransition(from:to:delta:));
 
 /**
  * Up to [count] songs to follow [currentId] and the songs already queued
@@ -123,7 +128,8 @@ typedef NS_ENUM(NSInteger, HarmonyShuffleEvent) {
                                exclude:(NSArray<NSNumber *> *)exclude
                                  count:(NSInteger)count
                               atMillis:(int64_t)atMillis
-                                  seed:(uint64_t)seed;
+                                  seed:(uint64_t)seed
+    NS_SWIFT_NAME(generate(after:prefix:exclude:count:atMillis:seed:));
 
 /** Why each song of the last generateAfter was picked. */
 @property (nonatomic, readonly, copy) NSArray<HarmonyShuffleTrace *> *lastTraces;
