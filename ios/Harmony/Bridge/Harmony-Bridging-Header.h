@@ -5,3 +5,5 @@
 #import "HarmonyEngineCheck.h"
 #import "../Audio/HarmonyDspBridge.h"
 #import "../Scanner/FastAcousticScanner_iOS.h"
+#import "../Ingest/HarmonyTranscoder.h"
+#import "../Soulseek/HarmonySoulseekBridge.h"

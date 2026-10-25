@@ -46,6 +46,8 @@ enum CyberGlassColors {
     static let selectedChip = LinearGradient(colors: [mint, azure], startPoint: .leading, endPoint: .trailing)
     static let searchRim = LinearGradient(colors: [indigo, indigoDeep], startPoint: .leading, endPoint: .trailing)
     static let iridescent = LinearGradient(colors: [violet, cyan, mint, purple], startPoint: .topLeading, endPoint: .bottomTrailing)
+    static let iridescentSoft = LinearGradient(colors: [violet.opacity(0.6), cyan.opacity(0.55), mint.opacity(0.5), purple.opacity(0.55)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing)
     static let iridescentSweep = AngularGradient(colors: [violet, cyan, mint, purple, violet], center: .center)
     static let progress = LinearGradient(colors: [violet, cyan, mint], startPoint: .leading, endPoint: .trailing)
     static let playButton = LinearGradient(colors: [violet, purple], startPoint: .topLeading, endPoint: .bottomTrailing)

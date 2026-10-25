@@ -77,6 +77,10 @@ targets:
       - sdk: MediaPlayer.framework
       - sdk: Accelerate.framework
       - sdk: UniformTypeIdentifiers.framework
+      - sdk: AuthenticationServices.framework
+      - sdk: ShazamKit.framework
+      - sdk: CryptoKit.framework
+      - sdk: Security.framework
       - sdk: libsqlite3.tbd
       - sdk: libz.tbd
     info:
@@ -108,6 +112,13 @@ targets:
         NSBonjourServices: ["_harmony._tcp"]
         CADisableMinimumFrameDurationOnPhone: true
         ITSAppUsesNonExemptEncryption: false
+        # harmony://import?url=… (links from Shortcuts and Safari); com.harmony.app:// is Spotify's
+        # sign-in redirect, the same URI the Android app registers.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.harmony.app.ios.links
+            CFBundleURLSchemes: [harmony]
+          - CFBundleURLName: com.harmony.app.ios.spotify
+            CFBundleURLSchemes: [com.harmony.app]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Audio
             CFBundleTypeRole: Viewer
