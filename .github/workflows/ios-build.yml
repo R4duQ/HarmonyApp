@@ -6,6 +6,8 @@ name: Harmony for iOS
 
 on:
   workflow_dispatch:
+  # The Android release calls this too, to attach the IPA to the GitHub release.
+  workflow_call:
   push:
     paths:
       - 'ios/**'
@@ -26,7 +28,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: harmony-ios-${{ github.ref }}
+  # By event too: the build a release runs must not cancel (or be cancelled by) a push build of main.
+  group: harmony-ios-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

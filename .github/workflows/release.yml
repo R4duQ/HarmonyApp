@@ -249,3 +249,33 @@ jobs:
         shell: bash
         run: |
           rm -f release.keystore keystore.properties
+
+  ios:
+    name: iOS IPA
+    uses: ./.github/workflows/ios-build.yml
+
+  ios-release:
+    name: Attach the iOS IPA
+    needs: [release, ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download the IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: Harmony-iOS-Unsigned
+          path: ios-dist
+
+      - name: Upload to the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          ipa="ios-dist/Harmony-${RELEASE_TAG}-iOS-unsigned.ipa"
+          mv ios-dist/Harmony-iOS-Unsigned.ipa "$ipa"
+          sha=$(sha256sum "$ipa" | cut -d' ' -f1)
+          echo "SHA-256 ${sha}  $(basename "$ipa")"
+          gh release upload "${RELEASE_TAG}" --clobber --repo "${GITHUB_REPOSITORY}" \
+            "${ipa}#Harmony ${RELEASE_TAG} — iOS (unsigned: install with Sideloadly or AltStore)"
