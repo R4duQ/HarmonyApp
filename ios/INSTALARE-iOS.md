@@ -38,3 +38,33 @@ Următoarele module adaugă playerul complet peste acest nucleu.
 Aplicația apare în **Files → On My iPhone → Harmony**: copiază muzica acolo,
 sau (din modulele următoare) alege orice folder din Files, iar Harmony îl
 păstrează accesibil și după repornire.
+
+## Downloads pe iOS
+
+Tab-ul **Downloads** are patru surse. Ce se descarcă ajunge în
+**Files › On My iPhone › Harmony › Downloads**, intră în bibliotecă și i se
+măsoară imediat vectorul 24D pentru Smart Shuffle.
+
+- **Soulseek P2P**: te conectezi cu contul Soulseek. Parola se păstrează în
+  Keychain, doar pe acest iPhone. Cauți „Artist - Melodie”, iar rezultatele
+  sunt ordonate ca pe Android (potrivire, FLAC, 24-bit/hi-res, slot liber,
+  coadă). Un fișier e păstrat doar dacă e cu adevărat FLAC/MP3 valid; o
+  descărcare întreruptă se reia de unde a rămas. Soulseek permite o singură
+  sesiune pe cont, deci conectarea aici deconectează celelalte clienturi.
+- **Links**: un link direct către un fișier audio (FLAC, ALAC, WAV, AIFF, MP3,
+  M4A), de exemplu un download Bandcamp, archive.org sau serverul tău. Descărcarea
+  continuă și cu aplicația închisă. WAV/AIFF se comprimă lossless în FLAC (sau
+  ALAC). Un link care deschide o pagină web e refuzat. Din alte aplicații: un
+  Shortcut care deschide `harmony://import?url=<link>` apare în meniul Share.
+- **Playlist Import**: Spotify (playlisturile tale, cu Client ID-ul aplicației
+  tale de dezvoltator, același redirect ca pe Android:
+  `com.harmony.app://spotify-playlist-callback`), orice playlist public Deezer
+  sau o listă lipită „Artist - Titlu”. „Find lossless on Soulseek” caută fiecare
+  melodie după durată (±2 s), încearcă cele mai bune 4 surse și o etichetează
+  cu titlul, artistul, albumul și coperta din playlist.
+- **Recognize**: ShazamKit ascultă până la 15 secunde. Recunoașterea are nevoie
+  de serviciul ShazamKit activat pe bundle ID, ceea ce cere un cont Apple
+  Developer plătit. Cu un Apple ID gratuit, aplicația îți spune asta clar.
+
+Un fișier lossy (MP3/AAC) rămâne așa cum e: nu e transformat în FLAC, pentru
+că asta l-ar mări fără nicio îmbunătățire de calitate.
