@@ -133,7 +133,7 @@ final class MornyeRuntime: @unchecked Sendable {
         let commands = try current.environment().ffmpegCommands()
         let pump = CoreFFmpegExecution(
             wait: { try JSONDecoder().decode([CoreFFmpegCommand].self, from: Data(commands.waitPending(timeoutMs: $0).utf8)) },
-            active: { try !commands.getCommand(commandId: $0).isEmpty },
+            active: { !commands.getCommand(commandId: $0).isEmpty },
             complete: { id, success, output, error in
                 _ = try commands.complete(commandId: id, success: success, output: output, error: error)
             })
@@ -162,6 +162,9 @@ final class MornyeRuntime: @unchecked Sendable {
     func cancel(_ itemID: String) {
         // No lazy initialization here: a cancelled setup must not start a runtime.
         try? owner().environment().downloadState().cancelDownload(itemId: itemID)
+    }
+    func clearProgress(_ itemID: String) {
+        try? owner().environment().downloadState().clearItemProgress(itemId: itemID)
     }
     func progress() throws -> [String: Any] {
         try MornyeJSON.object(owner().environment().downloadState().allProgress())["items"] as? [String: Any] ?? [:]

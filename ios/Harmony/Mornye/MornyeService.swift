@@ -16,6 +16,7 @@ struct MornyeJob: Identifiable, Codable {
     var speed: Double = 0
     var detail: String?
     var indexed = false
+    var actualFormatBadge: String?
     var finalRelativePath: String?
     var resumeOnForeground = false
     var verificationProvider: String?
@@ -33,7 +34,7 @@ struct MornyeJob: Identifiable, Codable {
         case .cancelled: status = .cancelled
         }
         return DownloadItem(origin: .mornye(id), title: track.title, artist: track.artist, album: track.album,
-                            source: "Mornye", formatBadge: quality.title.uppercased(), progress: progress,
+                            source: "Mornye", formatBadge: actualFormatBadge ?? (quality == .hiRes ? "HI-RES REQUESTED" : "LOSSLESS"), progress: progress,
                             bytes: bytes, totalBytes: total, bytesPerSecond: stage == .downloading ? speed : 0,
                             status: status, detail: detail, indexed: indexed)
     }
@@ -114,15 +115,25 @@ final class MornyeService: ObservableObject {
                 let runtime = self.runtime
                 providers = try await Task.detached { try runtime.prepare() }.value
                 results = try await Task.detached { try runtime.search(query, provider: provider) }.value
-                if results.isEmpty {
-                    for id in provider.isEmpty ? MornyeProvider.order : [provider] {
-                        if let challenge = try? await Task.detached(operation: { try runtime.pendingVerification(provider: id, jobID: nil) }).value {
-                            verification = challenge
-                            break
-                        }
-                    }
-                }
-            } catch { self.error = MornyeJSON.redact(error.localizedDescription) }
+                if results.isEmpty { await findSearchVerification(provider: provider) }
+            } catch {
+                self.error = MornyeJSON.redact(error.localizedDescription)
+                await findSearchVerification(provider: provider)
+            }
+        }
+    }
+
+    /// Search itself can request a session before it returns any tracks.
+    /// Surface that challenge instead of leaving a first-time user stuck.
+    private func findSearchVerification(provider: String) async {
+        let runtime = self.runtime
+        for id in provider.isEmpty ? MornyeProvider.order : [provider] {
+            if let pending = try? await Task.detached(operation: {
+                try runtime.pendingVerification(provider: id, jobID: nil)
+            }).value {
+                verification = pending
+                return
+            }
         }
     }
 
@@ -369,7 +380,15 @@ final class MornyeService: ObservableObject {
             final = try await IosNativeAudioTranscoder.shared.prepare(
                 file: file, into: directory, baseName: "\(job.track.artist) - \(job.track.title)", lossless: .flac).url
         }
-        update(id) { $0.finalRelativePath = HarmonyPaths.relativePath(for: final) }
+        let info = HarmonyTranscoder.inspectFile(at: final)
+        let actualFormat: String
+        if let info, info.bitDepth > 0 {
+            actualFormat = "\(info.codec.uppercased()) \(info.bitDepth)/\(String(format: "%g", info.sampleRate / 1000))"
+        } else { actualFormat = "LOSSLESS" }
+        update(id) {
+            $0.finalRelativePath = HarmonyPaths.relativePath(for: final)
+            $0.actualFormatBadge = actualFormat
+        }
         let known = KnownTrackInfo(title: job.track.title, artist: job.track.artist, album: job.track.album,
                                    isrc: job.track.isrc.isEmpty ? nil : job.track.isrc,
                                    durationMs: job.track.durationMs, coverArtURL: job.track.coverURL)
@@ -411,6 +430,10 @@ final class MornyeService: ObservableObject {
                 jobs[i].resumeOnForeground = false
             }
             if jobs[i].stage == .cancelled { discardStaging(id) }
+        }
+        if let itemID = activeItemID {
+            let runtime = self.runtime
+            Task.detached { runtime.clearProgress(itemID) }
         }
         activeID = nil
         activeItemID = nil

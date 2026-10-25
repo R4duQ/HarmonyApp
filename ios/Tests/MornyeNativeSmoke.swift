@@ -45,6 +45,30 @@ enum MornyeNativeSmoke {
         precondition(!newCancelled, "Late cancellation must not affect a new attempt")
         oldAttempt.release()
         newAttempt.release()
+        try state.clearItemProgress(itemId: "progress")
+        let cleared = try JSONSerialization.jsonObject(with: Data(state.allProgress().utf8)) as? [String: Any]
+        precondition((cleared?["items"] as? [String: Any])?["progress"] == nil)
+
+        // Exercise the shipped packages in the actual Rust/JavaScript runtime,
+        // without a provider account or network request.
+        let packages = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("ios/Vendor/Mornye/MornyeProviders")
+        let expected = ["tidal-web", "qobuz-web", "deezer", "amazon"]
+        for id in expected {
+            _ = try owner.install(packagePath: packages.appendingPathComponent(id + ".sflx").path)
+            try owner.setEnabled(extensionId: id, enabled: true)
+        }
+        let rows = try JSONSerialization.jsonObject(with: Data(owner.installed().utf8)) as? [[String: Any]] ?? []
+        for id in expected {
+            guard let row = rows.first(where: { $0["id"] as? String == id }),
+                  let qualities = row["quality_options"] as? [[String: Any]], !qualities.isEmpty else {
+                fatalError("Bundled provider failed to load its quality options: \(id)")
+            }
+            precondition(qualities.contains { $0["kind"] as? String == "lossless" || $0["id"] as? String == "flac" })
+        }
+        try owner.setProviderPriority(kind: "download", ids: expected)
+        try owner.setProviderPriority(kind: "metadata", ids: expected)
+        try owner.setFallbackProviders(ids: expected)
         let commands = environment.ffmpegCommands()
         let pending = try commands.waitPending(timeoutMs: 0)
         precondition(pending == "[]")
@@ -52,6 +76,6 @@ enum MornyeNativeSmoke {
             _ = try environment.consumeCallbackState(state: "not-issued-by-this-runtime")
             fatalError("Unknown callback state was accepted")
         } catch {}
-        print("Mornye native Swift/Rust initialization, download errors, cancellation, progress and callback checks passed")
+        print("Mornye native Swift/Rust initialization, download errors, cancellation, progress, bundled providers and callback checks passed")
     }
 }
