@@ -164,7 +164,7 @@ enum class SessionEvent : int {
     Seeded = 1,
     /** Played past half: S_t = normalize(0.60 v + 0.40 S_t-1). */
     PlayEma = 2,
-    /** Skipped before 20%: S_t = normalize(S_t-1 - 0.35 v). Re-rank the tail. */
+    /** Skipped before 20%: S_t = normalize(S_t-1 - 0.35 v). Steers the next picks. */
     FastSkip = 3,
     /** Chosen by hand: S_t = normalize(0.85 v + 0.15 S_t-1). */
     ManualAnchor = 4,

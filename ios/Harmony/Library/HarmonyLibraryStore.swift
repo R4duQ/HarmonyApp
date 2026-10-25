@@ -72,7 +72,35 @@ enum LibraryStoreError: LocalizedError {
     }
 }
 
-/// The library database: songs, their 24-D Smart Shuffle vectors.
+/// A folder from the Files app that Harmony reads in place (a security-scoped bookmark).
+struct LibraryFolder: Identifiable, Hashable {
+    let id: Int64
+    var bookmark: Data
+    var name: String
+    var addedAt: Date
+    var lastScan: Date?
+
+    /// Songs in this folder are stored as "@<id>/<path inside the folder>".
+    var pathPrefix: String { "@\(id)/" }
+}
+
+/// What Smart Shuffle knows about how a song is listened to.
+struct PlayStats: Hashable {
+    var completed: Int
+    var skipped: Int
+    /// Milliseconds since 1970, 0 = never.
+    var lastPlayedMs: Int64
+}
+
+/// A learned "to after from" habit.
+struct Transition: Hashable {
+    let from: Int64
+    let to: Int64
+    let weight: Float
+}
+
+/// The library database: songs, their 24-D Smart Shuffle vectors, the
+/// folders read in place, play statistics and the Markov habits.
 ///
 /// SQLite through its C API, one connection used on one serial queue, so it
 /// is safe from any thread. Vectors are stored as 96-byte BLOBs (24 float32).
@@ -123,6 +151,31 @@ final class HarmonyLibraryStore: @unchecked Sendable {
                     vector BLOB NOT NULL,
                     quality INTEGER NOT NULL,
                     measured_at REAL NOT NULL
+                )
+                """)
+            exec("""
+                CREATE TABLE IF NOT EXISTS folders(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bookmark BLOB NOT NULL,
+                    name TEXT NOT NULL,
+                    added_at REAL NOT NULL,
+                    last_scan REAL
+                )
+                """)
+            exec("""
+                CREATE TABLE IF NOT EXISTS play_stats(
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    skipped INTEGER NOT NULL DEFAULT 0,
+                    last_played_ms INTEGER NOT NULL DEFAULT 0
+                )
+                """)
+            exec("""
+                CREATE TABLE IF NOT EXISTS transitions(
+                    from_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    to_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    weight REAL NOT NULL,
+                    PRIMARY KEY(from_id, to_id)
                 )
                 """)
         }
@@ -280,6 +333,204 @@ final class HarmonyLibraryStore: @unchecked Sendable {
         return fold(firstArtist) + "|" + fold(base)
     }
 
+    /// The songs stored under [prefix] ("@3/" for a folder), by relative path, with their size.
+    func pathIndex(prefix: String) -> [String: (id: Int64, size: Int64)] {
+        queue.sync {
+            var index: [String: (id: Int64, size: Int64)] = [:]
+            guard let statement = try? prepare(
+                "SELECT relative_path, id, file_size FROM tracks WHERE substr(relative_path, 1, ?) = ?"
+            ) else { return index }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int(statement, 1, Int32(prefix.utf8.count))
+            bind(statement, 2, prefix)
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let path = text(statement, 0) {
+                    index[path] = (sqlite3_column_int64(statement, 1), sqlite3_column_int64(statement, 2))
+                }
+            }
+            return index
+        }
+    }
+
+    /// Removes songs (their vectors, stats and habits go with them).
+    func delete(trackIds: [Int64]) {
+        guard !trackIds.isEmpty else { return }
+        queue.sync {
+            exec("BEGIN")
+            if let statement = try? prepare("DELETE FROM tracks WHERE id = ?") {
+                for id in trackIds {
+                    sqlite3_reset(statement)
+                    sqlite3_bind_int64(statement, 1, id)
+                    sqlite3_step(statement)
+                }
+                sqlite3_finalize(statement)
+            }
+            exec("COMMIT")
+        }
+    }
+
+    // MARK: - Folders
+
+    func folders() -> [LibraryFolder] {
+        queue.sync {
+            guard let statement = try? prepare("SELECT id, bookmark, name, added_at, last_scan FROM folders ORDER BY name") else {
+                return []
+            }
+            defer { sqlite3_finalize(statement) }
+            var folders: [LibraryFolder] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let bytes = sqlite3_column_blob(statement, 1)
+                let count = Int(sqlite3_column_bytes(statement, 1))
+                let bookmark = bytes.map { Data(bytes: $0, count: count) } ?? Data()
+                let scanned = sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil
+                    : Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                folders.append(LibraryFolder(
+                    id: sqlite3_column_int64(statement, 0),
+                    bookmark: bookmark,
+                    name: text(statement, 2) ?? "",
+                    addedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
+                    lastScan: scanned
+                ))
+            }
+            return folders
+        }
+    }
+
+    func addFolder(bookmark: Data, name: String) throws -> Int64 {
+        try queue.sync {
+            let statement = try prepare("INSERT INTO folders(bookmark, name, added_at) VALUES(?,?,?)")
+            defer { sqlite3_finalize(statement) }
+            bindBlob(statement, 1, bookmark)
+            bind(statement, 2, name)
+            sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw LibraryStoreError.sqlite(lastError) }
+            return sqlite3_last_insert_rowid(db)
+        }
+    }
+
+    /// A stale bookmark resolved anyway: iOS hands out a fresh one to keep.
+    func updateFolder(id: Int64, bookmark: Data) {
+        queue.sync {
+            guard let statement = try? prepare("UPDATE folders SET bookmark = ? WHERE id = ?") else { return }
+            defer { sqlite3_finalize(statement) }
+            bindBlob(statement, 1, bookmark)
+            sqlite3_bind_int64(statement, 2, id)
+            sqlite3_step(statement)
+        }
+    }
+
+    func markFolderScanned(id: Int64) {
+        queue.sync {
+            guard let statement = try? prepare("UPDATE folders SET last_scan = ? WHERE id = ?") else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, Date().timeIntervalSince1970)
+            sqlite3_bind_int64(statement, 2, id)
+            sqlite3_step(statement)
+        }
+    }
+
+    /// Forgets the folder and its songs (the files themselves are not touched).
+    func removeFolder(_ folder: LibraryFolder) {
+        let ids = pathIndex(prefix: folder.pathPrefix).values.map { $0.id }
+        delete(trackIds: ids)
+        queue.sync {
+            guard let statement = try? prepare("DELETE FROM folders WHERE id = ?") else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int64(statement, 1, folder.id)
+            sqlite3_step(statement)
+        }
+    }
+
+    // MARK: - Listening history (Smart Shuffle)
+
+    /// A song was finished ([completed]) or skipped early ([skipped]) at [atMs].
+    func recordPlay(trackId: Int64, completed: Bool, skipped: Bool, atMs: Int64) {
+        queue.sync {
+            guard let statement = try? prepare("""
+                INSERT INTO play_stats(track_id, completed, skipped, last_played_ms) VALUES(?,?,?,?)
+                ON CONFLICT(track_id) DO UPDATE SET
+                    completed = completed + excluded.completed,
+                    skipped = skipped + excluded.skipped,
+                    last_played_ms = MAX(last_played_ms, excluded.last_played_ms)
+                """) else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int64(statement, 1, trackId)
+            sqlite3_bind_int(statement, 2, completed ? 1 : 0)
+            sqlite3_bind_int(statement, 3, skipped ? 1 : 0)
+            sqlite3_bind_int64(statement, 4, atMs)
+            sqlite3_step(statement)
+        }
+    }
+
+    func allPlayStats() -> [Int64: PlayStats] {
+        queue.sync {
+            var stats: [Int64: PlayStats] = [:]
+            guard let statement = try? prepare("SELECT track_id, completed, skipped, last_played_ms FROM play_stats") else {
+                return stats
+            }
+            defer { sqlite3_finalize(statement) }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                stats[sqlite3_column_int64(statement, 0)] = PlayStats(
+                    completed: Int(sqlite3_column_int64(statement, 1)),
+                    skipped: Int(sqlite3_column_int64(statement, 2)),
+                    lastPlayedMs: sqlite3_column_int64(statement, 3)
+                )
+            }
+            return stats
+        }
+    }
+
+    /// Adds [delta] to the "to after from" habit.
+    func addTransition(from: Int64, to: Int64, delta: Float) {
+        guard from != to, delta.isFinite else { return }
+        queue.sync {
+            guard let statement = try? prepare("""
+                INSERT INTO transitions(from_id, to_id, weight) VALUES(?,?,?)
+                ON CONFLICT(from_id, to_id) DO UPDATE SET weight = weight + excluded.weight
+                """) else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int64(statement, 1, from)
+            sqlite3_bind_int64(statement, 2, to)
+            sqlite3_bind_double(statement, 3, Double(delta))
+            sqlite3_step(statement)
+        }
+    }
+
+    func allTransitions() -> [Transition] {
+        queue.sync {
+            var transitions: [Transition] = []
+            guard let statement = try? prepare("SELECT from_id, to_id, weight FROM transitions WHERE weight > 0") else {
+                return transitions
+            }
+            defer { sqlite3_finalize(statement) }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                transitions.append(Transition(
+                    from: sqlite3_column_int64(statement, 0),
+                    to: sqlite3_column_int64(statement, 1),
+                    weight: Float(sqlite3_column_double(statement, 2))
+                ))
+            }
+            return transitions
+        }
+    }
+
+    /// Every stored vector with its quality (2 = real 24-D).
+    func allVectors() -> [Int64: (vector: [Float], quality: Int)] {
+        queue.sync {
+            var vectors: [Int64: (vector: [Float], quality: Int)] = [:]
+            guard let statement = try? prepare("SELECT track_id, vector, quality FROM acoustic_vectors") else { return vectors }
+            defer { sqlite3_finalize(statement) }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let blob = sqlite3_column_blob(statement, 1) else { continue }
+                let count = Int(sqlite3_column_bytes(statement, 1)) / MemoryLayout<Float>.size
+                guard count == 24 else { continue }
+                let vector = Array(UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: count))
+                vectors[sqlite3_column_int64(statement, 0)] = (vector, Int(sqlite3_column_int(statement, 2)))
+            }
+            return vectors
+        }
+    }
+
     // MARK: - Plumbing
 
     private static let selectTracks = """
@@ -345,6 +596,12 @@ final class HarmonyLibraryStore: @unchecked Sendable {
             sqlite3_bind_text(statement, index, value, -1, Self.transient)
         } else {
             sqlite3_bind_null(statement, index)
+        }
+    }
+
+    private func bindBlob(_ statement: OpaquePointer, _ index: Int32, _ data: Data) {
+        data.withUnsafeBytes { raw in
+            _ = sqlite3_bind_blob(statement, index, raw.baseAddress, Int32(raw.count), Self.transient)
         }
     }
 

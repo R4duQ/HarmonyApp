@@ -50,8 +50,13 @@ enum HarmonyPaths {
         return String(path.dropFirst(base.count + 1))
     }
 
+    /// Where a stored path points: under Documents, or "@<folder>/…" inside a
+    /// folder from the Files app (see FolderAccess).
     static func url(forRelative path: String) -> URL {
-        documents.appendingPathComponent(path)
+        if let stored = FolderAccess.parse(path), let base = FolderAccess.shared.url(forFolder: stored.folderId) {
+            return base.appendingPathComponent(stored.inside)
+        }
+        return documents.appendingPathComponent(path)
     }
 
     /// A file name safe for the Files app: no separators or control characters, at most 150 characters.

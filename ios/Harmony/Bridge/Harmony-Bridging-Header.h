@@ -7,3 +7,4 @@
 #import "../Scanner/FastAcousticScanner_iOS.h"
 #import "../Ingest/HarmonyTranscoder.h"
 #import "../Soulseek/HarmonySoulseekBridge.h"
+#import "../Shuffle/HarmonySmartShuffle.h"

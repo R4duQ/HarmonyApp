@@ -33,6 +33,11 @@ final class LibraryIngest: ObservableObject {
         trackCount = store.trackCount
     }
 
+    /// Re-reads the song count (after songs were removed).
+    func refreshCount() {
+        trackCount = store.trackCount
+    }
+
     /// Queues every song still missing its vector (on launch, after a big import).
     func indexMissingVectors() {
         let missing = store.tracksWithoutVectors().map { AcousticScanCoordinator.Item(trackId: $0.id, url: $0.url) }
@@ -40,26 +45,60 @@ final class LibraryIngest: ObservableObject {
     }
 
     /**
-     * Stores the file at [url] (which must already be in its final place
-     * under Documents) and measures its vector. Returns the song's id.
-     * [onIndexing] is called when the vector measurement starts.
+     * Stores the file at [url] and returns the song's id. The file must
+     * already be in its final place under Documents, unless [relativePath]
+     * says where it is stored ("@<folder>/…" for a folder read in place).
+     * [measureNow]: measure its 24-D vector straight away (one download)
+     * rather than leaving it to the background indexer (a folder of
+     * thousands). [onIndexing] is called when that measurement starts.
      */
-    func ingest(fileAt url: URL, source: String, known: KnownTrackInfo? = nil,
-                onIndexing: (() -> Void)? = nil) async throws -> Int64 {
-        guard let relative = HarmonyPaths.relativePath(for: url) else {
+    func ingest(fileAt url: URL, source: String, known: KnownTrackInfo? = nil, relativePath: String? = nil,
+                measureNow: Bool = true, onIndexing: (() -> Void)? = nil) async throws -> Int64 {
+        guard let relative = relativePath ?? HarmonyPaths.relativePath(for: url) else {
             throw IngestError.outsideLibrary
         }
-        let tags = await Self.readTags(url)
+        // Tags, format and artwork off the main thread: a folder scan reads thousands.
+        let (draft, artworkJPEG) = await Task.detached(priority: .utility) {
+            await Self.describe(fileAt: url, relativePath: relative, source: source, known: known)
+        }.value
+        let id = try store.upsert(draft)
+
+        if let artworkJPEG {
+            let name = "\(id).jpg"
+            try? artworkJPEG.write(to: HarmonyPaths.artwork.appendingPathComponent(name), options: .atomic)
+            store.setArtwork(trackId: id, fileName: name)
+        }
+        trackCount = store.trackCount
+        NotificationCenter.default.post(name: .harmonyLibraryChanged, object: nil)
+        guard measureNow else { return id }
+
+        // The 24-D vector, now: a single scan is a few tens of milliseconds.
+        onIndexing?()
+        let result = await Task.detached(priority: .utility) {
+            HarmonyFastAcousticScanner.scanFile(at: url, isCancelled: nil)
+        }.value
+        if let data = result.vector {
+            let vector = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            store.saveVector(trackId: id, vector: vector)
+            NotificationCenter.default.post(name: .harmonyLibraryChanged, object: nil)
+        }
+        return id
+    }
+
+    /// Everything stored about a file, and its artwork as JPEG. Runs on any thread.
+    nonisolated static func describe(fileAt url: URL, relativePath relative: String, source: String,
+                                     known: KnownTrackInfo?) async -> (TrackDraft, Data?) {
+        let tags = await readTags(url)
         let info = HarmonyTranscoder.inspectFile(at: url)
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
         let fallbackTitle = url.deletingPathExtension().lastPathComponent
-        let (parsedArtist, parsedTitle) = Self.splitArtistTitle(fallbackTitle)
+        let (parsedArtist, parsedTitle) = splitArtistTitle(fallbackTitle)
 
         let draft = TrackDraft(
             relativePath: relative,
-            title: Self.firstNonEmpty(known?.title, tags.title, parsedTitle, fallbackTitle) ?? fallbackTitle,
-            artist: Self.firstNonEmpty(known?.artist, tags.artist, parsedArtist) ?? "Unknown artist",
-            album: Self.firstNonEmpty(known?.album, tags.album) ?? "",
+            title: firstNonEmpty(known?.title, tags.title, parsedTitle, fallbackTitle) ?? fallbackTitle,
+            artist: firstNonEmpty(known?.artist, tags.artist, parsedArtist) ?? "Unknown artist",
+            album: firstNonEmpty(known?.album, tags.album) ?? "",
             albumArtist: tags.albumArtist,
             trackNumber: tags.trackNumber,
             discNumber: nil,
@@ -73,32 +112,14 @@ final class LibraryIngest: ObservableObject {
             source: source,
             isrc: known?.isrc
         )
-        let id = try store.upsert(draft)
 
         // Artwork: the one we were given, else the file's own.
         var artwork = tags.artwork
         if artwork == nil, let coverURL = known?.coverArtURL {
             artwork = try? await URLSession.shared.data(from: coverURL).0
         }
-        if let artwork, let image = UIImage(data: artwork), let jpeg = image.jpegData(compressionQuality: 0.88) {
-            let name = "\(id).jpg"
-            try? jpeg.write(to: HarmonyPaths.artwork.appendingPathComponent(name), options: .atomic)
-            store.setArtwork(trackId: id, fileName: name)
-        }
-        trackCount = store.trackCount
-        NotificationCenter.default.post(name: .harmonyLibraryChanged, object: nil)
-
-        // The 24-D vector, now: a single scan is a few tens of milliseconds.
-        onIndexing?()
-        let result = await Task.detached(priority: .utility) {
-            HarmonyFastAcousticScanner.scanFile(at: url, isCancelled: nil)
-        }.value
-        if let data = result.vector {
-            let vector = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
-            store.saveVector(trackId: id, vector: vector)
-            NotificationCenter.default.post(name: .harmonyLibraryChanged, object: nil)
-        }
-        return id
+        let jpeg = artwork.flatMap { UIImage(data: $0) }.flatMap { $0.jpegData(compressionQuality: 0.88) }
+        return (draft, jpeg)
     }
 
     enum IngestError: LocalizedError {
@@ -122,7 +143,7 @@ final class LibraryIngest: ObservableObject {
     }
 
     /// Reads the tags AVFoundation understands (ID3, iTunes, Vorbis comments in FLAC).
-    static func readTags(_ url: URL) async -> FileTags {
+    nonisolated static func readTags(_ url: URL) async -> FileTags {
         let asset = AVURLAsset(url: url)
         var tags = FileTags()
         if let duration = try? await asset.load(.duration), duration.isNumeric {
@@ -158,12 +179,12 @@ final class LibraryIngest: ObservableObject {
         return tags
     }
 
-    static func firstNonEmpty(_ values: String?...) -> String? {
+    nonisolated static func firstNonEmpty(_ values: String?...) -> String? {
         values.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
     }
 
     /// "Artist - Title" file names, as most downloads are named.
-    static func splitArtistTitle(_ name: String) -> (String?, String?) {
+    nonisolated static func splitArtistTitle(_ name: String) -> (String?, String?) {
         let cleaned = name.replacingOccurrences(of: #"^\s*\d{1,3}\s*[-._)]\s*"#, with: "", options: .regularExpression)
         for dash in [" - ", " – ", " — "] {
             if let range = cleaned.range(of: dash) {

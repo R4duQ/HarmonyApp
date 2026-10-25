@@ -3,10 +3,11 @@ import UIKit
 
 /// Harmony for iOS.
 ///
-/// Two tabs for now: Downloads (Soulseek, links, playlist import,
-/// recognition) and Engine (the shared C++ engines running on this iPhone).
-/// The full Cyber-Glass shell (library, mini player, Now Playing, equalizer)
-/// replaces this root in the next module.
+/// Three tabs for now: Library (songs, folders from Files, the player),
+/// Downloads (Soulseek, links, playlist import, recognition) and Engine (the
+/// shared C++ engines running on this iPhone). The full Cyber-Glass shell
+/// (floating mini player, Now Playing, the Winamp equalizer) replaces this
+/// root in the UI module.
 @main
 struct HarmonyApp: App {
     @UIApplicationDelegateAdaptor(HarmonyAppDelegate.self) private var appDelegate
@@ -23,13 +24,19 @@ struct HarmonyApp: App {
 struct RootView: View {
     var body: some View {
         TabView {
+            LibraryScreen()
+                .tabItem { Label("Library", systemImage: "music.note.list") }
             DownloadsScreen()
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
             EngineCheckView()
                 .tabItem { Label("Engine", systemImage: "cpu") }
         }
         .tint(CyberGlassColors.cyan)
-        .task { LibraryIngest.shared.indexMissingVectors() }
+        .task {
+            HarmonyAudioController.shared.start()
+            IosMusicLibraryManager.shared.start()
+            LibraryIngest.shared.indexMissingVectors()
+        }
     }
 }
 
