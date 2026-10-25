@@ -171,85 +171,203 @@ struct NeonProgressBar: View {
     }
 }
 
-/// One transfer: title, where it's from, stage, progress, speed, and the 24-D brain indicator.
-struct TransferCard: View {
-    let title: String
-    let subtitle: String
-    let stage: String
-    let fraction: Double
-    let bytesPerSecond: Double
-    let detail: String?
-    let active: Bool
-    let failed: Bool
-    let indexed: Bool
-    let indexing: Bool
-    var onCancel: (() -> Void)?
+/// One download: title, artist and source, format, the laser progress line,
+/// live speed, its controls, and the 24-D brain badge once indexed.
+struct DownloadItemCard: View {
+    let item: DownloadItem
+    var onPause: () -> Void = {}
+    var onResume: () -> Void = {}
+    var onRetry: () -> Void = {}
+    var onCancel: () -> Void = {}
+
+    private var failed: Bool { item.status == .failed }
+    private var live: Bool { item.status.isActive || item.status == .paused }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top, spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CyberGlassColors.artWell)
-                    Image(systemName: failed ? "exclamationmark.triangle.fill" : indexed ? "checkmark.seal.fill" : "waveform")
+                    Image(systemName: icon)
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(failed ? AnyShapeStyle(CyberGlassColors.danger) : AnyShapeStyle(CyberGlassColors.iridescent))
                 }
                 .frame(width: 44, height: 44)
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(CyberGlassColors.thumbRim, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(CyberGlassColors.textPrimary).lineLimit(1)
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(CyberGlassColors.textSecondary).lineLimit(1)
+                    Text(item.title).font(.system(size: 15, weight: .bold)).foregroundStyle(CyberGlassColors.textPrimary).lineLimit(1)
+                    Text([item.artist, item.source].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 12)).foregroundStyle(CyberGlassColors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                if active, let onCancel {
-                    Button(action: onCancel) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(CyberGlassColors.textSecondary)
-                            .frame(width: 28, height: 28)
-                            .background(CyberGlassColors.recessed, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
+                FormatBadge(text: item.formatBadge)
             }
-            if active { NeonProgressBar(fraction: fraction) }
+            if live { NeonProgressBar(fraction: item.progress) }
             HStack(spacing: 8) {
-                Text(stage.uppercased())
+                Text(statusLine)
                     .font(.system(size: 10.5, weight: .semibold))
                     .tracking(0.9)
                     .foregroundStyle(failed ? CyberGlassColors.danger : CyberGlassColors.cyan.opacity(0.85))
-                if active, bytesPerSecond > 0 {
-                    Text(Self.speed(bytesPerSecond))
+                if item.bytesPerSecond > 0 {
+                    Text(Formatters.speed(item.bytesPerSecond))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(CyberGlassColors.sky)
                 }
                 Spacer()
-                if indexing || indexed {
-                    HStack(spacing: 4) {
-                        Image(systemName: "brain.head.profile").font(.system(size: 10, weight: .bold))
-                        Text(indexed ? "24D INDEXED" : "24D…").font(.system(size: 10, weight: .heavy)).tracking(0.6)
-                    }
-                    .foregroundStyle(CyberGlassColors.obsidian)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(CyberGlassColors.selectedChip, in: Capsule())
-                    .shadow(color: CyberGlassColors.mint.opacity(0.5), radius: indexing ? 8 : 4)
+                if item.indexed {
+                    BrainBadge(text: "24D Brain Indexed ✔", glowing: false)
+                } else if item.status == .indexing24D {
+                    BrainBadge(text: "24D…", glowing: true)
                 }
             }
-            if let detail, !detail.isEmpty {
-                Text(detail).font(.system(size: 12)).foregroundStyle(failed ? CyberGlassColors.danger.opacity(0.9) : CyberGlassColors.textSecondary)
+            if let detail = item.detail, !detail.isEmpty {
+                Text(detail).font(.system(size: 12))
+                    .foregroundStyle(failed ? CyberGlassColors.danger.opacity(0.9) : CyberGlassColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if item.canPause || item.canResume || item.canRetry || item.canCancel {
+                HStack(spacing: 8) {
+                    if item.canPause { ControlPill(title: "Pause", systemImage: "pause.fill", action: onPause) }
+                    if item.canResume { ControlPill(title: "Resume", systemImage: "play.fill", prominent: true, action: onResume) }
+                    if item.canRetry { ControlPill(title: "Retry", systemImage: "arrow.clockwise", prominent: true, action: onRetry) }
+                    Spacer()
+                    if item.canCancel { ControlPill(title: "Cancel", systemImage: "xmark", destructive: true, action: onCancel) }
+                }
             }
         }
         .padding(14)
         .background(CyberGlassColors.card.opacity(CyberGlassColors.cardAlpha), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(
-            active ? AnyShapeStyle(CyberGlassColors.iridescentSoft) : AnyShapeStyle(CyberGlassColors.chipBorder), lineWidth: 1))
+            item.status.isActive ? AnyShapeStyle(CyberGlassColors.iridescentSoft) : AnyShapeStyle(CyberGlassColors.chipBorder), lineWidth: 1))
     }
 
-    static func speed(_ bytesPerSecond: Double) -> String {
-        bytesPerSecond >= 1_000_000 ? String(format: "%.1f MB/s", bytesPerSecond / 1_000_000)
-            : String(format: "%.0f KB/s", bytesPerSecond / 1000)
+    private var icon: String {
+        switch item.status {
+        case .failed: return "exclamationmark.triangle.fill"
+        case .completed: return item.indexed ? "checkmark.seal.fill" : "checkmark.circle.fill"
+        case .paused: return "pause.circle.fill"
+        case .searching: return "magnifyingglass"
+        default: return "waveform"
+        }
+    }
+
+    /// "DOWNLOADING • 42%", "QUEUED", "COMPLETED".
+    private var statusLine: String {
+        let name = item.status.rawValue.uppercased()
+        switch item.status {
+        case .downloading, .paused:
+            return item.totalBytes > 0 ? "\(name) • \(item.progressPct)%" : name
+        default:
+            return name
+        }
+    }
+}
+
+/// "FLAC", "HI-RES", "MP3 320" in a small glowing capsule.
+struct FormatBadge: View {
+    let text: String
+
+    private var accent: Color {
+        switch text {
+        case "HI-RES": return CyberGlassColors.violet
+        case "FLAC", "ALAC", "WAV", "AIFF": return CyberGlassColors.mint
+        default: return CyberGlassColors.sky
+        }
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .heavy, design: .monospaced))
+            .foregroundStyle(accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(accent.opacity(0.14), in: Capsule())
+            .overlay(Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1))
+            .shadow(color: accent.opacity(0.35), radius: 5)
+    }
+}
+
+/// The mint "24D Brain Indexed ✔" capsule.
+struct BrainBadge: View {
+    let text: String
+    let glowing: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "brain.head.profile").font(.system(size: 10, weight: .bold))
+            Text(text).font(.system(size: 10, weight: .heavy)).tracking(0.4)
+        }
+        .foregroundStyle(CyberGlassColors.obsidian)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(CyberGlassColors.selectedChip, in: Capsule())
+        .shadow(color: CyberGlassColors.mint.opacity(0.5), radius: glowing ? 8 : 4)
+    }
+}
+
+/// A small transfer control: Pause, Resume, Retry, Cancel.
+struct ControlPill: View {
+    let title: String
+    let systemImage: String
+    var prominent = false
+    var destructive = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage).font(.system(size: 11, weight: .bold))
+                Text(title).font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(prominent ? CyberGlassColors.obsidian : destructive ? CyberGlassColors.danger : CyberGlassColors.cyan)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background {
+                if prominent {
+                    Capsule().fill(CyberGlassColors.selectedChip)
+                } else {
+                    Capsule().fill(CyberGlassColors.recessed)
+                }
+            }
+            .overlay(Capsule().strokeBorder(prominent ? Color.clear : (destructive ? CyberGlassColors.danger : CyberGlassColors.cyan).opacity(0.4), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}
+
+/// The neon "BACKGROUND GUARD: ACTIVE • SCREEN-LOCK SAFE" strip, with a pulsing dot.
+struct GuardBadge: View {
+    let text: String
+    let detail: String
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(CyberGlassColors.mint)
+                .frame(width: 8, height: 8)
+                .shadow(color: CyberGlassColors.mint, radius: pulse ? 8 : 2)
+                .scaleEffect(pulse ? 1.25 : 0.9)
+                .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text)
+                    .font(.system(size: 10.5, weight: .heavy, design: .monospaced))
+                    .tracking(0.6)
+                    .foregroundStyle(CyberGlassColors.mint)
+                Text(detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(CyberGlassColors.textSecondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "lock.shield.fill").foregroundStyle(CyberGlassColors.mint.opacity(0.8))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(CyberGlassColors.mint.opacity(0.08), in: Capsule())
+        .overlay(Capsule().strokeBorder(CyberGlassColors.mint.opacity(0.45), lineWidth: 1))
+        .shadow(color: CyberGlassColors.mint.opacity(0.25), radius: 10)
+        .onAppear { pulse = true }
     }
 }
 
@@ -281,5 +399,11 @@ enum Formatters {
 
     static func megabytes(_ bytes: UInt64) -> String {
         String(format: "%.1f MB", Double(bytes) / 1_000_000)
+    }
+
+    /// "3.4 MB/s", "820 KB/s".
+    static func speed(_ bytesPerSecond: Double) -> String {
+        bytesPerSecond >= 1_000_000 ? String(format: "%.1f MB/s", bytesPerSecond / 1_000_000)
+            : String(format: "%.0f KB/s", bytesPerSecond / 1000)
     }
 }

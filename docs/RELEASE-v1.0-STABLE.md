@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **143**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 142), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **144**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 143), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -88,8 +88,9 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
     yet borrow an estimate from the older analysis until their turn comes.
   - *The vibe of the session*: as you listen, Harmony keeps a running picture of what the
     session sounds like. A song you hear past half pulls it toward that song; a song you skip
-    in its first fifth pushes it away and the songs lined up after it are replaced at once; a
-    song you pick yourself or swipe in as Play next sets the direction.
+    in its first fifth pushes it away; a song you pick yourself or swipe in as Play next sets
+    the direction. This only steers the songs added later: skipping, going back or tapping a
+    song never changes the queue you see, and the next song stays the one shown.
   - *How songs are chosen*: each song is scored on how well it fits the vibe, the songs you
     usually play after the one before (learned from your own listening), how often you finish
     it, and a bonus for songs you have not heard in a while. Songs heard in the last few hours

@@ -1,46 +1,61 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /**
- * The Downloads tab, Cyber-Glass: a link bar on top ("Paste & Fetch"), four
- * sources (Soulseek P2P, Links, Playlist Import, Audio Recognition), and the
- * live transfers with their speed, stage and Smart Shuffle indexing.
+ * The Downloads tab, Cyber-Glass.
+ *
+ *  - Search / Fetch bar: a link downloads it, anything else searches Soulseek.
+ *  - The background guard's badge while transfers run with the screen locked.
+ *  - Four filters: Active Queue (running, waiting, paused, failed, with
+ *    Pause / Resume / Retry / Cancel), Search & Discover (Soulseek, links,
+ *    playlist import, recognition), Completed (with the 24-D brain badge) and
+ *    Import Folder (folders and files from the Files app).
  */
 struct DownloadsScreen: View {
-    enum Tab: Hashable { case soulseek, links, playlists, recognize }
+    enum Filter: Hashable { case active, discover, completed, importFolder }
+    enum Source: Hashable { case soulseek, links, playlists, recognize }
 
-    @StateObject private var soulseek = SoulseekService.shared
-    @StateObject private var links = StreamIngestManager.shared
-    @StateObject private var resolver = LosslessTrackResolver.shared
-    @State private var tab: Tab = .soulseek
-    @State private var linkText = ""
-    @State private var linkError: String?
+    @ObservedObject private var soulseek = SoulseekService.shared
+    @ObservedObject private var links = StreamIngestManager.shared
+    @ObservedObject private var resolver = LosslessTrackResolver.shared
+    @ObservedObject private var transferGuard = IosBackgroundTransferGuard.shared
+    @State private var filter: Filter = .discover
+    @State private var source: Source = .soulseek
+    @State private var fetchText = ""
+    @State private var fetchError: String?
 
     var body: some View {
+        let items = HarmonyDownloadEngine.items()
+        let queue = items.filter { $0.status.isActive || $0.status == .paused || $0.status == .failed }
+        let completed = items.filter { $0.status == .completed }
         ZStack {
             CyberGlassColors.page.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
-                    linkBar
-                    CapsuleTabs(tabs: [
-                        (Tab.soulseek, "Soulseek P2P", "point.3.connected.trianglepath.dotted"),
-                        (Tab.links, "Links", "link"),
-                        (Tab.playlists, "Playlist Import", "music.note.list"),
-                        (Tab.recognize, "Recognize", "waveform.badge.mic"),
-                    ], selection: $tab)
-                    switch tab {
-                    case .soulseek: SoulseekPanel()
-                    case .links: LinksPanel()
-                    case .playlists: PlaylistImportPanel()
-                    case .recognize: RecognizePanel(openImport: { tab = .playlists })
+                    if let badge = transferGuard.badge {
+                        GuardBadge(text: badge, detail: guardDetail)
                     }
-                    TransfersSection()
+                    fetchBar
+                    CapsuleTabs(tabs: [
+                        (Filter.active, queue.isEmpty ? "Active Queue" : "Active Queue · \(queue.count)", "arrow.down.circle"),
+                        (Filter.discover, "Search & Discover", "sparkle.magnifyingglass"),
+                        (Filter.completed, completed.isEmpty ? "Completed" : "Completed · \(completed.count)", "checkmark.seal"),
+                        (Filter.importFolder, "Import Folder", "folder.badge.plus"),
+                    ], selection: $filter)
+                    switch filter {
+                    case .active: ActiveQueueSection(items: queue)
+                    case .discover: discover
+                    case .completed: CompletedSection(items: completed)
+                    case .importFolder: ImportFolderPanel()
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 32)
             }
             .scrollDismissesKeyboard(.interactively)
+            .harmonyChromeInset()
         }
     }
 
@@ -57,10 +72,36 @@ struct DownloadsScreen: View {
         .padding(.top, 12)
     }
 
-    private var linkBar: some View {
+    private var guardDetail: String {
+        var parts = ["\(transferGuard.activeDownloads) running", transferGuard.tier.rawValue]
+        if !transferGuard.networkAvailable {
+            parts.append("waiting for the network")
+        } else if transferGuard.onCellular {
+            parts.append("on cellular")
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    @ViewBuilder private var discover: some View {
+        CapsuleTabs(tabs: [
+            (Source.soulseek, "Soulseek P2P", "point.3.connected.trianglepath.dotted"),
+            (Source.links, "Links", "link"),
+            (Source.playlists, "Playlist Import", "music.note.list"),
+            (Source.recognize, "Recognize", "waveform.badge.mic"),
+        ], selection: $source)
+        switch source {
+        case .soulseek: SoulseekPanel()
+        case .links: LinksPanel()
+        case .playlists: PlaylistImportPanel()
+        case .recognize: RecognizePanel(openImport: { source = .playlists })
+        }
+    }
+
+    private var fetchBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                GlassField(placeholder: "Direct link to an audio file", text: $linkText, systemImage: "link", onSubmit: fetch)
+                GlassField(placeholder: "Search Soulseek, or paste a link", text: $fetchText,
+                           systemImage: "sparkle.magnifyingglass", onSubmit: fetch)
                 Button(action: pasteAndFetch) {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.system(size: 22, weight: .bold))
@@ -72,26 +113,179 @@ struct DownloadsScreen: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Paste and fetch")
             }
-            HStack {
-                NeonButton(title: "Paste & Fetch FLAC/Audio", systemImage: "doc.on.clipboard", action: pasteAndFetch)
-                Spacer()
-            }
-            if let linkError {
-                Text(linkError).font(.system(size: 12)).foregroundStyle(CyberGlassColors.danger)
+            if let fetchError {
+                Text(fetchError).font(.system(size: 12)).foregroundStyle(CyberGlassColors.danger)
             }
         }
     }
 
     private func pasteAndFetch() {
-        if let pasted = UIPasteboard.general.string, !pasted.isEmpty { linkText = pasted }
+        if fetchText.isEmpty, let pasted = UIPasteboard.general.string, !pasted.isEmpty { fetchText = pasted }
         fetch()
     }
 
+    /// A link is downloaded; any other text is a Soulseek search.
     private func fetch() {
-        linkError = links.enqueue(linkText)
-        if linkError == nil {
-            linkText = ""
-            tab = .links
+        let text = fetchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        fetchError = nil
+        guard !text.isEmpty else { return }
+        if StreamIngestManager.extractURL(from: text) != nil {
+            fetchError = links.enqueue(text)
+            if fetchError == nil {
+                fetchText = ""
+                filter = .active
+            }
+            return
+        }
+        guard text.count >= 2 else { return }
+        filter = .discover
+        source = .soulseek
+        if soulseek.isConnected {
+            soulseek.searchForUI(text)
+        } else {
+            Task {
+                if await soulseek.ensureConnected() {
+                    soulseek.searchForUI(text)
+                } else {
+                    fetchError = "Sign in to Soulseek below to search."
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Active queue and completed
+
+private struct ActiveQueueSection: View {
+    let items: [DownloadItem]
+    @ObservedObject private var transferGuard = IosBackgroundTransferGuard.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            list
+            CyberCard {
+                Toggle(isOn: $transferGuard.keepAliveWhenLocked) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Keep downloads running when locked")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(CyberGlassColors.textPrimary)
+                        Text("With nothing playing, Harmony keeps a silent audio session open while Soulseek transfers run, so iOS doesn't freeze them. It stops the moment the last transfer ends. Off: transfers pause when iOS suspends Harmony and continue when you come back.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(CyberGlassColors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(CyberGlassColors.cyan)
+            }
+        }
+    }
+
+    @ViewBuilder private var list: some View {
+        if items.isEmpty {
+            CyberCard {
+                Text("Nothing downloading")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(CyberGlassColors.textPrimary)
+                Text("Search Soulseek or paste a link above. Up to \(SoulseekService.maxConcurrent) Soulseek transfers run at once; the others wait their turn. A paused or interrupted transfer continues from the bytes it already has.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(CyberGlassColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(title: "Transfers", trailing: "\(items.filter { $0.status.isActive }.count) active")
+                ForEach(items) { item in
+                    DownloadItemCard(item: item,
+                                     onPause: { HarmonyDownloadEngine.pause(item) },
+                                     onResume: { HarmonyDownloadEngine.resume(item) },
+                                     onRetry: { HarmonyDownloadEngine.retry(item) },
+                                     onCancel: { HarmonyDownloadEngine.cancel(item) })
+                }
+            }
+        }
+    }
+}
+
+private struct CompletedSection: View {
+    let items: [DownloadItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if items.isEmpty {
+                CyberCard {
+                    Text("Finished downloads appear here, tagged, in your library and indexed for Smart Shuffle.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(CyberGlassColors.textSecondary)
+                }
+            } else {
+                HStack {
+                    SectionHeading(title: "In your library", trailing: "\(items.filter(\.indexed).count) indexed")
+                }
+                ForEach(items) { item in DownloadItemCard(item: item) }
+                NeonButton(title: "Clear finished", systemImage: "trash", prominent: false) {
+                    HarmonyDownloadEngine.clearFinished()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Import folder
+
+private struct ImportFolderPanel: View {
+    @ObservedObject private var library = IosMusicLibraryManager.shared
+    @State private var picking = false
+    @State private var importing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            CyberCard {
+                Text("Bring your own music")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(CyberGlassColors.textPrimary)
+                Text("A folder from the Files app (iCloud Drive, a USB drive, another app) is read where it is, without copying, and stays available after restarts. Files you import are copied into Files › On My iPhone › Harmony › Imported. Either way, every song is tagged, added and indexed for Smart Shuffle.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(CyberGlassColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    NeonButton(title: "Add a folder", systemImage: "folder.badge.plus") { picking = true }
+                    NeonButton(title: "Import files", systemImage: "square.and.arrow.down", prominent: false) { importing = true }
+                }
+                if let scan = library.scan {
+                    Text("Reading \(scan.location) • \(scan.seen) checked, \(scan.added) new")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(CyberGlassColors.cyan)
+                } else if let summary = library.lastScanSummary {
+                    Text(summary).font(.system(size: 12)).foregroundStyle(CyberGlassColors.mint)
+                }
+            }
+            if !library.folders.isEmpty {
+                SectionHeading(title: "Folders", trailing: "\(library.folders.count)")
+                ForEach(library.folders) { folder in
+                    let reachable = !library.unavailableFolderIds.contains(folder.id)
+                    HStack(spacing: 12) {
+                        Image(systemName: reachable ? "folder.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(reachable ? CyberGlassColors.cyan : CyberGlassColors.amber)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(folder.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(CyberGlassColors.textPrimary)
+                            Text(reachable ? "Read in place" : "Not reachable: add it again")
+                                .font(.system(size: 11.5)).foregroundStyle(CyberGlassColors.textSecondary)
+                        }
+                        Spacer()
+                        ControlPill(title: "Read", systemImage: "arrow.clockwise") { library.rescan(folder: folder) }
+                        ControlPill(title: "Remove", systemImage: "trash", destructive: true) { library.removeFolder(folder) }
+                    }
+                    .padding(12)
+                    .background(CyberGlassColors.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
+        }
+        .sheet(isPresented: $picking) {
+            FolderPicker { url in library.addFolder(url) }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls { IncomingLinks.handle(url) }
         }
     }
 }
@@ -575,58 +769,5 @@ struct NeonArtPlaceholder: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Transfers
-
-private struct TransfersSection: View {
-    @ObservedObject private var soulseek = SoulseekService.shared
-    @ObservedObject private var links = StreamIngestManager.shared
-
-    var body: some View {
-        let hasTransfers = !soulseek.transfers.isEmpty || !links.jobs.isEmpty
-        if hasTransfers {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeading(title: "Transfers", trailing: activeCount > 0 ? "\(activeCount) active" : nil)
-                ForEach(soulseek.transfers) { t in
-                    TransferCard(
-                        title: t.title,
-                        subtitle: "Soulseek · \(t.username)",
-                        stage: t.indexing ? "Indexing 24D vector" : t.indexed ? "In your library" :
-                            (t.stage == .queued && t.queuePlace > 0 ? "Queued #\(t.queuePlace)" : t.stage.label),
-                        fraction: t.fraction,
-                        bytesPerSecond: t.bytesPerSecond,
-                        detail: t.stage == .failed ? t.message : (t.stage == .transferring ? "\(Formatters.megabytes(t.bytes)) of \(Formatters.megabytes(t.total))" : nil),
-                        active: !t.stage.isFinished,
-                        failed: t.stage == .failed,
-                        indexed: t.indexed,
-                        indexing: t.indexing,
-                        onCancel: { soulseek.cancel(t.id) })
-                }
-                ForEach(links.jobs) { job in
-                    TransferCard(
-                        title: job.title,
-                        subtitle: job.source.host ?? job.source.absoluteString,
-                        stage: job.stage.rawValue,
-                        fraction: job.fraction,
-                        bytesPerSecond: job.bytesPerSecond,
-                        detail: job.message ?? (job.stage == .downloading && job.totalBytes > 0
-                            ? "\(Formatters.megabytes(UInt64(job.bytes))) of \(Formatters.megabytes(UInt64(job.totalBytes)))" : nil),
-                        active: job.stage.isActive,
-                        failed: job.stage == .failed,
-                        indexed: job.stage == .done,
-                        indexing: job.stage == .indexing,
-                        onCancel: { links.cancel(job.id) })
-                }
-                if soulseek.transfers.contains(where: { $0.stage.isFinished }) {
-                    NeonButton(title: "Clear finished Soulseek transfers", prominent: false) { soulseek.clearFinished() }
-                }
-            }
-        }
-    }
-
-    private var activeCount: Int {
-        soulseek.transfers.filter { !$0.stage.isFinished }.count + links.jobs.filter(\.stage.isActive).count
     }
 }

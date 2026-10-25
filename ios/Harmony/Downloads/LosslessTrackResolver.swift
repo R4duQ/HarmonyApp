@@ -112,6 +112,7 @@ final class LosslessTrackResolver: ObservableObject {
                 guard !self.items[index].state.finished else { continue }
                 await self.resolve(at: index)
             }
+            self.saveAsPlaylist()
             self.running = false
         }
     }
@@ -123,6 +124,15 @@ final class LosslessTrackResolver: ObservableObject {
             if let transfer = item.transferId, !item.state.finished { SoulseekService.shared.cancel(transfer) }
         }
         running = false
+    }
+
+    /// The imported playlist becomes a Harmony playlist with every song now in the library, in its order.
+    private func saveAsPlaylist() {
+        let name = playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ids = items.compactMap(\.trackId)
+        guard !name.isEmpty, !ids.isEmpty else { return }
+        HarmonyLibraryStore.shared.upsertPlaylist(name: name, trackIds: ids)
+        NotificationCenter.default.post(name: .harmonyLibraryChanged, object: nil)
     }
 
     // MARK: - One song
@@ -188,15 +198,11 @@ final class LosslessTrackResolver: ObservableObject {
                 SoulseekService.shared.setIndexing(transfer, indexing: false, indexed: ok)
             }
         }
-        var tags = AudioTagValues(title: track.title, artist: track.artist, album: track.album, isrc: track.isrc)
-        if let cover = track.coverArtURL {
-            tags.cover = try? await URLSession.shared.data(from: cover).0
-        }
-        try? await IosNativeAudioTranscoder.shared.writeTags(tags, to: file)
         let known = KnownTrackInfo(title: track.title, artist: track.artist, album: track.album, isrc: track.isrc,
                                    durationMs: track.durationMs, coverArtURL: track.coverArtURL)
         do {
-            let id = try await LibraryIngest.shared.ingest(fileAt: file, source: "Soulseek", known: known)
+            // Tagged with the playlist's metadata and cover, added, and measured for Smart Shuffle.
+            let id = try await DownloadPostProcessor.finish(file: file, source: "Soulseek", known: known, fallbackName: nil)
             if items.indices.contains(index) { items[index].trackId = id }
             set(index, .done)
         } catch {

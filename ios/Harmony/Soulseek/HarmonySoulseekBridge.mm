@@ -172,4 +172,12 @@ std::string utf8(NSString *s) {
     _engine->cancelTransfer(transferId);
 }
 
+- (void)pauseTransfer:(uint32_t)transferId {
+    _engine->cancelTransfer(transferId, true);
+}
+
+- (void)discardPartialForCandidate:(HarmonySlskCandidate *)candidate {
+    _engine->discardPartial(candidate->_raw);
+}
+
 @end

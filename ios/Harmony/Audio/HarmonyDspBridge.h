@@ -70,14 +70,15 @@ FOUNDATION_EXPORT const NSInteger HarmonyMaxSpectrumBars;
 - (void)stopEngine;
 
 /** Replaces whatever plays with [url], from [startSeconds]. Clears the queued next song. */
-- (BOOL)loadURL:(NSURL *)url token:(int64_t)token startSeconds:(double)startSeconds error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)loadURL:(NSURL *)url token:(int64_t)token startSeconds:(double)startSeconds error:(NSError *_Nullable *_Nullable)error
+    NS_SWIFT_NAME(load(url:token:startSeconds:));
 /** The song to continue into without a gap when this one ends; nil to end after it. */
-- (void)setNextURL:(nullable NSURL *)url token:(int64_t)token;
+- (void)setNextURL:(nullable NSURL *)url token:(int64_t)token NS_SWIFT_NAME(setNext(url:token:));
 
 - (void)play;
 - (void)pause;
 @property (nonatomic, readonly, getter=isPlaying) BOOL playing;
-- (void)seekToSeconds:(double)seconds;
+- (void)seekToSeconds:(double)seconds NS_SWIFT_NAME(seek(toSeconds:));
 
 /** Where playback is in the current song, seconds (what is heard, not what is decoded). */
 @property (nonatomic, readonly) double positionSeconds;
@@ -113,9 +114,10 @@ FOUNDATION_EXPORT const NSInteger HarmonyMaxSpectrumBars;
 - (float)pollTelemetryWithGains:(float *_Nullable)gains
                            bars:(float *_Nullable)bars
                           peaks:(float *_Nullable)peaks
-                       capacity:(NSInteger)capacity;
+                       capacity:(NSInteger)capacity
+    NS_SWIFT_NAME(pollTelemetry(gains:bars:peaks:capacity:));
 /** Auto's live offset per band, dB (±4.5). */
-- (void)copyLiveAutoOffsets:(float *)offsets;
+- (void)copyLiveAutoOffsets:(float *)offsets NS_SWIFT_NAME(copyLiveAutoOffsets(into:));
 @property (nonatomic, readonly) float bassDuckDb;
 @property (nonatomic, readonly) float harshDuckDb;
 @property (nonatomic, readonly) BOOL tonalFrozen;
