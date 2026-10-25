@@ -84,6 +84,17 @@ struct LibraryFolder: Identifiable, Hashable {
     var pathPrefix: String { "@\(id)/" }
 }
 
+/// A playlist the listener made (or one imported from Spotify, Deezer or a list).
+struct LibraryPlaylist: Identifiable, Hashable {
+    let id: Int64
+    var name: String
+    var createdAt: Date
+    var songCount: Int
+    var durationMs: Int
+    /// Up to four song ids, for the cover mosaic.
+    var coverTrackIds: [Int64]
+}
+
 /// What Smart Shuffle knows about how a song is listened to.
 struct PlayStats: Hashable {
     var completed: Int
@@ -160,6 +171,21 @@ final class HarmonyLibraryStore: @unchecked Sendable {
                     name TEXT NOT NULL,
                     added_at REAL NOT NULL,
                     last_scan REAL
+                )
+                """)
+            exec("""
+                CREATE TABLE IF NOT EXISTS playlists(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+                """)
+            exec("""
+                CREATE TABLE IF NOT EXISTS playlist_items(
+                    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    PRIMARY KEY(playlist_id, position)
                 )
                 """)
             exec("""
@@ -439,6 +465,115 @@ final class HarmonyLibraryStore: @unchecked Sendable {
             sqlite3_bind_int64(statement, 1, folder.id)
             sqlite3_step(statement)
         }
+    }
+
+    // MARK: - Playlists
+
+    func playlists() -> [LibraryPlaylist] {
+        queue.sync {
+            guard let statement = try? prepare("""
+                SELECT p.id, p.name, p.created_at, COUNT(t.id), COALESCE(SUM(t.duration_ms), 0)
+                FROM playlists p
+                LEFT JOIN playlist_items i ON i.playlist_id = p.id
+                LEFT JOIN tracks t ON t.id = i.track_id
+                GROUP BY p.id ORDER BY p.name COLLATE NOCASE
+                """) else { return [] }
+            defer { sqlite3_finalize(statement) }
+            var playlists: [LibraryPlaylist] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                playlists.append(LibraryPlaylist(
+                    id: sqlite3_column_int64(statement, 0),
+                    name: text(statement, 1) ?? "",
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                    songCount: Int(sqlite3_column_int64(statement, 3)),
+                    durationMs: Int(sqlite3_column_int64(statement, 4)),
+                    coverTrackIds: []
+                ))
+            }
+            guard let covers = try? prepare(
+                "SELECT track_id FROM playlist_items WHERE playlist_id = ? ORDER BY position LIMIT 4"
+            ) else { return playlists }
+            defer { sqlite3_finalize(covers) }
+            for index in playlists.indices {
+                sqlite3_reset(covers)
+                sqlite3_bind_int64(covers, 1, playlists[index].id)
+                while sqlite3_step(covers) == SQLITE_ROW { playlists[index].coverTrackIds.append(sqlite3_column_int64(covers, 0)) }
+            }
+            return playlists
+        }
+    }
+
+    @discardableResult
+    func createPlaylist(name: String) throws -> Int64 {
+        try queue.sync {
+            let statement = try prepare("INSERT INTO playlists(name, created_at) VALUES(?, ?)")
+            defer { sqlite3_finalize(statement) }
+            bind(statement, 1, name)
+            sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw LibraryStoreError.sqlite(lastError) }
+            return sqlite3_last_insert_rowid(db)
+        }
+    }
+
+    func renamePlaylist(id: Int64, name: String) {
+        queue.sync {
+            guard let statement = try? prepare("UPDATE playlists SET name = ? WHERE id = ?") else { return }
+            defer { sqlite3_finalize(statement) }
+            bind(statement, 1, name)
+            sqlite3_bind_int64(statement, 2, id)
+            sqlite3_step(statement)
+        }
+    }
+
+    func deletePlaylist(id: Int64) {
+        queue.sync {
+            guard let statement = try? prepare("DELETE FROM playlists WHERE id = ?") else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int64(statement, 1, id)
+            sqlite3_step(statement)
+        }
+    }
+
+    /// The playlist's songs in order (songs since removed from the library are skipped).
+    func tracks(inPlaylist id: Int64) -> [LibraryTrack] {
+        query("\(Self.selectTracks) JOIN playlist_items i ON i.track_id = t.id WHERE i.playlist_id = ? ORDER BY i.position",
+              bind: { sqlite3_bind_int64($0, 1, id) })
+    }
+
+    /// Replaces the playlist's songs with [trackIds], in that order.
+    func setPlaylistTracks(id: Int64, trackIds: [Int64]) {
+        queue.sync {
+            exec("BEGIN")
+            if let clear = try? prepare("DELETE FROM playlist_items WHERE playlist_id = ?") {
+                sqlite3_bind_int64(clear, 1, id)
+                sqlite3_step(clear)
+                sqlite3_finalize(clear)
+            }
+            if let insert = try? prepare("INSERT INTO playlist_items(playlist_id, position, track_id) VALUES(?,?,?)") {
+                for (position, trackId) in trackIds.enumerated() {
+                    sqlite3_reset(insert)
+                    sqlite3_bind_int64(insert, 1, id)
+                    sqlite3_bind_int64(insert, 2, Int64(position))
+                    sqlite3_bind_int64(insert, 3, trackId)
+                    sqlite3_step(insert)
+                }
+                sqlite3_finalize(insert)
+            }
+            exec("COMMIT")
+        }
+    }
+
+    /// Adds songs at the end of the playlist.
+    func addToPlaylist(id: Int64, trackIds: [Int64]) {
+        let current = tracks(inPlaylist: id).map(\.id)
+        setPlaylistTracks(id: id, trackIds: current + trackIds)
+    }
+
+    /// The playlist called [name], made if needed, holding exactly [trackIds] (an import run again updates it).
+    func upsertPlaylist(name: String, trackIds: [Int64]) {
+        let existing = playlists().first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        guard let id = existing?.id ?? (try? createPlaylist(name: name)) else { return }
+        setPlaylistTracks(id: id, trackIds: trackIds)
     }
 
     // MARK: - Listening history (Smart Shuffle)

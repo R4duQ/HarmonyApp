@@ -114,9 +114,10 @@ FOUNDATION_EXPORT const NSInteger HarmonyMaxSpectrumBars;
 - (float)pollTelemetryWithGains:(float *_Nullable)gains
                            bars:(float *_Nullable)bars
                           peaks:(float *_Nullable)peaks
-                       capacity:(NSInteger)capacity;
+                       capacity:(NSInteger)capacity
+    NS_SWIFT_NAME(pollTelemetry(gains:bars:peaks:capacity:));
 /** Auto's live offset per band, dB (±4.5). */
-- (void)copyLiveAutoOffsets:(float *)offsets;
+- (void)copyLiveAutoOffsets:(float *)offsets NS_SWIFT_NAME(copyLiveAutoOffsets(into:));
 @property (nonatomic, readonly) float bassDuckDb;
 @property (nonatomic, readonly) float harshDuckDb;
 @property (nonatomic, readonly) BOOL tonalFrozen;

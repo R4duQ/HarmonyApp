@@ -112,6 +112,7 @@ final class LosslessTrackResolver: ObservableObject {
                 guard !self.items[index].state.finished else { continue }
                 await self.resolve(at: index)
             }
+            self.saveAsPlaylist()
             self.running = false
         }
     }
@@ -123,6 +124,15 @@ final class LosslessTrackResolver: ObservableObject {
             if let transfer = item.transferId, !item.state.finished { SoulseekService.shared.cancel(transfer) }
         }
         running = false
+    }
+
+    /// The imported playlist becomes a Harmony playlist with every song now in the library, in its order.
+    private func saveAsPlaylist() {
+        let name = playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ids = items.compactMap(\.trackId)
+        guard !name.isEmpty, !ids.isEmpty else { return }
+        HarmonyLibraryStore.shared.upsertPlaylist(name: name, trackIds: ids)
+        NotificationCenter.default.post(name: .harmonyLibraryChanged, object: nil)
     }
 
     // MARK: - One song

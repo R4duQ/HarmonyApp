@@ -65,7 +65,9 @@ final class LibraryIngest: ObservableObject {
 
         if let artworkJPEG {
             let name = "\(id).jpg"
-            try? artworkJPEG.write(to: HarmonyPaths.artwork.appendingPathComponent(name), options: .atomic)
+            let artworkFile = HarmonyPaths.artwork.appendingPathComponent(name)
+            try? artworkJPEG.write(to: artworkFile, options: .atomic)
+            ArtworkCache.shared.forget(artworkFile)
             store.setArtwork(trackId: id, fileName: name)
         }
         trackCount = store.trackCount

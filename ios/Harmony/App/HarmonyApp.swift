@@ -1,13 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Harmony for iOS.
-///
-/// Three tabs for now: Library (songs, folders from Files, the player),
-/// Downloads (Soulseek, links, playlist import, recognition) and Engine (the
-/// shared C++ engines running on this iPhone). The full Cyber-Glass shell
-/// (floating mini player, Now Playing, the Winamp equalizer) replaces this
-/// root in the UI module.
+/// Harmony for iOS: the Cyber-Glass shell (Home, Library, Playlists,
+/// Discover, Downloads) under a floating mini player and navigation pill.
 @main
 struct HarmonyApp: App {
     @UIApplicationDelegateAdaptor(HarmonyAppDelegate.self) private var appDelegate
@@ -22,38 +17,21 @@ struct HarmonyApp: App {
 }
 
 struct RootView: View {
-    @ObservedObject private var transferGuard = IosBackgroundTransferGuard.shared
-
     var body: some View {
-        TabView {
-            LibraryScreen()
-                .tabItem { Label("Library", systemImage: "music.note.list") }
-            DownloadsScreen()
-                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
-                .badge(transferGuard.activeDownloads)
-            EngineCheckView()
-                .tabItem { Label("Engine", systemImage: "cpu") }
-        }
-        .tint(CyberGlassColors.cyan)
-        .task {
-            HarmonyAudioController.shared.start()
-            IosBackgroundTransferGuard.shared.start()
-            IosMusicLibraryManager.shared.start()
-            LibraryIngest.shared.indexMissingVectors()
-        }
+        HarmonyShell()
+            .tint(CyberGlassColors.cyan)
+            .task {
+                HarmonyAudioController.shared.start()
+                IosBackgroundTransferGuard.shared.start()
+                IosMusicLibraryManager.shared.start()
+                LibraryIngest.shared.indexMissingVectors()
+            }
     }
 }
 
 final class HarmonyAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterialDark)
-        appearance.backgroundColor = UIColor(red: 0x13 / 255, green: 0x1B / 255, blue: 0x2E / 255, alpha: 0.9)
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
-
         // Background 24-D indexing: registered before launch ends, as iOS requires,
         // and asked for again each time Harmony goes to the background.
         BackgroundIndexing.register()
