@@ -157,8 +157,29 @@ struct DownloadsScreen: View {
 
 private struct ActiveQueueSection: View {
     let items: [DownloadItem]
+    @ObservedObject private var transferGuard = IosBackgroundTransferGuard.shared
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            list
+            CyberCard {
+                Toggle(isOn: $transferGuard.keepAliveWhenLocked) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Keep downloads running when locked")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(CyberGlassColors.textPrimary)
+                        Text("With nothing playing, Harmony keeps a silent audio session open while Soulseek transfers run, so iOS doesn't freeze them. It stops the moment the last transfer ends. Off: transfers pause when iOS suspends Harmony and continue when you come back.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(CyberGlassColors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(CyberGlassColors.cyan)
+            }
+        }
+    }
+
+    @ViewBuilder private var list: some View {
         if items.isEmpty {
             CyberCard {
                 Text("Nothing downloading")

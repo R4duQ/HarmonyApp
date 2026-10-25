@@ -86,3 +86,22 @@ măsoară imediat vectorul 24D pentru Smart Shuffle.
 
 Un fișier lossy (MP3/AAC) rămâne așa cum e: nu e transformat în FLAC, pentru
 că asta l-ar mări fără nicio îmbunătățire de calitate.
+
+### Coada de descărcări
+
+- Bara de sus: un link pornește descărcarea, orice alt text caută pe Soulseek.
+- **Active Queue**: ce rulează, ce așteaptă, ce e pe pauză și ce a eșuat, cu
+  Pause, Resume, Retry și Cancel. Rulează cel mult 3 transferuri Soulseek
+  deodată, iar celelalte își așteaptă rândul. Pauza și o descărcare întreruptă
+  continuă de la octeții deja primiți.
+- **Completed**: melodiile terminate, etichetate, în bibliotecă și cu
+  insigna „24D Brain Indexed ✔” după ce au fost măsurate pentru Smart Shuffle.
+- **Import Folder**: adaugi un folder din Files (citit pe loc) sau imporți
+  fișiere în Harmony › Imported.
+- **Ecran blocat**: cât timp rulează transferuri apare insigna
+  „BACKGROUND GUARD: ACTIVE • SCREEN-LOCK SAFE”. Dacă nu cânți muzică,
+  Harmony ține deschisă o sesiune audio tăcută, ca iOS să nu înghețe
+  transferurile, și o închide imediat ce s-a terminat ultimul. O poți opri din
+  Active Queue › „Keep downloads running when locked”.
+- La trecerea de pe Wi-Fi pe date mobile, Harmony se reconectează la Soulseek
+  și reîncearcă o dată ce a eșuat între timp.
