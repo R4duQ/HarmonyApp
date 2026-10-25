@@ -113,7 +113,8 @@ class NativeShuffleEngineTest {
         val step = engine.journeyStep(10, 60, 0.5f, 10, longArrayOf(10), 1L, 3)
         assertNotNull(step)
         assertEquals(1, engine.lastTraces().size)
-        assertTrue(NativeShuffleEngine.runSyntheticBrainSimulation().contains("RESULT: PASS"))
+        val report = NativeShuffleEngine.runSyntheticBrainSimulation()
+        assertTrue(report, report.contains("RESULT: PASS"))
     }
 
     @Test

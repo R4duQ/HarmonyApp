@@ -10,6 +10,10 @@
 #include <map>
 #include <numeric>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <time.h>
+#endif
+
 namespace harmony::shuffle {
 
 const float kBandCentersHz[kBands] = {31.25f, 62.5f, 125.0f, 250.0f, 500.0f,
@@ -18,6 +22,23 @@ const float kBandCentersHz[kBands] = {31.25f, 62.5f, 125.0f, 250.0f, 500.0f,
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+/**
+ * CPU time this thread has used, in ms: what the self-test's latency budget
+ * measures. Wall time would also count the moments the OS ran something
+ * else (a busy CI runner, a phone in the middle of a scan), which says
+ * nothing about the engine. Falls back to wall time where there is no
+ * per-thread clock.
+ */
+double threadCpuMs() {
+#if defined(CLOCK_THREAD_CPUTIME_ID)
+    timespec ts{};
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0) {
+        return static_cast<double>(ts.tv_sec) * 1000.0 + static_cast<double>(ts.tv_nsec) / 1.0e6;
+    }
+#endif
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 constexpr float kEps = 1e-12f;
 
 /** Weight of each group of dimensions in the working space. */
@@ -1763,7 +1784,7 @@ std::string runSyntheticBrainSimulation(bool* passed) {
     engine.setLibrary(ids.data(), raw.data(), quality.data(), artists.data(), albums.data(), kTracks);
 
     // ---- 5 bass-heavy plays, then 2 fast skips on bright treble ----------
-    const auto t0 = std::chrono::steady_clock::now();
+    const double t0 = threadCpuMs();
     std::vector<std::int64_t> played;
     for (int i = 0; i < 5; ++i) {
         const std::int64_t id = 1000 + i;
@@ -1816,7 +1837,7 @@ std::string runSyntheticBrainSimulation(bool* passed) {
         trebleShare = familyShare(next, kBrightTreble);
         queue = next;
     }
-    const double adaptMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    const double adaptMs = threadCpuMs() - t0;
     const BrainAuditReport afterSkips = engine.lastAudit();
 
     r.check(bassDominant, "Session vector leans on the bass bands after 5 bass-heavy plays",
@@ -1836,7 +1857,7 @@ std::string runSyntheticBrainSimulation(bool* passed) {
     r.check(afterSkips.healthy(), "All 5 audits pass or heal after the skips",
             format("%.0f healed, %.0f failed", afterSkips.healedCount(), afterSkips.failedCount()) +
                 (afterSkips.healthy() ? "" : ": " + problems(afterSkips)));
-    r.check(adaptMs < 5.0, "Adapts in under 5 ms (7 events, 3 queues)", format("%.3f ms", adaptMs));
+    r.check(adaptMs < 5.0, "Adapts in under 5 ms of CPU (7 events, 3 queues)", format("%.3f ms", adaptMs));
 
     bool tracesOk = !engine.lastTraces().empty();
     for (const auto& t : engine.lastTraces()) {
