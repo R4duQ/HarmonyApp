@@ -50,7 +50,7 @@ enum class SessionEvent {
     SEEDED,
     /** Played past half: S_t = normalize(0.60 v + 0.40 S_t-1). */
     PLAY_EMA,
-    /** Skipped before 20%: S_t = normalize(S_t-1 - 0.35 v), and the tail is re-ranked. */
+    /** Skipped before 20%: S_t = normalize(S_t-1 - 0.35 v); the queue stays as it is. */
     FAST_SKIP,
     /** Picked by hand: S_t = normalize(0.85 v + 0.15 S_t-1). */
     MANUAL_ANCHOR,

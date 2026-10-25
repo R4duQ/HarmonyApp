@@ -30,7 +30,7 @@ interface ShuffleBrain {
 
     /**
      * A song was left after [fraction] of it. Past half: S_t moves toward it;
-     * under 20%: a fast skip pushes S_t away (and the manager re-ranks).
+     * under 20%: a fast skip pushes S_t away (the queue is not touched).
      * [shufflePick] says whether Smart Shuffle had queued it.
      */
     suspend fun onPlaybackOutcome(songId: Long, fraction: Float, atMillis: Long, shufflePick: Boolean): SessionEvent
