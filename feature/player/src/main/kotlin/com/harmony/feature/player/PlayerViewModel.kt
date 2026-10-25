@@ -123,6 +123,11 @@ class PlayerViewModel @Inject constructor(
 
     val brainHudVisible: StateFlow<Boolean> = queueManager.debugOverlayVisible
 
+    /** The equalizer's AUTO LIVE is calibrating to the music (the mini player says so). */
+    val liveSpectralEq: StateFlow<Boolean> = settings.settings
+        .map { it.eq.enabled && it.eq.auto }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     fun setBrainHudVisible(visible: Boolean) = queueManager.setDebugOverlayVisible(visible)
 
     private val _selfTestRunning = kotlinx.coroutines.flow.MutableStateFlow(false)

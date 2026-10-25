@@ -153,6 +153,8 @@ data class ShuffleBrainTelemetry(
     val audit: BrainAuditReport? = null,
     /** The upcoming queued tracks the brain chose, in queue order, with their reasons. */
     val upcoming: List<QueuedDecision> = emptyList(),
+    /** Why the song playing now was picked, when Smart Shuffle picked it. */
+    val nowPlaying: QueuedDecision? = null,
     val librarySize: Int = 0,
     val engineAvailable: Boolean = true,
     val updatedAtMillis: Long = 0L,
@@ -163,4 +165,7 @@ data class QueuedDecision(
     val trace: TrackDecisionTrace,
     val title: String,
     val artist: String,
-)
+) {
+    /** How closely the song matched the session's vibe, 0..100 (the cosine, mapped). */
+    val vibeMatchPct: Int get() = Math.round(50f * (trace.cosineSimilarity + 1f)).coerceIn(0, 100)
+}

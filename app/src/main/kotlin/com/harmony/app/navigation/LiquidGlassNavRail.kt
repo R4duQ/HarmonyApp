@@ -28,6 +28,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -43,6 +45,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
+import com.harmony.core.ui.theme.CyberGlassColors
+import com.harmony.core.ui.theme.cyberGlassActive
 import kotlin.math.roundToInt
 
 /** Width of the rail's glass capsule. */
@@ -83,18 +87,30 @@ fun LiquidGlassNavRail(
 
     // Same derivations as the bottom bar, so switching a device between
     // the two layouts never changes the look of the glass.
-    val glass = remember(palette.field) {
+    // Dark theme: the bottom bar's Cyber-Glass, upright.
+    val cyber = cyberGlassActive()
+    val base = if (cyber) CyberGlassColors.Obsidian else palette.field
+    val glass = if (cyber) CyberGlassColors.NavGlass.copy(alpha = CyberGlassColors.NAV_ALPHA) else remember(palette.field) {
         lerp(palette.field, Color.White, 0.62f).copy(alpha = 0.55f)
     }
-    val rim = remember(palette.ink) {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.75f),
-                Color.White.copy(alpha = 0.18f),
-                palette.ink.copy(alpha = 0.06f),
-            ),
-        )
+    val rim = if (cyber) {
+        remember {
+            Brush.verticalGradient(listOf(CyberGlassColors.NavRim, CyberGlassColors.NavRim.copy(alpha = 0.08f)))
+        }
+    } else {
+        remember(palette.ink) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.75f),
+                    Color.White.copy(alpha = 0.18f),
+                    palette.ink.copy(alpha = 0.06f),
+                ),
+            )
+        }
     }
+    val shadowColor = if (cyber) Color.Black else palette.ink
+    val selectedInk = if (cyber) CyberGlassColors.Cyan else palette.ink
+    val idleInk = if (cyber) CyberGlassColors.TextSecondary else palette.muted
 
     Box(
         modifier
@@ -104,15 +120,15 @@ fun LiquidGlassNavRail(
                 elevation = 14.dp,
                 shape = RailShape,
                 clip = false,
-                ambientColor = palette.ink,
-                spotColor = palette.ink,
+                ambientColor = shadowColor,
+                spotColor = shadowColor,
             )
             .clip(RailShape)
             // An opaque base under the glass. Nothing scrolls behind the rail
             // (the page is laid out beside it), so translucency bought nothing
             // here, and it let the drop shadow show through the glass as a
             // dark bar down the middle of the rail.
-            .background(palette.field)
+            .background(base)
             .background(glass)
             .border(width = 1.dp, brush = rim, shape = RailShape)
             // Same swipe as the bottom bar, turned upright: dragging walks the
@@ -153,23 +169,49 @@ fun LiquidGlassNavRail(
                 ),
                 label = "glass-rail-indicator",
             )
-            Box(
-                Modifier
-                    .offset(y = indicatorY)
-                    .fillMaxWidth()
-                    .height(ItemHeight)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .clip(PillShape)
-                    .background(palette.ink.copy(alpha = 0.10f))
-                    .border(width = 0.5.dp, color = Color.White.copy(alpha = 0.45f), shape = PillShape),
-            )
+            if (cyber) {
+                Box(
+                    Modifier
+                        .offset(y = indicatorY)
+                        .fillMaxWidth()
+                        .height(ItemHeight)
+                        .drawBehind {
+                            val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
+                            val radius = 24.dp.toPx()
+                            drawCircle(
+                                Brush.radialGradient(
+                                    listOf(
+                                        CyberGlassColors.Cyan.copy(alpha = 0.34f),
+                                        CyberGlassColors.Cyan.copy(alpha = 0.10f),
+                                        Color.Transparent,
+                                    ),
+                                    center = center,
+                                    radius = radius,
+                                ),
+                                radius = radius,
+                                center = center,
+                            )
+                        },
+                )
+            } else {
+                Box(
+                    Modifier
+                        .offset(y = indicatorY)
+                        .fillMaxWidth()
+                        .height(ItemHeight)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clip(PillShape)
+                        .background(palette.ink.copy(alpha = 0.10f))
+                        .border(width = 0.5.dp, color = Color.White.copy(alpha = 0.45f), shape = PillShape),
+                )
+            }
         }
 
         Column(Modifier.fillMaxWidth()) {
             items.forEachIndexed { index, item ->
                 val selected = index == selectedIndex
                 val contentColor by animateColorAsState(
-                    targetValue = if (selected) palette.ink else palette.muted,
+                    targetValue = if (selected) selectedInk else idleInk,
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "glass-rail-content-$index",
                 )

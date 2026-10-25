@@ -701,6 +701,7 @@ class SmartQueueManager @Inject constructor(
             lastEvent = lastEvent ?: previous.lastEvent,
             audit = plan?.audit ?: previous.audit,
             upcoming = upcomingDecisions(),
+            nowPlaying = playingDecision(),
             librarySize = size,
             engineAvailable = brain.available,
             updatedAtMillis = System.currentTimeMillis(),
@@ -709,8 +710,15 @@ class SmartQueueManager @Inject constructor(
 
     private fun publishUpcoming() {
         val upcoming = upcomingDecisions()
-        if (upcoming != _telemetry.value.upcoming) _telemetry.value = _telemetry.value.copy(upcoming = upcoming)
+        val playing = playingDecision()
+        val current = _telemetry.value
+        if (upcoming != current.upcoming || playing != current.nowPlaying) {
+            _telemetry.value = current.copy(upcoming = upcoming, nowPlaying = playing)
+        }
     }
+
+    private fun playingDecision(): QueuedDecision? =
+        playback.playerState.value.currentSong?.id?.let { decisions[it] }
 
     private fun upcomingDecisions(): List<QueuedDecision> {
         val state = playback.playerState.value

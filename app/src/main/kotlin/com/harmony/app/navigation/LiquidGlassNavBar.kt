@@ -31,6 +31,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -45,6 +47,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
+import com.harmony.core.ui.theme.CyberGlassColors
+import com.harmony.core.ui.theme.cyberGlassActive
 import kotlin.math.roundToInt
 
 /**
@@ -106,11 +110,15 @@ fun LiquidGlassNavBar(
     val currentIndex by rememberUpdatedState(selectedIndex)
     val select by rememberUpdatedState(onSelect)
 
+    // Dark theme: Cyber-Glass. Darker, denser frost (labels stay crisp over
+    // the list), a top-lit cyan rim, and the selection as a cyan glow.
+    val cyber = cyberGlassActive()
+
     // Glass is the section's own field colour pulled toward white. Deriving
     // it from the palette rather than hardcoding a grey means the bar still
     // belongs to whichever screen is above it — amber Library and blue EQ
     // each get their own tint of frost instead of one neutral slab.
-    val glass = remember(palette.field) {
+    val glass = if (cyber) CyberGlassColors.NavGlass.copy(alpha = CyberGlassColors.NAV_ALPHA) else remember(palette.field) {
         // 0.72 was set back when the list scrolled underneath and competed
         // with these labels for contrast. It no longer does — the shell
         // ends content at the chrome's top edge — so the backdrop here is
@@ -122,15 +130,26 @@ fun LiquidGlassNavBar(
     }
     // The rim: brighter along the top edge, fading out by the bottom. This
     // is the single cheapest cue that a surface is glass rather than paint.
-    val rim = remember(palette.ink) {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.75f),
-                Color.White.copy(alpha = 0.18f),
-                palette.ink.copy(alpha = 0.06f),
-            ),
-        )
+    val rim = if (cyber) {
+        remember {
+            Brush.verticalGradient(
+                listOf(CyberGlassColors.NavRim, CyberGlassColors.NavRim.copy(alpha = 0.08f)),
+            )
+        }
+    } else {
+        remember(palette.ink) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.75f),
+                    Color.White.copy(alpha = 0.18f),
+                    palette.ink.copy(alpha = 0.06f),
+                ),
+            )
+        }
     }
+    val shadowColor = if (cyber) Color.Black else palette.ink
+    val selectedInk = if (cyber) CyberGlassColors.Cyan else palette.ink
+    val idleInk = if (cyber) CyberGlassColors.TextSecondary else palette.muted
 
     Box(
         modifier
@@ -148,8 +167,8 @@ fun LiquidGlassNavBar(
                     // Opaque — Compose multiplies these by its own
                     // elevation alpha, so a pre-faded colour cancels the
                     // shadow out almost entirely.
-                    ambientColor = palette.ink,
-                    spotColor = palette.ink,
+                    ambientColor = shadowColor,
+                    spotColor = shadowColor,
                 )
                 .clip(Capsule)
                 .background(glass)
@@ -198,7 +217,32 @@ fun LiquidGlassNavBar(
                 label = "glass-nav-indicator",
             )
 
-            Box(
+            if (cyber) {
+                // A soft cyan glow behind the selected icon, sliding with the selection.
+                Box(
+                    Modifier
+                        .offset(x = indicatorX)
+                        .width(itemWidth)
+                        .fillMaxHeight()
+                        .drawBehind {
+                            val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
+                            val radius = 24.dp.toPx()
+                            drawCircle(
+                                Brush.radialGradient(
+                                    listOf(
+                                        CyberGlassColors.Cyan.copy(alpha = 0.34f),
+                                        CyberGlassColors.Cyan.copy(alpha = 0.10f),
+                                        Color.Transparent,
+                                    ),
+                                    center = center,
+                                    radius = radius,
+                                ),
+                                radius = radius,
+                                center = center,
+                            )
+                        },
+                )
+            } else Box(
                 Modifier
                     .offset(x = indicatorX)
                     .width(itemWidth)
@@ -222,7 +266,7 @@ fun LiquidGlassNavBar(
                     val selected = index == safeIndex
 
                     val contentColor by animateColorAsState(
-                        targetValue = if (selected) palette.ink else palette.muted,
+                        targetValue = if (selected) selectedInk else idleInk,
                         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                         label = "glass-nav-content-$index",
                     )

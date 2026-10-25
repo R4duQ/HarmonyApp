@@ -2,6 +2,7 @@ package com.harmony.core.ui.component
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -45,6 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -58,6 +61,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +75,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import com.harmony.core.ui.theme.CyberGlassColors
+import com.harmony.core.ui.theme.isCyberGlass
 
 // ---------------------------------------------------------------------------
 // Shared glass surface maths
@@ -172,6 +178,9 @@ fun GlassSearchBar(
     autoFocus: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    // Cyber-Glass: a dark translucent pill with a 1dp neon indigo rim.
+    val cyber = palette.isCyberGlass
+    val placeholderColor = if (cyber) CyberGlassColors.TextPlaceholder else palette.muted
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -184,8 +193,11 @@ fun GlassSearchBar(
                 .weight(1f)
                 .height(44.dp)
                 .clip(Capsule)
-                .background(glassFill(palette))
-                .border(1.dp, glassRim(palette), Capsule)
+                .background(if (cyber) CyberGlassColors.Surface else glassFill(palette))
+                .then(
+                    if (cyber) Modifier.border(1.dp, CyberGlassColors.SearchRim, Capsule)
+                    else Modifier.border(1.dp, glassRim(palette), Capsule),
+                )
                 .then(
                     if (active) Modifier
                     else Modifier.clickable(
@@ -237,7 +249,7 @@ fun GlassSearchBar(
                             .padding(start = 8.dp),
                     ) {
                         if (value.isEmpty()) {
-                            Text(placeholder, color = palette.muted, fontSize = 15.sp, maxLines = 1)
+                            Text(placeholder, color = placeholderColor, fontSize = 15.sp, maxLines = 1)
                         }
                         BasicTextField(
                             value = value,
@@ -247,7 +259,7 @@ fun GlassSearchBar(
                                 .focusRequester(focusRequester),
                             singleLine = true,
                             textStyle = TextStyle(color = palette.ink, fontSize = 15.sp),
-                            cursorBrush = SolidColor(palette.ink),
+                            cursorBrush = SolidColor(if (cyber) CyberGlassColors.Cyan else palette.ink),
                             // Search action, and it actually dismisses. The
                             // field had no imeAction at all, so the key read
                             // "enter" and did nothing — results are already
@@ -291,7 +303,7 @@ fun GlassSearchBar(
                     )
                     Text(
                         placeholder,
-                        color = palette.muted,
+                        color = placeholderColor,
                         fontSize = 15.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -315,19 +327,35 @@ fun GlassCircleButton(
     filled: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val container = if (filled) palette.ink.copy(alpha = 0.14f) else glassFill(palette)
+    val cyber = palette.isCyberGlass
+    val container = when {
+        cyber && filled -> CyberGlassColors.Cyan.copy(alpha = 0.16f)
+        cyber -> CyberGlassColors.Surface
+        filled -> palette.ink.copy(alpha = 0.14f)
+        else -> glassFill(palette)
+    }
+    val ink = when {
+        cyber && filled -> CyberGlassColors.Cyan
+        cyber -> CyberGlassColors.TextSilver
+        else -> palette.ink
+    }
     Box(
         modifier = modifier
             .size(size)
+            // Cyber-Glass: a soft glowing ring, brighter while the button is on.
+            .then(if (cyber) Modifier.neonGlow(CyberGlassColors.Cyan, 6.dp, if (filled) 0.40f else 0.16f) else Modifier)
             .clip(CircleShape)
             .background(container)
-            .border(1.dp, glassRim(palette), CircleShape)
+            .then(
+                if (cyber) Modifier.border(1.dp, CyberGlassColors.Iridescent, CircleShape)
+                else Modifier.border(1.dp, glassRim(palette), CircleShape),
+            )
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.size(19.dp), contentAlignment = Alignment.Center) {
             androidx.compose.runtime.CompositionLocalProvider(
-                androidx.compose.material3.LocalContentColor provides palette.ink,
+                androidx.compose.material3.LocalContentColor provides ink,
             ) { content() }
         }
     }
@@ -376,6 +404,10 @@ fun GlassSegmentedTabs(
 ) {
     if (tabs.isEmpty()) return
     val safeIndex = selected.coerceIn(0, tabs.lastIndex)
+    if (palette.isCyberGlass) {
+        CyberSegmentedTabs(tabs, safeIndex, onSelect, modifier)
+        return
+    }
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -447,6 +479,95 @@ fun GlassSegmentedTabs(
     }
 }
 
+/**
+ * The Songs / Albums / Artists pills in Cyber-Glass. Same geometry as the
+ * editorial chips (equal-width capsules, nothing reflows): the selected one
+ * fills with a mint-to-azure gradient, glows cyan and carries dark bold ink;
+ * the others are dark glass capsules with a slate-cyan rim and silver ink;
+ * an empty section sits one tier quieter.
+ */
+@Composable
+private fun CyberSegmentedTabs(
+    tabs: List<EditorialTab>,
+    safeIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEachIndexed { index, tab ->
+            val isSelected = index == safeIndex
+            val isQuiet = !isSelected && tab.count == null
+            val selection by animateFloatAsState(
+                targetValue = if (isSelected) 1f else 0f,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "cyber-segment-$index",
+            )
+            val content by animateColorAsState(
+                targetValue = when {
+                    isSelected -> CyberGlassColors.Obsidian
+                    isQuiet -> CyberGlassColors.TextQuiet
+                    else -> CyberGlassColors.TextSilver
+                },
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "cyber-segment-ink-$index",
+            )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    // The glow: a cyan shadow that rises with the selection.
+                    .shadow(
+                        elevation = (10f * selection).dp,
+                        shape = Capsule,
+                        clip = false,
+                        ambientColor = CyberGlassColors.Cyan,
+                        spotColor = CyberGlassColors.Cyan,
+                    )
+                    .clip(Capsule)
+                    .background(CyberGlassColors.Chip)
+                    .drawBehind {
+                        if (selection > 0f) drawRect(CyberGlassColors.SelectedChip, alpha = selection)
+                    }
+                    .border(
+                        1.dp,
+                        CyberGlassColors.ChipBorder.copy(alpha = (if (isQuiet) 0.6f else 1f) * (1f - selection)),
+                        Capsule,
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Tab,
+                        onClick = { onSelect(index) },
+                    ),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tab.icon?.let { icon ->
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = content,
+                        modifier = Modifier
+                            .padding(end = 7.dp)
+                            .size(17.dp),
+                    )
+                }
+                Text(
+                    tab.label,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = content,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Song row
@@ -528,11 +649,12 @@ fun GlassSongCard(
         // from the section palette rather than a fixed accent, same as every
         // other glass surface, so it belongs to whichever screen it's on.
         val progress = (offsetX.value / (rowWidth * SwipeQueueFraction)).coerceIn(0f, 1f)
+        val revealInk = if (palette.isCyberGlass) CyberGlassColors.Cyan else palette.ink
         if (offsetX.value > 1f) {
             Row(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(glassFill(palette, strength = 0.5f))
+                    .background(if (palette.isCyberGlass) CyberGlassColors.Surface else glassFill(palette, strength = 0.5f))
                     .padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start,
@@ -540,7 +662,7 @@ fun GlassSongCard(
                 Icon(
                     Icons.Rounded.QueueMusic,
                     contentDescription = null,
-                    tint = palette.ink,
+                    tint = revealInk,
                     modifier = Modifier.graphicsLayer {
                         // Icon settles in as the threshold approaches, so the
                         // commit point is legible before you let go.
@@ -553,7 +675,7 @@ fun GlassSongCard(
                     "Play next",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = palette.ink,
+                    color = revealInk,
                     modifier = Modifier
                         .padding(start = 10.dp)
                         .graphicsLayer { alpha = progress },
@@ -632,6 +754,10 @@ private fun GlassSongRowContent(
     removeLabel: String,
     dragHandle: (@Composable () -> Unit)?,
 ) {
+    if (palette.isCyberGlass) {
+        TrackListItem(song, onClick, modifier, onPlayNext, onAddToPlaylist, onRemove, removeLabel, dragHandle)
+        return
+    }
     var menuOpen by remember { mutableStateOf(false) }
     val hasMenu = onPlayNext != null || onAddToPlaylist != null || onRemove != null
 
@@ -729,6 +855,129 @@ private fun GlassSongRowContent(
                 .fillMaxWidth()
                 .height(0.5.dp)
                 .background(palette.line.copy(alpha = 0.15f)),
+        )
+    }
+}
+
+/**
+ * A song row in Cyber-Glass. The same row as the glass one (artwork, title
+ * over artist, duration and the overflow menu on the right): a 50dp cover
+ * with a faint cyan rim, a neon waveform for songs without a cover, a bold
+ * white title, a cool grey artist, a cyan monospace duration and a divider
+ * barely there.
+ */
+@Composable
+fun TrackListItem(
+    song: Song,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPlayNext: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onRemove: (() -> Unit)? = null,
+    removeLabel: String = "Remove",
+    dragHandle: (@Composable () -> Unit)? = null,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val hasMenu = onPlayNext != null || onAddToPlaylist != null || onRemove != null
+    val thumbShape = RoundedCornerShape(10.dp)
+
+    // Opaque, so the swipe-to-queue affordance behind the row can't show through it.
+    Column(modifier.fillMaxWidth().background(CyberGlassColors.Obsidian)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (dragHandle != null) {
+                dragHandle()
+                Spacer(Modifier.width(8.dp))
+            }
+            Artwork(
+                artworkUri = song.artworkUri,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(50.dp)
+                    .border(1.dp, CyberGlassColors.ThumbRim, thumbShape),
+                cornerRadius = 10.dp,
+                fallback = { NeonWaveformArt(Modifier.fillMaxSize(), cornerRadius = 10.dp) },
+            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+            ) {
+                Text(
+                    song.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CyberGlassColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    song.artist,
+                    fontSize = 13.sp,
+                    color = CyberGlassColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
+            Text(
+                formatDuration(song.durationMs),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = CyberGlassColors.Sky,
+                maxLines = 1,
+            )
+            if (hasMenu) {
+                Box {
+                    IconButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.MoreVert,
+                            contentDescription = "More options for ${song.title}",
+                            tint = CyberGlassColors.TextSecondary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                    ) {
+                        onPlayNext?.let { action ->
+                            DropdownMenuItem(
+                                text = { Text("Play next") },
+                                onClick = { menuOpen = false; action() },
+                            )
+                        }
+                        onAddToPlaylist?.let { action ->
+                            DropdownMenuItem(
+                                text = { Text("Add to playlist") },
+                                onClick = { menuOpen = false; action() },
+                            )
+                        }
+                        onRemove?.let { action ->
+                            DropdownMenuItem(
+                                text = { Text(removeLabel) },
+                                onClick = { menuOpen = false; action() },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // From the text, not the screen edge (16 + 50 + 12).
+        Box(
+            Modifier
+                .padding(start = 78.dp)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(CyberGlassColors.Divider),
         )
     }
 }

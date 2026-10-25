@@ -75,7 +75,9 @@ import com.harmony.core.ui.component.GlassSearchBar
 import com.harmony.core.ui.component.GlassSegmentedTabs
 import com.harmony.core.ui.component.GlassSongCard
 import com.harmony.core.ui.component.VinylAlbumCover
-import com.harmony.core.ui.component.amberPalette
+import com.harmony.core.ui.component.libraryPalette
+import com.harmony.core.ui.theme.CyberGlassColors
+import com.harmony.core.ui.theme.isCyberGlass
 import com.harmony.core.ui.component.LocalFloatingChromeHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -128,7 +130,8 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    val palette = amberPalette()
+    // Cyber-Glass obsidian and cyan in dark theme, the amber editorial look in light.
+    val palette = libraryPalette()
     val audioPermission = if (Build.VERSION.SDK_INT >= 33) {
         Manifest.permission.READ_MEDIA_AUDIO
     } else {
@@ -253,16 +256,20 @@ fun LibraryScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.field),
+            .then(
+                if (palette.isCyberGlass) Modifier.background(CyberGlassColors.Page)
+                else Modifier.background(palette.field),
+            ),
     ) {
         // ---- Header: glass search pill, with the wheel toggle trailing it
         // on the Songs tab ----
-        GlassSearchBar(
-            active = searchActive,
-            autoFocus = raiseKeyboard,
-            value = searchQuery,
-            onValueChange = viewModel::onSearchQueryChange,
-            onFieldClick = { searchActive = true; raiseKeyboard = true },
+        LibraryHeaderSection(
+            palette = palette,
+            searchActive = searchActive,
+            raiseKeyboard = raiseKeyboard,
+            searchQuery = searchQuery,
+            onSearchQueryChange = viewModel::onSearchQueryChange,
+            onActivateSearch = { searchActive = true; raiseKeyboard = true },
             onClear = {
                 if (searchQuery.isEmpty()) {
                     searchActive = false
@@ -270,28 +277,9 @@ fun LibraryScreen(
                     viewModel.onSearchQueryChange("")
                 }
             },
-            palette = palette,
-            // The pill sat 10dp under the status bar with the tab row right
-            // beneath it and the list starting immediately after — three
-            // bands stacked with no air between them, which is what made the
-            // top read as cut off rather than as a header.
-            modifier = Modifier.padding(top = 10.dp),
-            trailing = if (!searchActive && selectedTab == 0) {
-                {
-                    GlassCircleButton(
-                        onClick = { arcMode = !arcMode },
-                        contentDescription = if (arcMode) "Switch to list view" else "Switch to wheel view",
-                        palette = palette,
-                        filled = arcMode,
-                    ) {
-                        Icon(
-                            if (arcMode) Icons.Rounded.ViewList else Icons.Rounded.Album,
-                            contentDescription = null,
-                            modifier = Modifier.size(19.dp),
-                        )
-                    }
-                }
-            } else null,
+            showViewToggle = !searchActive && selectedTab == 0,
+            arcMode = arcMode,
+            onToggleArcMode = { arcMode = !arcMode },
         )
 
         // ---- Search results OR the normal tabbed browser ----
@@ -342,7 +330,9 @@ fun LibraryScreen(
                                 Brush.horizontalGradient(
                                     listOf(
                                         Color.Transparent,
-                                        palette.line.copy(alpha = 0.35f),
+                                        // Cyber-Glass: a faint cyan seam instead of the ink hairline.
+                                        if (palette.isCyberGlass) CyberGlassColors.Cyan.copy(alpha = 0.22f)
+                                        else palette.line.copy(alpha = 0.35f),
                                         Color.Transparent,
                                     ),
                                 ),
@@ -382,6 +372,57 @@ fun LibraryScreen(
 // ---------------------------------------------------------------------------
 // Shared pieces
 // ---------------------------------------------------------------------------
+
+/**
+ * The library's header: the search pill with, on the Songs tab, the circular
+ * list/wheel toggle trailing it. The Songs / Albums / Artists pills sit just
+ * below it in the screen. Both restyle themselves in Cyber-Glass (see
+ * GlassSearchBar and GlassCircleButton) from [palette].
+ */
+@Composable
+private fun LibraryHeaderSection(
+    palette: EditorialPalette,
+    searchActive: Boolean,
+    raiseKeyboard: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onActivateSearch: () -> Unit,
+    onClear: () -> Unit,
+    showViewToggle: Boolean,
+    arcMode: Boolean,
+    onToggleArcMode: () -> Unit,
+) {
+    GlassSearchBar(
+        active = searchActive,
+        autoFocus = raiseKeyboard,
+        value = searchQuery,
+        onValueChange = onSearchQueryChange,
+        onFieldClick = onActivateSearch,
+        onClear = onClear,
+        palette = palette,
+        // The pill sat 10dp under the status bar with the tab row right
+        // beneath it and the list starting immediately after — three
+        // bands stacked with no air between them, which is what made the
+        // top read as cut off rather than as a header.
+        modifier = Modifier.padding(top = 10.dp),
+        trailing = if (showViewToggle) {
+            {
+                GlassCircleButton(
+                    onClick = onToggleArcMode,
+                    contentDescription = if (arcMode) "Switch to list view" else "Switch to wheel view",
+                    palette = palette,
+                    filled = arcMode,
+                ) {
+                    Icon(
+                        if (arcMode) Icons.Rounded.ViewList else Icons.Rounded.Album,
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+            }
+        } else null,
+    )
+}
 
 @Composable
 private fun PermissionPane(

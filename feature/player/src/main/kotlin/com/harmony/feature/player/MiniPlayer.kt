@@ -57,6 +57,8 @@ fun MiniPlayer(
 ) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     val forms by viewModel.outputForms.collectAsStateWithLifecycle()
+    val brain by viewModel.brainTelemetry.collectAsStateWithLifecycle()
+    val liveEq by viewModel.liveSpectralEq.collectAsStateWithLifecycle()
 
     var lastSong by remember { mutableStateOf<Song?>(null) }
     state.currentSong?.let { lastSong = it }
@@ -105,6 +107,10 @@ fun MiniPlayer(
             deviceLabel = output.label,
             deviceIcon = OutputIcons.forOutput(output.type, OutputForms.effective(output, forms)),
             upNext = upNext(state),
+            telemetry = miniTelemetryLine(
+                brain.nowPlaying?.takeIf { it.trace.trackId == song.id },
+                liveSpectralEq = liveEq,
+            ),
         )
         val actions = remember(viewModel, onExpand) {
             MiniPlayerActions(
@@ -120,6 +126,32 @@ fun MiniPlayer(
         }
         MiniPlayerCard(ui, actions)
     }
+}
+
+/**
+ * The micro-subtitle under the title: what the engines are doing for this
+ * song, from live data only. "LIVE SPECTRAL EQ" while the equalizer's AUTO
+ * LIVE calibrates to the music; why Smart Shuffle picked the song when it
+ * did ("VIBE MATCH 94%"). Null when neither applies.
+ */
+internal fun miniTelemetryLine(decision: com.harmony.core.model.QueuedDecision?, liveSpectralEq: Boolean): String? {
+    val parts = buildList {
+        if (liveSpectralEq) add("LIVE SPECTRAL EQ")
+        decision?.let {
+            add(
+                when (it.trace.reason) {
+                    com.harmony.core.model.ReasonTag.VIBE_MATCH -> "VIBE MATCH ${it.vibeMatchPct}%"
+                    com.harmony.core.model.ReasonTag.MARKOV_FAVORITE -> "YOUR USUAL NEXT"
+                    com.harmony.core.model.ReasonTag.BANDIT_GEM -> "REDISCOVERY"
+                    com.harmony.core.model.ReasonTag.POST_SKIP_PIVOT -> "POST-SKIP PIVOT"
+                    com.harmony.core.model.ReasonTag.PROVEN_FAVORITE -> "PROVEN FAVORITE"
+                    com.harmony.core.model.ReasonTag.SONIC_ADVENTURE -> "SONIC ADVENTURE"
+                    com.harmony.core.model.ReasonTag.COLD_START -> "WILDCARD"
+                },
+            )
+        }
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" • ")
 }
 
 /** The songs after the current one, with their queue positions; wraps round when the whole queue repeats. */

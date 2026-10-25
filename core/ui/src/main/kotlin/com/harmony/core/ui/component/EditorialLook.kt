@@ -59,6 +59,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import com.harmony.core.ui.theme.CyberGlassColors
+import com.harmony.core.ui.theme.CyberGlassPalette
+import com.harmony.core.ui.theme.cyberGlassActive
+import com.harmony.core.ui.theme.isCyberGlass
 
 /**
  * The "editorial" look shared by the Library (amber) and Playlists (green)
@@ -381,6 +385,14 @@ private val LavenderDark = EditorialPalette(
 fun amberPalette(): EditorialPalette =
     if (MaterialTheme.colorScheme.background.luminance() < 0.5f) AmberDark else AmberLight
 
+/**
+ * The library's palette: Cyber-Glass obsidian and cyan in dark theme
+ * ([CyberGlassPalette]), the amber editorial look in light theme.
+ */
+@Composable
+fun libraryPalette(): EditorialPalette =
+    if (cyberGlassActive()) CyberGlassPalette else amberPalette()
+
 @Composable
 fun greenPalette(): EditorialPalette =
     if (MaterialTheme.colorScheme.background.luminance() < 0.5f) GreenDark else GreenLight
@@ -462,7 +474,11 @@ fun EditorialCard(
     content: @Composable () -> Unit,
 ) {
     val shape = RoundedCornerShape(EDITORIAL_CARD_RADIUS)
-    val border = BorderStroke(1.5.dp, palette.line)
+    val cyber = palette.isCyberGlass
+    // Cyber-Glass: a dark glass pane with a thin slate-cyan rim instead of
+    // the printed outline.
+    val border = if (cyber) BorderStroke(1.dp, CyberGlassColors.ChipBorder) else BorderStroke(1.5.dp, palette.line)
+    val fill = if (cyber) CyberGlassColors.Surface else palette.field
     // Filled with the field rather than transparent: visually identical
     // against the page, but opaque, so anything revealed behind a card
     // (the swipe-to-queue affordance) can't bleed through it.
@@ -471,7 +487,7 @@ fun EditorialCard(
             onClick = onClick,
             modifier = modifier,
             shape = shape,
-            color = palette.field,
+            color = fill,
             contentColor = palette.ink,
             border = border,
         ) { content() }
@@ -479,7 +495,7 @@ fun EditorialCard(
         Surface(
             modifier = modifier,
             shape = shape,
-            color = palette.field,
+            color = fill,
             contentColor = palette.ink,
             border = border,
         ) { content() }
@@ -651,8 +667,17 @@ fun EditorialCircleButton(
     filled: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val container = if (filled) palette.accent else Color.Transparent
-    val contentColor = if (filled) palette.onAccent else palette.ink
+    val cyber = palette.isCyberGlass
+    val container = when {
+        filled -> palette.accent
+        cyber -> CyberGlassColors.Chip
+        else -> Color.Transparent
+    }
+    val contentColor = when {
+        filled -> palette.onAccent
+        cyber -> CyberGlassColors.Cyan
+        else -> palette.ink
+    }
     Surface(
         onClick = onClick,
         modifier = modifier
@@ -661,7 +686,11 @@ fun EditorialCircleButton(
         shape = CircleShape,
         color = container,
         contentColor = contentColor,
-        border = if (filled) null else BorderStroke(1.5.dp, palette.line),
+        border = when {
+            filled -> null
+            cyber -> BorderStroke(1.dp, CyberGlassColors.Iridescent)
+            else -> BorderStroke(1.5.dp, palette.line)
+        },
     ) {
         Box(contentAlignment = Alignment.Center) {
             CompositionLocalProvider(LocalContentColor provides contentColor) { content() }
