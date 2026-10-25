@@ -56,7 +56,7 @@ enum MornyeModelsTest {
         let file = allowed.appendingPathComponent("track.flac")
         try Data("fLaC-test".utf8).write(to: file)
         let staged = try MornyeJSON.stagedFile(file.path, directory: allowed)
-        expect(staged == file, "Keep a regular staged output")
+        expect(staged == file.standardizedFileURL.resolvingSymlinksInPath(), "Keep a regular staged output")
         let outside = directory.appendingPathComponent("outside.flac")
         try Data("outside".utf8).write(to: outside)
         let symlink = allowed.appendingPathComponent("escape.flac")

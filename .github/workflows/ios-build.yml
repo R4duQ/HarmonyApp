@@ -77,6 +77,12 @@ jobs:
           ./build/ios-core-test/tag_writer_test
           ./build/ios-core-test/slsk_test
 
+      - name: Mornye wire contract and callback tests
+        run: |
+          mkdir -p build/tests
+          swiftc ios/Harmony/Mornye/MornyeModels.swift ios/Tests/MornyeModelsTest.swift -o build/tests/mornye-models-test
+          build/tests/mornye-models-test
+
       - name: Cache Mornye and FFmpeg iOS SDKs
         id: mornye-cache
         uses: actions/cache@v4
@@ -89,12 +95,6 @@ jobs:
       - name: Build Mornye 5.2.5 and stage verified iOS SDKs
         if: steps.mornye-cache.outputs.cache-hit != 'true'
         run: bash scripts/ci/build-mornye-ios.sh
-
-      - name: Mornye wire contract and callback tests
-        run: |
-          mkdir -p build/tests
-          swiftc ios/Harmony/Mornye/MornyeModels.swift ios/Tests/MornyeModelsTest.swift -o build/tests/mornye-models-test
-          build/tests/mornye-models-test
 
       - name: Mornye native Swift and Rust smoke test
         run: |
