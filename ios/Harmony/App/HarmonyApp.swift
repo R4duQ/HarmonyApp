@@ -22,6 +22,7 @@ struct RootView: View {
             .tint(CyberGlassColors.cyan)
             .task {
                 HarmonyAudioController.shared.start()
+                MornyeService.shared.start()
                 IosBackgroundTransferGuard.shared.start()
                 IosMusicLibraryManager.shared.start()
                 LibraryIngest.shared.indexMissingVectors()
@@ -59,6 +60,7 @@ final class HarmonyAppDelegate: NSObject, UIApplicationDelegate {
 @MainActor
 enum IncomingLinks {
     static func handle(_ url: URL) {
+        if MornyeService.shared.handleCallback(url) { return }
         if url.isFileURL {
             importFile(url)
             return

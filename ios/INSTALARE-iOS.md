@@ -134,3 +134,43 @@ că asta l-ar mări fără nicio îmbunătățire de calitate.
   Active Queue › „Keep downloads running when locked”.
 - La trecerea de pe Wi-Fi pe date mobile, Harmony se reconectează la Soulseek
   și reîncearcă o dată ce a eșuat între timp.
+
+
+## Mornye în Downloads
+
+În **Downloads → Search & Discover → Mornye** poți căuta o melodie sau lipi un
+link Tidal, Qobuz, Deezer ori Amazon Music. Alege **Auto** pentru a încerca
+sursele disponibile, sau un furnizor anume, apoi **Lossless** ori **Hi-Res
+lossless**. Apasă săgeata de descărcare pe rezultatul dorit.
+
+Transferul apare în **Active Queue**. Mornye folosește un slot separat, în
+paralel cu transferurile Soulseek. Pause oprește apelul nativ curent; Resume
+reia jobul și runtime-ul poate refolosi un checkpoint parțial valid, dacă
+furnizorul îl suportă. Retry reîncearcă un eșec, iar Cancel elimină staging-ul
+după ce apelul nativ s-a încheiat. Coada se păstrează între porniri.
+
+Dacă un furnizor cere verificare, **Verify provider** deschide browserul de
+autentificare iOS. Callbackul mornye:// este validat de backendul care a emis
+starea; după verificare jobul în așteptare revine în coadă. Parola/cheia de
+stocare rămân în Keychain și în stocarea criptată a runtime-ului.
+
+Fișierele finale ajung în **Files → On My iPhone → Harmony → Downloads →
+Mornye**, primesc taguri/copertă și intră în biblioteca cu indexare 24D.
+Un stream lossy sau protejat nu este prezentat drept FLAC lossless.
+
+### Build local pe macOS
+
+Înainte de XcodeGen, instalează rustup și rulează din rădăcina proiectului:
+
+    bash scripts/ci/build-mornye-ios.sh
+    cd ios
+    xcodegen generate --spec project.yml
+
+Scriptul fixează Mornye la 5.2.5 și generează interfața Swift și XCFramework-ul
+pentru dispozitiv și simulator. Bibliotecile FFmpegKit audio și pachetele celor
+patru furnizori sunt verificate prin SHA-256. Workflow-ul Harmony for iOS face
+acești pași automat și păstrează SDK-urile generate în cache.
+
+Pe fundal se aplică IosBackgroundTransferGuard. Dacă iOS suspendă aplicația,
+Mornye se oprește și jobul continuă când revii. O aplicație terminată manual nu
+primește timp nelimitat pentru apeluri Rust în fundal.

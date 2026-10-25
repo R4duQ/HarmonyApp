@@ -86,6 +86,7 @@ final class IosBackgroundTransferGuard: ObservableObject {
         // Any change to the transfers, the playlist matcher or the player: look again (after it lands).
         let changes: [ObservableObjectPublisher] = [
             SoulseekService.shared.objectWillChange,
+            MornyeService.shared.objectWillChange,
             StreamIngestManager.shared.objectWillChange,
             LosslessTrackResolver.shared.objectWillChange,
             HarmonyAudioController.shared.objectWillChange,
@@ -108,6 +109,7 @@ final class IosBackgroundTransferGuard: ObservableObject {
             Task { @MainActor in
                 self?.inBackground = false
                 SoulseekService.shared.resumeSuspended()
+                MornyeService.shared.resumeSuspended()
                 self?.evaluate()
             }
         })
@@ -128,7 +130,7 @@ final class IosBackgroundTransferGuard: ObservableObject {
 
     private func evaluate() {
         let soulseek = SoulseekService.shared
-        socketWork = soulseek.activeTransferCount + (LosslessTrackResolver.shared.running ? 1 : 0)
+        socketWork = soulseek.activeTransferCount + MornyeService.shared.socketWork + (LosslessTrackResolver.shared.running ? 1 : 0)
         let downloads = HarmonyDownloadEngine.activeCount()
         if activeDownloads != downloads { activeDownloads = downloads }
 
@@ -169,6 +171,7 @@ final class IosBackgroundTransferGuard: ObservableObject {
             // iOS takes the time back now: stop the transfers cleanly, keeping their bytes.
             MainActor.assumeIsolated {
                 SoulseekService.shared.suspendForBackground()
+                MornyeService.shared.suspendForBackground()
                 self?.endBackgroundTask()
             }
         }
@@ -242,6 +245,7 @@ final class IosBackgroundTransferGuard: ObservableObject {
             // Wi-Fi to cellular without a gap: sockets on the old interface die soon.
             SoulseekService.shared.networkRestored(lostAt: Date().addingTimeInterval(-30))
         }
+        if available { MornyeService.shared.networkRestored() }
         lastInterface = interface
     }
 }

@@ -1,4 +1,6 @@
 .gradle/
+# Generated iOS Mornye UniFFI bindings and native XCFrameworks.
+ios/Vendor/
 build/
 local.properties
 keystore.properties

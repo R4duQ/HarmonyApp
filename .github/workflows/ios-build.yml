@@ -10,6 +10,7 @@ on:
   workflow_call:
   push:
     paths:
+      - 'scripts/ci/build-mornye-ios.sh'
       - 'ios/**'
       - 'core/eq-engine/src/main/cpp/**'
       - 'core/eq-engine/src/test/cpp/**'
@@ -19,6 +20,7 @@ on:
       - '.github/workflows/ios-build.yml'
   pull_request:
     paths:
+      - 'scripts/ci/build-mornye-ios.sh'
       - 'ios/**'
       - 'core/eq-engine/src/main/cpp/**'
       - 'core/dsp-native/src/main/cpp/SmartShuffleEngine.*'
@@ -74,6 +76,33 @@ jobs:
           # Tag writing and the container check, and the Soulseek engine against a fake server and peers.
           ./build/ios-core-test/tag_writer_test
           ./build/ios-core-test/slsk_test
+
+      - name: Cache Mornye and FFmpeg iOS SDKs
+        id: mornye-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Vendor/Mornye
+            ios/Vendor/FFmpeg
+          key: mornye-ios-macos14-xcode16-${{ hashFiles('scripts/ci/build-mornye-ios.sh') }}
+
+      - name: Build Mornye 5.2.5 and stage verified iOS SDKs
+        if: steps.mornye-cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci/build-mornye-ios.sh
+
+      - name: Mornye wire contract and callback tests
+        run: |
+          mkdir -p build/tests
+          swiftc ios/Harmony/Mornye/MornyeModels.swift ios/Tests/MornyeModelsTest.swift -o build/tests/mornye-models-test
+          build/tests/mornye-models-test
+
+      - name: Mornye native Swift and Rust smoke test
+        run: |
+          host="$PWD/ios/Vendor/Mornye/Host"
+          swiftc -I "$host" -L "$host" -lmornye_mobile -Xlinker -rpath -Xlinker "$host" \
+            ios/Vendor/Mornye/MornyeBackend.swift ios/Tests/MornyeNativeSmoke.swift \
+            -o build/tests/mornye-native-smoke
+          DYLD_LIBRARY_PATH="$host" build/tests/mornye-native-smoke
 
       - name: Install XcodeGen
         run: |
