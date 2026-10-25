@@ -64,6 +64,10 @@ jobs:
           cmake -S core/dsp-native/src/test/cpp -B build/shuffle-host -DCMAKE_BUILD_TYPE=Release
           cmake --build build/shuffle-host --target shuffle_test --parallel
           ./build/shuffle-host/shuffle_test
+          # The iOS player core (gapless, seek, end of queue, passive vector) on its own.
+          cmake -S ios/Tests -B build/ios-core-test -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ios-core-test --parallel
+          ./build/ios-core-test/player_core_test
 
       - name: Install XcodeGen
         run: |
