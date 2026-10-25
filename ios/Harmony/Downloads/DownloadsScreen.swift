@@ -14,14 +14,15 @@ import UniformTypeIdentifiers
  */
 struct DownloadsScreen: View {
     enum Filter: Hashable { case active, discover, completed, importFolder }
-    enum Source: Hashable { case soulseek, links, playlists, recognize }
+    enum Source: Hashable { case mornye, soulseek, links, playlists, recognize }
 
     @ObservedObject private var soulseek = SoulseekService.shared
+    @ObservedObject private var mornye = MornyeService.shared
     @ObservedObject private var links = StreamIngestManager.shared
     @ObservedObject private var resolver = LosslessTrackResolver.shared
     @ObservedObject private var transferGuard = IosBackgroundTransferGuard.shared
     @State private var filter: Filter = .discover
-    @State private var source: Source = .soulseek
+    @State private var source: Source = .mornye
     @State private var fetchText = ""
     @State private var fetchError: String?
 
@@ -84,12 +85,14 @@ struct DownloadsScreen: View {
 
     @ViewBuilder private var discover: some View {
         CapsuleTabs(tabs: [
+            (Source.mornye, "Mornye", "arrow.down.circle"),
             (Source.soulseek, "Soulseek P2P", "point.3.connected.trianglepath.dotted"),
             (Source.links, "Links", "link"),
             (Source.playlists, "Playlist Import", "music.note.list"),
             (Source.recognize, "Recognize", "waveform.badge.mic"),
         ], selection: $source)
         switch source {
+        case .mornye: MornyeDownloadsPanel()
         case .soulseek: SoulseekPanel()
         case .links: LinksPanel()
         case .playlists: PlaylistImportPanel()
@@ -100,7 +103,7 @@ struct DownloadsScreen: View {
     private var fetchBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                GlassField(placeholder: "Search Soulseek, or paste a link", text: $fetchText,
+                GlassField(placeholder: source == .mornye ? "Search Mornye, or paste a provider link" : "Search Soulseek, or paste a link", text: $fetchText,
                            systemImage: "sparkle.magnifyingglass", onSubmit: fetch)
                 Button(action: pasteAndFetch) {
                     Image(systemName: "arrow.down.circle.fill")
@@ -129,6 +132,12 @@ struct DownloadsScreen: View {
         let text = fetchText.trimmingCharacters(in: .whitespacesAndNewlines)
         fetchError = nil
         guard !text.isEmpty else { return }
+        if MornyeTrack.isProviderURL(text) || (source == .mornye && StreamIngestManager.extractURL(from: text) == nil) {
+            filter = .discover
+            source = .mornye
+            mornye.search(text)
+            return
+        }
         if StreamIngestManager.extractURL(from: text) != nil {
             fetchError = links.enqueue(text)
             if fetchError == nil {
@@ -169,7 +178,7 @@ private struct ActiveQueueSection: View {
                         Text("Keep downloads running when locked")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(CyberGlassColors.textPrimary)
-                        Text("With nothing playing, Harmony keeps a silent audio session open while Soulseek transfers run, so iOS doesn't freeze them. It stops the moment the last transfer ends. Off: transfers pause when iOS suspends Harmony and continue when you come back.")
+                        Text("With nothing playing, Harmony keeps a silent audio session open while native transfers run, so they can continue with the screen locked. It stops the moment the last transfer ends. Off: transfers pause when iOS suspends Harmony and continue when you come back.")
                             .font(.system(size: 11.5))
                             .foregroundStyle(CyberGlassColors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -186,7 +195,7 @@ private struct ActiveQueueSection: View {
                 Text("Nothing downloading")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(CyberGlassColors.textPrimary)
-                Text("Search Soulseek or paste a link above. Up to \(SoulseekService.maxConcurrent) Soulseek transfers run at once; the others wait their turn. A paused or interrupted transfer continues from the bytes it already has.")
+                Text("Search Mornye or Soulseek, or paste a link above. Soulseek runs up to \(SoulseekService.maxConcurrent) transfers at once; Mornye uses one provider slot. Paused transfers can be resumed.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(CyberGlassColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

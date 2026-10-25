@@ -21,6 +21,7 @@ struct DownloadItem: Identifiable, Equatable {
         case soulseek(UInt32)
         case link(UUID)
         case lookup(UUID)
+        case mornye(UUID)
     }
 
     let origin: Origin
@@ -46,6 +47,7 @@ struct DownloadItem: Identifiable, Equatable {
         case .soulseek(let id): return "slsk-\(id)"
         case .link(let id): return "link-\(id.uuidString)"
         case .lookup(let id): return "find-\(id.uuidString)"
+        case .mornye(let id): return "mornye-\(id.uuidString)"
         }
     }
 
@@ -53,18 +55,20 @@ struct DownloadItem: Identifiable, Equatable {
 
     var canPause: Bool {
         if case .soulseek = origin { return [.queued, .connecting, .downloading].contains(status) }
+        if case .mornye = origin { return [.queued, .connecting, .downloading].contains(status) }
         return false
     }
     var canResume: Bool { status == .paused }
     var canRetry: Bool {
         switch origin {
-        case .soulseek, .link: return status == .failed
+        case .soulseek, .link, .mornye: return status == .failed
         case .lookup: return false
         }
     }
     var canCancel: Bool {
         switch origin {
         case .lookup: return false
+        case .mornye: return (status.isActive && status != .indexing24D) || status == .paused
         default: return status.isActive || status == .paused
         }
     }
@@ -107,6 +111,7 @@ enum HarmonyDownloadEngine {
         }
         items += soulseek.transfers.map(item(for:))
         items += links.jobs.map(item(for:))
+        items += MornyeService.shared.jobs.map(\.item)
         return items
     }
 
@@ -119,10 +124,12 @@ enum HarmonyDownloadEngine {
 
     static func pause(_ item: DownloadItem) {
         if case .soulseek(let id) = item.origin { SoulseekService.shared.pause(id) }
+        if case .mornye(let id) = item.origin { MornyeService.shared.pause(id) }
     }
 
     static func resume(_ item: DownloadItem) {
         if case .soulseek(let id) = item.origin { SoulseekService.shared.resume(id) }
+        if case .mornye(let id) = item.origin { MornyeService.shared.resume(id) }
     }
 
     static func retry(_ item: DownloadItem) {
@@ -135,6 +142,7 @@ enum HarmonyDownloadEngine {
                 links.clear(id)
                 _ = links.enqueue(job.source.absoluteString)
             }
+        case .mornye(let id): MornyeService.shared.retry(id)
         case .lookup:
             break
         }
@@ -144,6 +152,7 @@ enum HarmonyDownloadEngine {
         switch item.origin {
         case .soulseek(let id): SoulseekService.shared.cancel(id)
         case .link(let id): StreamIngestManager.shared.cancel(id)
+        case .mornye(let id): MornyeService.shared.cancel(id)
         case .lookup: break
         }
     }
@@ -151,6 +160,7 @@ enum HarmonyDownloadEngine {
     static func clearFinished() {
         SoulseekService.shared.clearFinished()
         StreamIngestManager.shared.clearFinished()
+        MornyeService.shared.clearFinished()
     }
 
     // MARK: - Mapping
