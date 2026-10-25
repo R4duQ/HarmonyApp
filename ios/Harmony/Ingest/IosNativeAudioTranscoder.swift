@@ -135,7 +135,7 @@ final class IosNativeAudioTranscoder {
             objc.comment = tags.comment
             objc.cover = tags.cover
             try await Task.detached(priority: .utility) {
-                try HarmonyTranscoder.writeTags(objc, toFileAtPath: url.path)
+                try HarmonyTranscoder.write(objc, toFileAtPath: url.path)
             }.value
         case "m4a":
             try await writeMp4Tags(tags, to: url)
