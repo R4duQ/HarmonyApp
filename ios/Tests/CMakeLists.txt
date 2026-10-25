@@ -20,3 +20,16 @@ target_include_directories(player_core_test PRIVATE
   ../../core/dsp-native/src/main/cpp)
 target_compile_options(player_core_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(player_core_test PRIVATE Threads::Threads)
+
+add_executable(tag_writer_test tag_writer_test.cpp ../Harmony/Ingest/HarmonyTagWriter.cpp)
+target_include_directories(tag_writer_test PRIVATE ../Harmony/Ingest)
+target_compile_options(tag_writer_test PRIVATE -Wall -Wextra -Werror)
+
+find_package(ZLIB REQUIRED)
+add_executable(slsk_test slsk_test.cpp
+  ../Harmony/Soulseek/SlskProtocol.cpp
+  ../Harmony/Soulseek/SlskEngine.cpp
+  ../Harmony/Ingest/HarmonyTagWriter.cpp)
+target_include_directories(slsk_test PRIVATE ../Harmony/Soulseek ../Harmony/Ingest)
+target_compile_options(slsk_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(slsk_test PRIVATE ZLIB::ZLIB Threads::Threads)

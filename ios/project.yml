@@ -78,6 +78,7 @@ targets:
       - sdk: Accelerate.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: libsqlite3.tbd
+      - sdk: libz.tbd
     info:
       path: Config/Info.plist
       properties:
