@@ -130,10 +130,10 @@ final class MornyeRuntime: @unchecked Sendable {
         try current.setFallbackProviders(ids: [provider.id])
         let request = try track.request(provider: provider.id, quality: provider.qualityID(for: quality),
                                         itemID: itemID, directory: directory)
-        let commands = try current.environment().ffmpegCommands()
+        let commands = current.environment().ffmpegCommands()
         let pump = CoreFFmpegExecution(
             wait: { try JSONDecoder().decode([CoreFFmpegCommand].self, from: Data(commands.waitPending(timeoutMs: $0).utf8)) },
-            active: { !commands.getCommand(commandId: $0).isEmpty },
+            active: { try !commands.getCommand(commandId: $0).isEmpty },
             complete: { id, success, output, error in
                 _ = try commands.complete(commandId: id, success: success, output: output, error: error)
             })
