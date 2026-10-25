@@ -26,8 +26,9 @@ how they sound.
    the song, vector or analysis count changes, and at least every 30 minutes.
 3. **Session.** `S_t` follows the brief exactly:
    - past half: `normalize(0.60 v + 0.40 S)`;
-   - under 20% (a fast skip): `normalize(S − 0.35 v)`, and the generated tail is
-     dropped and re-ranked;
+   - under 20% (a fast skip): `normalize(S − 0.35 v)`. The queue is not touched:
+     skipping never changes the songs already queued, only the batch appended
+     at the end next;
    - a hand pick, or a song swiped in as Play next: `normalize(0.85 v + 0.15 S)`.
 4. **Scoring.**
    `(w_sim·sim + w_markov·P(prev→i) + w_aff·affinity + w_explore·UCB) · cooldown`

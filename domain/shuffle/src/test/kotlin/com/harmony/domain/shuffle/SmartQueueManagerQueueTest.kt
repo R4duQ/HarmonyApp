@@ -230,11 +230,12 @@ class SmartQueueManagerQueueTest {
     private fun toggle(p: FakePlayback, c: SmartQueueManager, mode: ShuffleMode) = c.chooseShuffleMode(mode)
 
     /**
-     * Lets the debounced re-rank fire. advanceUntilIdle alone doesn't move
-     * the clock for work in backgroundScope, where the manager runs.
+     * Lets anything delayed run (a re-rank would, if one were scheduled).
+     * advanceUntilIdle alone doesn't move the clock for work in
+     * backgroundScope, where the manager runs.
      */
     private fun TestScope.settle() {
-        advanceTimeBy(SmartQueueManager.RERANK_DEBOUNCE_MS + 100)
+        advanceTimeBy(2_000)
         runCurrent()
         advanceUntilIdle()
     }
@@ -269,25 +270,20 @@ class SmartQueueManagerQueueTest {
     }
 
     @Test
-    fun aFastSkipReRanksTheGeneratedTail() = runTest(UnconfinedTestDispatcher()) {
+    fun aFastSkipTeachesTheBrainButLeavesTheQueueAlone() = runTest(UnconfinedTestDispatcher()) {
         val (p, c, brain) = build(this)
         p.setQueue(listOf(song(1)), 0, true)
         toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
-        p.skipAfter(0.9f); advanceUntilIdle()           // song 1 played: no re-rank
-        val before = ids(p).drop(p.idx + 1)
+        p.skipAfter(0.9f); advanceUntilIdle()           // song 1 played
+        val queue = ids(p)
         val requestsBefore = brain.requests.size
+        val writes = p.writes.size
         p.skipAfter(0.05f); settle()                    // a fast skip
-        val after = ids(p).drop(p.idx + 1)
-        assertEquals(requestsBefore + 1, brain.requests.size)
-        val rerank = brain.requests.last()
-        assertEquals("the brain is told what it replaced (the next song is kept)", before.drop(2), rerank.replacedTail)
-        assertEquals("the song after the skipped one still plays next", before[1], after[0])
-        assertEquals("one replaceMediaItems from current + 2", "replace ${p.idx + 2}", p.writes.last())
-        assertTrue("the tail was rebuilt: $before -> $after", after.drop(1).toSet() != before.drop(2).toSet())
-        assertEquals(SmartQueueManager.QUEUE_TARGET, after.size)
+        assertEquals("the queue is exactly as it was", queue, ids(p))
+        assertEquals("no batch generated", requestsBefore, brain.requests.size)
+        assertEquals("no queue write at all", writes, p.writes.size)
         assertTrue("the outcome reached the brain", brain.outcomes.any { it.second < 0.2f })
         assertEquals(SessionEvent.FAST_SKIP, c.telemetry.value.lastEvent)
-        assertTrue("re-rank logged", logged.any { "re-rank" in it })
     }
 
     @Test
@@ -312,16 +308,16 @@ class SmartQueueManagerQueueTest {
     }
 
     @Test
-    fun aSwipedPlayNextSongBoostsAndReRanks() = runTest(UnconfinedTestDispatcher()) {
+    fun aSwipedPlayNextSongAnchorsTheVibeWithoutRewritingTheQueue() = runTest(UnconfinedTestDispatcher()) {
         val (p, c, brain) = build(this)
         p.setQueue(listOf(song(1)), 0, true)
         toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        val before = ids(p)
         val requests = brain.requests.size
         p.addNext(song(77)); settle()
         assertEquals(listOf(77L), brain.manual)
-        assertEquals("swiped song plays next", 77L, p.q[1].id)
-        assertTrue("tail regenerated around it", brain.requests.size > requests)
-        assertTrue(ids(p).drop(2).all { it in pickPool })
+        assertEquals("swiped song plays next, the rest is unchanged", listOf(1L, 77L) + before.drop(1), ids(p))
+        assertEquals("no batch generated", requests, brain.requests.size)
     }
 
     @Test
@@ -457,20 +453,24 @@ class SmartQueueManagerQueueTest {
     }
 
     @Test
-    fun aBurstOfFastSkipsReRanksOnceAndKeepsTheNextSong() = runTest(UnconfinedTestDispatcher()) {
+    fun skippingSongAfterSongNeverRewritesTheQueue() = runTest(UnconfinedTestDispatcher()) {
         val (p, c, brain) = build(this)
         p.setQueue(listOf(song(1)), 0, true)
         toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
-        val history = ids(p).take(4)
-        // Three fast Nexts in a row, no time between them.
-        p.skipAfter(0.05f); p.skipAfter(0.05f); p.skipAfter(0.05f)
-        val next = p.q[p.idx + 1].id
+        val writes = p.writes.size
+        // Ten fast Nexts, some in a burst, some with time between them.
+        repeat(10) { i ->
+            val before = ids(p)
+            val upcoming = before.drop(p.idx + 1)
+            p.skipAfter(0.05f)
+            if (i % 3 == 0) settle() else advanceUntilIdle()
+            assertEquals("skip ${i + 1}: nothing already queued changed", before, ids(p).take(before.size))
+            assertEquals("skip ${i + 1}: the next song is the one that was queued", upcoming[0], p.q[p.idx].id)
+        }
         settle()
-        assertEquals("one re-rank for the whole burst", 1, brain.requests.count { it.replacedTail.isNotEmpty() })
-        assertEquals("the history (and the song playing) are untouched", history, ids(p).take(4))
-        assertEquals("the next song never jumps", next, p.q[p.idx + 1].id)
-        assertTrue("never a whole-queue replace", "set" !in p.writes.drop(1))
-        assertTrue("no one-by-one removals", "remove1" !in p.writes)
+        assertTrue("only appends at the end: ${p.writes.drop(writes)}", p.writes.drop(writes).all { it == "add" })
+        assertTrue("no re-rank", brain.requests.none { it.replacedTail.isNotEmpty() })
+        assertTrue(p.q.size - p.idx - 1 >= SmartQueueManager.REFILL_BELOW)
     }
 
     @Test

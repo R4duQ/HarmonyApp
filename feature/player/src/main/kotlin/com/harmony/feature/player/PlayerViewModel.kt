@@ -151,8 +151,8 @@ class PlayerViewModel @Inject constructor(
     /**
      * Transport goes through SmartQueueManager, which owns the queue's order:
      * Next and Previous only move within it (seekToNextMediaItem /
-     * seekToPrevious), never rebuilding it; a fast skip re-ranks the
-     * generated tail later, debounced, from current + 2 on.
+     * seekToPrevious), never changing it; a fast skip only teaches the
+     * brain, which shapes the songs appended at the end later.
      */
     fun onNext() = queueManager.skipToNext()
     fun onPrevious() = queueManager.skipToPrevious()
