@@ -1,0 +1,142 @@
+name: Harmony for iOS
+
+# Builds the iOS app on a macOS runner and uploads an unsigned (ad-hoc signed)
+# IPA for Sideloadly or AltStore, which re-sign it with your Apple ID.
+# No Mac needed: push, or start it from Actions > Harmony for iOS > Run workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios/**'
+      - 'core/eq-engine/src/main/cpp/**'
+      - 'core/eq-engine/src/test/cpp/**'
+      - 'core/dsp-native/src/main/cpp/SmartShuffleEngine.*'
+      - 'core/dsp-native/src/test/cpp/**'
+      - 'website/src/assets/apple-touch-icon.png'
+      - '.github/workflows/ios-build.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'core/eq-engine/src/main/cpp/**'
+      - 'core/dsp-native/src/main/cpp/SmartShuffleEngine.*'
+      - '.github/workflows/ios-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harmony-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IPA_NAME: Harmony-iOS-Unsigned.ipa
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  HOMEBREW_NO_INSTALL_CLEANUP: '1'
+
+jobs:
+  ios:
+    name: Unsigned IPA (arm64)
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          # The newest Xcode 16 on the image (Swift 6 toolchain, iOS 18 SDK); the default otherwise.
+          xcode=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$xcode" ]; then sudo xcode-select -s "$xcode/Contents/Developer"; fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Shared C++ engines on Apple clang (arm64)
+        # The same host tests as the Android CI, here on ARM64 with Apple's
+        # toolchain: the FPCR flush-to-zero path and NEON code generation the
+        # iPhone runs.
+        run: |
+          set -euo pipefail
+          cmake -S core/eq-engine/src/test/cpp -B build/eq-host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/eq-host --target eq_engine_test --parallel
+          ./build/eq-host/eq_engine_test
+          cmake -S core/dsp-native/src/test/cpp -B build/shuffle-host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/shuffle-host --target shuffle_test --parallel
+          ./build/shuffle-host/shuffle_test
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen --version
+
+      - name: App icon
+        # One 1024 px icon (no alpha, as iOS requires), made from the website's touch icon.
+        run: |
+          set -euo pipefail
+          out=ios/Harmony/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+          sips -s format png -z 1024 1024 website/src/assets/apple-touch-icon.png --out "$out" >/dev/null
+          sips -g pixelWidth -g pixelHeight -g hasAlpha "$out"
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Build (Release, iphoneos, arm64)
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          if ! xcodebuild \
+              -project ios/Harmony.xcodeproj \
+              -scheme Harmony \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath build/ios \
+              ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+              build > build/logs/xcodebuild.log 2>&1; then
+            echo "::group::Errors"
+            grep -E "error:|fatal error|Undefined symbol|ld: " -A4 build/logs/xcodebuild.log | head -300 || true
+            echo "::endgroup::"
+            tail -80 build/logs/xcodebuild.log
+            exit 1
+          fi
+          grep -E "warning:" build/logs/xcodebuild.log | grep -v "/core/" | sort -u | head -60 || true
+          tail -5 build/logs/xcodebuild.log
+
+      - name: Package the IPA
+        run: |
+          set -euo pipefail
+          app=build/ios/Build/Products/Release-iphoneos/Harmony.app
+          test -d "$app"
+          lipo -info "$app/Harmony"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" -c "Print :UIBackgroundModes" \
+            -c "Print :UIFileSharingEnabled" -c "Print :LSSupportsOpeningDocumentsInPlace" "$app/Info.plist"
+          # Ad-hoc signature: the app is complete and installable once Sideloadly
+          # or AltStore re-signs it with your Apple ID.
+          codesign --force --deep --sign - --timestamp=none "$app"
+          codesign --verify --verbose=2 "$app"
+          rm -rf dist && mkdir -p dist/Payload
+          cp -R "$app" dist/Payload/
+          (cd dist && zip -qry "$IPA_NAME" Payload)
+          ls -la dist
+          du -h "dist/$IPA_NAME"
+
+      - name: Upload the IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Harmony-iOS-Unsigned
+          path: dist/${{ env.IPA_NAME }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/logs/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
