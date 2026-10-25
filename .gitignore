@@ -40,3 +40,8 @@ website/dist/
 /desktop/build/
 /desktop/.gradle/
 /desktop/resources/windows/
+
+# iOS: XcodeGen output and CI-generated files (ios/project.yml is the source)
+ios/Harmony.xcodeproj/
+ios/Config/Info.plist
+ios/Harmony/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png

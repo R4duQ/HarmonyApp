@@ -148,8 +148,14 @@ class PlayerViewModel @Inject constructor(
 
     // -- Transport ----------------------------------------------------------
     fun onPlayPause() = togglePlayPause()
-    fun onNext() = playback.skipToNext()
-    fun onPrevious() = playback.skipToPrevious()
+    /**
+     * Transport goes through SmartQueueManager, which owns the queue's order:
+     * Next and Previous only move within it (seekToNextMediaItem /
+     * seekToPrevious), never rebuilding it; a fast skip re-ranks the
+     * generated tail later, debounced, from current + 2 on.
+     */
+    fun onNext() = queueManager.skipToNext()
+    fun onPrevious() = queueManager.skipToPrevious()
     fun onSeek(positionMs: Long) = playback.seekTo(positionMs)
 
     fun onToggleFavorite() {
@@ -234,7 +240,8 @@ class PlayerViewModel @Inject constructor(
     fun onCancelJourney() = queueManager.cancelJourney()
 
     // -- Queue --------------------------------------------------------------
-    fun onQueueItemClick(index: Int) = playback.skipToQueueItem(index)
+    /** A tap on a queued song: seekTo(index, 0), the queue unchanged. */
+    fun onQueueItemClick(index: Int) = queueManager.playQueueItem(index)
     fun onRemoveQueueItem(index: Int) {
         viewModelScope.launch { playback.removeFromQueue(index) }
     }

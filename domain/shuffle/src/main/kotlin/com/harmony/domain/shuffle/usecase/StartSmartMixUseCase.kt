@@ -1,6 +1,5 @@
 package com.harmony.domain.shuffle.usecase
 
-import com.harmony.core.model.ShuffleMode
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.shuffle.SmartQueueManager
@@ -34,8 +33,7 @@ class StartSmartMixUseCase @Inject constructor(
             val seed = library.songById(seedId) ?: return false
             playback.setQueue(listOf(seed), startIndex = 0, playWhenReady = true)
         }
-        playback.setShuffleMode(ShuffleMode.SMART)
-        queueManager.onShuffleActivated()
+        queueManager.activateSmartShuffle()
         return true
     }
 }

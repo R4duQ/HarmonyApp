@@ -31,6 +31,14 @@ interface PlaybackController {
      */
     val playOutcomes: Flow<PlayOutcome> get() = emptyFlow()
 
+    /**
+     * Shuffle turned on from outside the app (a Bluetooth or notification
+     * shuffle button, a watch): the player's own shuffle is switched straight
+     * back off and the request lands here, for SmartQueueManager to act on.
+     * Harmony orders the queue itself and never lets ExoPlayer shuffle it.
+     */
+    val externalShuffleRequests: Flow<Unit> get() = emptyFlow()
+
     // -- Queue --------------------------------------------------------------
     /** Replace the queue with [songs] and start playing from [startIndex]. */
     suspend fun setQueue(songs: List<Song>, startIndex: Int = 0, playWhenReady: Boolean = true)
@@ -54,6 +62,17 @@ interface PlaybackController {
      * visible; this is a single call.
      */
     suspend fun removeQueueRange(fromIndex: Int, toIndexExclusive: Int)
+
+    /**
+     * Replaces queue entries [fromIndex, toIndexExclusive) with [songs] in one
+     * operation (Media3's replaceMediaItems), leaving everything before
+     * [fromIndex] (the history and the song playing) untouched. The default
+     * is for simple fakes and only right for a range reaching the end.
+     */
+    suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>) {
+        removeQueueRange(fromIndex, toIndexExclusive)
+        if (songs.isNotEmpty()) addToQueueAll(songs)
+    }
     suspend fun moveQueueItem(from: Int, to: Int)
 
     // -- Transport ----------------------------------------------------------
