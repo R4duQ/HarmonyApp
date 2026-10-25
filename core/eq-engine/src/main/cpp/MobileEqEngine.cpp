@@ -88,8 +88,6 @@ constexpr float kPeakGravity = 2.5f;   // bar heights per second squared
 constexpr float kStaleSeconds = 0.25f;  // no audio for this long: the bars fall
 constexpr float kMaxLagSeconds = 0.75f; // never trail the audio thread by more
 
-constexpr int kPreampGridPoints = 64;
-
 inline float dbToLinear(float db) { return std::pow(10.f, db / 20.f); }
 
 /** x, or 0 when it is NaN or infinite. */
