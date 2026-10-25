@@ -42,6 +42,14 @@ final class HarmonyAppDelegate: NSObject, UIApplicationDelegate {
         appearance.backgroundColor = UIColor(red: 0x13 / 255, green: 0x1B / 255, blue: 0x2E / 255, alpha: 0.9)
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+
+        // Background 24-D indexing: registered before launch ends, as iOS requires,
+        // and asked for again each time Harmony goes to the background.
+        BackgroundIndexing.register()
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+                                               object: nil, queue: .main) { _ in
+            Task { @MainActor in BackgroundIndexing.scheduleIfNeeded() }
+        }
         return true
     }
 

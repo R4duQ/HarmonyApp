@@ -81,6 +81,8 @@ targets:
       - sdk: ShazamKit.framework
       - sdk: CryptoKit.framework
       - sdk: Security.framework
+      - sdk: Network.framework
+      - sdk: BackgroundTasks.framework
       - sdk: libsqlite3.tbd
       - sdk: libz.tbd
     info:
@@ -101,8 +103,13 @@ targets:
         UIRequiresFullScreen: true
         UIUserInterfaceStyle: Dark
         UIStatusBarStyle: UIStatusBarStyleLightContent
-        # Music keeps playing with the screen off and in the background.
-        UIBackgroundModes: [audio]
+        # audio: music keeps playing with the screen off and in the background.
+        # fetch and processing: iOS gives Harmony time while closed to finish the
+        # 24-D library indexing (BackgroundIndexing.swift).
+        UIBackgroundModes: [audio, fetch, processing]
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.harmony.app.ios.index24d
+          - com.harmony.app.ios.refresh
         # "Harmony" appears as its own folder in Files > On My iPhone: drop music there.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true

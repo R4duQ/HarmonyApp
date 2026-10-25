@@ -117,6 +117,7 @@ jobs:
           test -d "$app"
           lipo -info "$app/Harmony"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" -c "Print :UIBackgroundModes" \
+            -c "Print :BGTaskSchedulerPermittedIdentifiers" \
             -c "Print :UIFileSharingEnabled" -c "Print :LSSupportsOpeningDocumentsInPlace" "$app/Info.plist"
           # Ad-hoc signature: the app is complete and installable once Sideloadly
           # or AltStore re-signs it with your Apple ID.

@@ -39,6 +39,11 @@ Aplicația apare în **Files → On My iPhone → Harmony**: copiază muzica aco
 sau (din modulele următoare) alege orice folder din Files, iar Harmony îl
 păstrează accesibil și după repornire.
 
+Smart Shuffle măsoară fiecare melodie (vectorul 24D). Cu aplicația deschisă,
+o face pe loc. Ce rămâne nemăsurat termină iOS singur, cu Harmony închis, de
+obicei noaptea, când telefonul e la încărcare. Pentru asta, lasă pornit
+**Settings → General → Background App Refresh** pentru Harmony.
+
 ## Downloads pe iOS
 
 Tab-ul **Downloads** are patru surse. Ce se descarcă ajunge în
