@@ -58,7 +58,7 @@ final class AcousticScanCoordinator: ObservableObject {
 
     init() {
         let center = NotificationCenter.default
-        let refresh: (Notification) -> Void = { [weak self] _ in
+        let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
             Task { @MainActor in self?.applyDeviceState() }
         }
         observers.append(center.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main, using: refresh))

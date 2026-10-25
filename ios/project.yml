@@ -78,7 +78,6 @@ targets:
       - sdk: Accelerate.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: libsqlite3.tbd
-      - sdk: libc++.tbd
     info:
       path: Config/Info.plist
       properties:
@@ -94,6 +93,7 @@ targets:
         UIRequiredDeviceCapabilities: [arm64]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        UIRequiresFullScreen: true
         UIUserInterfaceStyle: Dark
         UIStatusBarStyle: UIStatusBarStyleLightContent
         # Music keeps playing with the screen off and in the background.
