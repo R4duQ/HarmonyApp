@@ -1524,19 +1524,11 @@ class SpotiFlacDownloadEngine @Inject constructor(
         return normalized.contains("already installed") || normalized.contains("already loaded")
     }
 
-    private fun resolveProviderRegistry(): RegistrySnapshot {
-        return runCatching { fetchOfficialProviderRegistry() }
-            .getOrElse { failure ->
-                RegistrySnapshot(
-                    packages = FALLBACK_PROVIDER_PACKAGES,
-                    updatedAt = "bundled-fallback",
-                    source = "bundled fallback after registry error: ${failure.message ?: failure.javaClass.simpleName}",
-                )
-            }
-    }
+    private fun resolveProviderRegistry(): RegistrySnapshot =
+        SpotiFlacProviderRegistry.resolve { fetchOfficialProviderRegistry() }
 
-    private fun fetchOfficialProviderRegistry(): RegistrySnapshot {
-        val connection = (URL(OFFICIAL_REGISTRY_URL).openConnection() as HttpURLConnection).apply {
+    private fun fetchOfficialProviderRegistry(): String {
+        val connection = (URL(SpotiFlacProviderRegistry.OFFICIAL_REGISTRY_URL).openConnection() as HttpURLConnection).apply {
             connectTimeout = REGISTRY_CONNECT_TIMEOUT_MS
             readTimeout = REGISTRY_READ_TIMEOUT_MS
             instanceFollowRedirects = true
@@ -1547,95 +1539,34 @@ class SpotiFlacDownloadEngine @Inject constructor(
         try {
             val code = connection.responseCode
             if (code !in 200..299) error("official extension registry returned HTTP $code")
-            val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-            val extensions = root.optJSONArray("extensions") ?: error("registry has no extensions array")
-            val byId = mutableMapOf<String, ProviderPackage>()
-            for (index in 0 until extensions.length()) {
-                val node = extensions.optJSONObject(index) ?: continue
-                val id = node.optString("id").trim()
-                if (id !in PROVIDER_PRIORITY) continue
-                if (!node.optString("category").equals("download", ignoreCase = true)) continue
-                val url = node.optString("download_url").trim()
-                val hash = node.optString("sha256").trim().lowercase(Locale.ROOT)
-                val version = node.optString("version").trim()
-                if (!isTrustedProviderUrl(url)) continue
-                if (!hash.matches(Regex("[0-9a-f]{64}"))) continue
-                byId[id] = ProviderPackage(
-                    id = id,
-                    displayName = providerDisplay(id),
-                    version = version.ifBlank { "unknown" },
-                    url = url,
-                    sha256 = hash,
-                )
-            }
-            val merged = PROVIDER_PRIORITY.map { id ->
-                byId[id] ?: FALLBACK_PROVIDER_PACKAGES.first { it.id == id }
-            }
-            return RegistrySnapshot(
-                packages = merged,
-                updatedAt = root.optString("updated_at").ifBlank { "unknown" },
-                source = "official SpotiFLAC extension registry",
-            )
+            return connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun isTrustedProviderUrl(raw: String): Boolean {
-        return runCatching {
-            val url = URL(raw)
-            url.protocol.equals("https", ignoreCase = true) &&
-                url.host.equals("raw.githubusercontent.com", ignoreCase = true)
-        }.getOrDefault(false)
     }
 
     private fun installProviderIfNeeded(provider: ProviderPackage, extensionsDir: File) {
-        val destination = File(extensionsDir, "${provider.id}.sflx")
-        if (destination.isFile && sha256(destination).equals(provider.sha256, ignoreCase = true)) return
-
-        val partial = File(extensionsDir, "${provider.id}.sflx.part").apply { delete() }
-        val connection = (URL(provider.url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = PROVIDER_CONNECT_TIMEOUT_MS
-            readTimeout = PROVIDER_READ_TIMEOUT_MS
-            instanceFollowRedirects = true
-            requestMethod = "GET"
-            setRequestProperty("Accept", "application/octet-stream")
-            setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Bridge")
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                throw SpotiFlacException(
-                    "Could not download the ${provider.displayName} SpotiFLAC provider (HTTP $code).",
-                    "provider_download",
-                )
+        SpotiFlacProviderInstaller.install(provider, extensionsDir) { requested, partial ->
+            val connection = (URL(requested.url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = PROVIDER_CONNECT_TIMEOUT_MS
+                readTimeout = PROVIDER_READ_TIMEOUT_MS
+                instanceFollowRedirects = true
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/octet-stream")
+                setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Bridge")
             }
-            connection.inputStream.use { input -> partial.outputStream().buffered().use(input::copyTo) }
-        } finally {
-            connection.disconnect()
-        }
-
-        val actualHash = sha256(partial)
-        if (!actualHash.equals(provider.sha256, ignoreCase = true)) {
-            partial.delete()
-            throw SpotiFlacException(
-                "The ${provider.displayName} provider failed its SHA-256 integrity check.",
-                "provider_integrity",
-                technicalDetails = "expected=${provider.sha256}; actual=$actualHash; version=${provider.version}",
-            )
-        }
-
-        if (destination.exists()) {
-            val archiveDir = File(extensionsDir, "archive").apply { mkdirs() }
-            val backup = File(archiveDir, "${provider.id}-${System.currentTimeMillis()}.sflx.bak")
-            if (!destination.renameTo(backup)) {
-                destination.copyTo(backup, overwrite = true)
-                destination.delete()
+            try {
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    throw SpotiFlacException(
+                        "Could not download the ${requested.displayName} SpotiFLAC provider (HTTP $code).",
+                        "provider_download",
+                    )
+                }
+                connection.inputStream.use { input -> partial.outputStream().buffered().use(input::copyTo) }
+            } finally {
+                connection.disconnect()
             }
-        }
-        if (!partial.renameTo(destination)) {
-            partial.copyTo(destination, overwrite = true)
-            partial.delete()
         }
     }
 
@@ -3396,33 +3327,6 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
     }
 
-    private data class ProviderPackage(
-        val id: String,
-        val displayName: String,
-        val version: String,
-        val url: String,
-        val sha256: String,
-    )
-
-    private data class RegistrySnapshot(
-        val packages: List<ProviderPackage>,
-        val updatedAt: String,
-        val source: String,
-    ) {
-        val fingerprint: String
-            get() = sha256Static(packages.joinToString("|") { "${it.id}:${it.version}:${it.sha256}" }).take(16)
-        val summary: String
-            get() = "$source; updated=$updatedAt; fingerprint=$fingerprint; " +
-                packages.joinToString { "${it.id}@${it.version}" }
-
-        companion object {
-            private fun sha256Static(value: String): String {
-                val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8))
-                return bytes.joinToString("") { "%02x".format(Locale.US, it.toInt() and 0xff) }
-            }
-        }
-    }
-
     companion object {
         private const val HARMONY_VALIDATED_FILE_PATH = "_harmony_validated_file_path"
         private val SPOTIFY_TRACK_ID = Regex("[A-Za-z0-9]{10,64}")
@@ -3457,9 +3361,6 @@ class SpotiFlacDownloadEngine @Inject constructor(
         private const val DEFAULT_GATEWAY_COOLDOWN_SECONDS = 60L
         private const val MIN_GATEWAY_COOLDOWN_SECONDS = 5L
         private const val MAX_GATEWAY_COOLDOWN_SECONDS = 600L
-        private const val OFFICIAL_REGISTRY_URL =
-            "https://raw.githubusercontent.com/spotiflacapp/SpotiFLAC-Extension/main/registry.json"
-
         private const val PROVIDER_STATE_PREFS = "spotiflac_provider_state"
         private const val KEY_LAST_SUCCESSFUL_PROVIDER = "last_successful_lossless_provider"
         private const val KEY_PENDING_VERIFICATION_TRACK = "pending_verification_track"
@@ -3469,7 +3370,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // Matches SpotiFLAC's pendingAuthRequestTTL. A callback that arrives
         // later must start a fresh challenge instead of reusing stale state.
         private const val PENDING_CALLBACK_STATE_TTL_MS = 5L * 60L * 1_000L
-        private val PROVIDER_PRIORITY = listOf("tidal-web", "qobuz-web", "deezer", "amazon")
+        private val PROVIDER_PRIORITY = SpotiFlacProviderRegistry.priority
         private val LOSSLESS_SOURCE_CODECS = setOf("flac", "alac")
         private val GENERIC_CONTAINER_CODEC_LABELS = setOf("m4a", "mp4", "mp4/m4a", "lossless", "unknown")
         private val KNOWN_AUDIO_EXTENSIONS = setOf(
@@ -3477,38 +3378,5 @@ class SpotiFlacDownloadEngine @Inject constructor(
             "aac", "webm", "mka", "ac4",
         )
 
-        // Safe offline fallback only. At runtime Harmony prefers the current
-        // official SpotiFLAC extension registry and verifies every downloaded
-        // provider package against the registry SHA-256 before loading it.
-        private val FALLBACK_PROVIDER_PACKAGES = listOf(
-            ProviderPackage(
-                id = "deezer",
-                displayName = "Deezer",
-                version = "1.2.0",
-                url = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/deezer.sflx",
-                sha256 = "dfead5b50889d2855b4409c6796421ccb35ffd3cac1e002498924e9a7c5446b3",
-            ),
-            ProviderPackage(
-                id = "qobuz-web",
-                displayName = "Qobuz",
-                version = "1.1.0",
-                url = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/qobuz-web.sflx",
-                sha256 = "9e6d14dc37623eed9ac6326c321b17fd802c36e907476f3068f7fcbe14d79f93",
-            ),
-            ProviderPackage(
-                id = "tidal-web",
-                displayName = "Tidal",
-                version = "1.1.7",
-                url = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/tidal-web.sflx",
-                sha256 = "0d59043bab8229b5fd5664bc144aee25bfd3e6d031832cdce48b9d9ccef5ed22",
-            ),
-            ProviderPackage(
-                id = "amazon",
-                displayName = "Amazon Music",
-                version = "2.2.1",
-                url = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/amzn.sflx",
-                sha256 = "4f844e9fa5b168463fb45c4f9ae6a3f278a59b0adb0070528f5d9194cf3f75f3",
-            ),
-        )
     }
 }
