@@ -528,9 +528,11 @@ private fun SpotiFlacDownloadsLayout(
             Text(
                 when {
                     state.isCheckingSpotiFlacVerification -> "Checking $providerName verification…"
+                    // A download can stop on another provider's challenge while
+                    // the primary one is ready; that challenge wins.
+                    verificationPending -> "Verification pending for downloads"
                     state.spotiFlacPreflightReady && challenge?.authenticated == true -> "Verification complete"
                     state.spotiFlacPreflightReady -> "Provider ready"
-                    verificationPending -> "Verification pending for downloads"
                     else -> "Verify SpotiFLAC before metadata"
                 },
                 fontSize = 16.sp,
@@ -541,14 +543,14 @@ private fun SpotiFlacDownloadsLayout(
                 when {
                     state.isCheckingSpotiFlacVerification ->
                         "Harmony is checking whether the primary lossless provider is ready for downloading. Metadata search remains available."
-                    state.spotiFlacPreflightReady && challenge?.authenticated == true ->
-                        "$providerName reports an authenticated session. Downloads are ready."
-                    state.spotiFlacPreflightReady ->
-                        "$providerName does not currently require an interactive challenge. Downloads are ready."
                     verificationPending && verificationUrl != null ->
                         "The official $providerName verification is still needed before downloading. You can search and select a track now."
                     verificationPending ->
                         "$providerName requires verification before downloading. Refresh the challenge to obtain the current verification page; metadata search remains available."
+                    state.spotiFlacPreflightReady && challenge?.authenticated == true ->
+                        "$providerName reports an authenticated session. Downloads are ready."
+                    state.spotiFlacPreflightReady ->
+                        "$providerName does not currently require an interactive challenge. Downloads are ready."
                     else ->
                         "Harmony is checking provider readiness for downloads. Use Check verification if the automatic check did not start."
                 },
@@ -569,7 +571,7 @@ private fun SpotiFlacDownloadsLayout(
                     )
                 }
             state.error
-                ?.takeIf { !state.spotiFlacPreflightReady }
+                ?.takeIf { !state.spotiFlacPreflightReady || verificationPending }
                 ?.let { error ->
                     Text(
                         error,
@@ -585,7 +587,7 @@ private fun SpotiFlacDownloadsLayout(
                         .fillMaxWidth()
                         .padding(top = 12.dp),
                 )
-            } else if (!state.spotiFlacPreflightReady) {
+            } else if (!state.spotiFlacPreflightReady || verificationPending) {
                 Row(
                     Modifier
                         .fillMaxWidth()
