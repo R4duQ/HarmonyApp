@@ -41,6 +41,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -102,7 +103,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.harmony.core.ui.component.neonGlow
 import com.harmony.core.ui.theme.CyberGlassColors
-import com.harmony.core.ui.theme.cyberGlassActive
+import com.harmony.core.ui.theme.CyberGlassScheme
 import com.harmony.domain.playback.AudioLevels
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.Song
@@ -153,8 +154,8 @@ internal object MiniPlayerTags {
 }
 
 /**
- * The card's colours. In light theme a dark card stands out on the light
- * page; in dark theme the card is Cyber-Glass smoked glass ([CyberCard]).
+ * The card's colours: Cyber-Glass in both themes, smoked obsidian glass in
+ * dark and pearl glass in light, taken from the theme's [CyberGlassScheme].
  */
 private class MiniColors(
     val card: Color,
@@ -167,54 +168,20 @@ private class MiniColors(
     val deviceDot: Color,
     val deviceDotInk: Color,
     val track: Color,
-    /** Cyber-Glass: iridescent rims, neon glows, the cyan device pill, the live waveform. */
-    val cyber: Boolean = false,
 )
 
-private val DarkCard = MiniColors(
-    card = Color(0xFF1A1F27),
-    ink = Color.White,
-    muted = Color.White.copy(alpha = 0.42f),
-    button = Color(0xFF243238),
-    buttonInk = Color(0xFFD9E3E8),
-    chip = Color(0xFF282E37),
-    chipInk = Color.White.copy(alpha = 0.92f),
-    deviceDot = Color.White,
-    deviceDotInk = Color(0xFF1A1F27),
-    track = Color.White.copy(alpha = 0.10f),
+private fun miniColors(c: CyberGlassScheme) = MiniColors(
+    card = c.Card.copy(alpha = c.CARD_ALPHA),
+    ink = c.TextPrimary,
+    muted = c.TextSecondary,
+    button = c.Recessed,
+    buttonInk = c.TextPlaceholder,
+    chip = c.Recessed,
+    chipInk = c.TextSilver,
+    deviceDot = c.Cyan.copy(alpha = 0.16f),
+    deviceDotInk = c.Cyan,
+    track = c.Sky.copy(alpha = 0.12f),
 )
-
-/** Dark theme: Cyber-Glass, a smoked-glass HUD card. */
-private val CyberCard = MiniColors(
-    card = CyberGlassColors.Card.copy(alpha = CyberGlassColors.CARD_ALPHA),
-    ink = CyberGlassColors.TextPrimary,
-    muted = CyberGlassColors.TextSecondary,
-    button = CyberGlassColors.Recessed,
-    buttonInk = CyberGlassColors.TextPlaceholder,
-    chip = CyberGlassColors.Recessed,
-    chipInk = CyberGlassColors.TextSilver,
-    deviceDot = CyberGlassColors.Cyan.copy(alpha = 0.16f),
-    deviceDotInk = CyberGlassColors.Cyan,
-    track = CyberGlassColors.Sky.copy(alpha = 0.12f),
-    cyber = true,
-)
-
-private object MiniAccent {
-    val Purple = Color(0xFF7C4DFF)
-    val PurpleDeep = Color(0xFF5A2BD8)
-    val Orange = Color(0xFFF2A65A)
-
-    /** The progress wave, from where the song starts to where it is. */
-    val Wave = listOf(
-        Color(0xFF8F5CFF), Color(0xFFE48AB3), Color(0xFFF3A45E), Color(0xFFE9C85A),
-        Color(0xFF63C99B), Color(0xFF39B9D3), Color(0xFF6C63FF),
-    )
-
-    /** The rim around the card and the record. */
-    val Rim = listOf(
-        Color(0xFF8F5CFF), Color(0xFF39B9D3), Color(0xFFF3A45E), Color(0xFFE48AB3), Color(0xFF8F5CFF),
-    )
-}
 
 /**
  * The mini player: the record, half out of the card, turning while the music
@@ -227,7 +194,8 @@ private object MiniAccent {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modifier = Modifier) {
-    val colors = if (cyberGlassActive()) CyberCard else DarkCard
+    val glass = CyberGlassColors
+    val colors = remember(glass) { miniColors(glass) }
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val onExpand by rememberUpdatedState(actions.onExpand)
@@ -277,15 +245,12 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                     .shadow(
                         18.dp,
                         shape,
-                        ambientColor = if (colors.cyber) CyberGlassColors.Violet else MiniAccent.Purple,
-                        spotColor = if (colors.cyber) CyberGlassColors.Cyan else MiniAccent.Purple,
+                        ambientColor = glass.Violet,
+                        spotColor = glass.Cyan,
                     )
                     .clip(shape)
                     .background(colors.card)
-                    .then(
-                        if (colors.cyber) Modifier.border(1.dp, CyberGlassColors.Iridescent, shape)
-                        else Modifier.border(1.5.dp, Brush.linearGradient(MiniAccent.Rim.map { it.copy(alpha = 0.7f) }), shape),
-                    )
+                    .border(1.dp, glass.Iridescent, shape)
                     .testTag(MiniPlayerTags.CARD)
                     .semantics { contentDescription = "Now playing: ${ui.song.title} by ${ui.song.artist}. Open the player." }
                     .clickable(onClick = { expand(-tapLiftPx) })
@@ -383,14 +348,14 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                         )
                     }
                     val telemetry = ui.telemetry
-                    if (colors.cyber && telemetry != null) {
+                    if (telemetry != null) {
                         Text(
                             telemetry,
                             fontSize = 10.5.sp,
                             lineHeight = 13.sp,
                             letterSpacing = 0.9.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = CyberGlassColors.Cyan.copy(alpha = 0.78f),
+                            color = glass.LiveInk,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 1.dp),
@@ -401,14 +366,13 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                         durationMs = ui.durationMs,
                         playing = ui.isPlaying,
                         track = colors.track,
-                        cyber = colors.cyber,
                         onSeek = actions.onSeek,
                         modifier = Modifier.padding(top = 6.dp).fillMaxWidth().height(22.dp).testTag(MiniPlayerTags.PROGRESS),
                     )
                     BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        // Cyber-Glass puts a live mini-waveform at the start of the row,
-                        // when the card is wide enough for it beside all five controls.
-                        val withSpectrum = colors.cyber && maxWidth >= SPECTRUM_ROW_MIN
+                        // A live mini-waveform at the start of the row, when the card
+                        // is wide enough for it beside all five controls.
+                        val withSpectrum = maxWidth >= SPECTRUM_ROW_MIN
                         val button = if (withSpectrum) 34.dp else 38.dp
                         val play = if (withSpectrum) 46.dp else 50.dp
                         Row(
@@ -422,7 +386,7 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                                 MiniPlayerTags.SHUFFLE, active = ui.shuffleOn, size = button,
                             )
                             RoundButton(Icons.Rounded.SkipPrevious, "Previous", colors, actions.onPrevious, MiniPlayerTags.PREVIOUS, size = button)
-                            PlayButton(ui.isPlaying, actions.onPlayPause, cyber = colors.cyber, size = play)
+                            PlayButton(ui.isPlaying, actions.onPlayPause, size = play)
                             RoundButton(Icons.Rounded.SkipNext, "Next", colors, actions.onNext, MiniPlayerTags.NEXT, size = button)
                             RoundButton(
                                 if (ui.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
@@ -446,7 +410,6 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
             nudge = dragX.value,
             rise = { (-lift.value / liftFullPx).coerceIn(0f, 1.4f) },
             entrance = { entrance.value },
-            cyber = colors.cyber,
             onClick = { expand(-tapLiftPx) },
             modifier = Modifier.align(Alignment.CenterStart).size(disc),
         )
@@ -468,7 +431,7 @@ private val TAP_LIFT = 36.dp
 // ---------------------------------------------------------------------------
 
 /**
- * The cover as a record: round, with a rainbow rim, turning about once every
+ * The cover as a record: round, with an iridescent rim, turning about once every
  * nine seconds while the music plays. On pause it coasts to a stop and sinks
  * back a little; a skip gives it a quick extra turn; a swipe turns it with
  * the finger.
@@ -483,11 +446,10 @@ private fun Disc(
     rise: () -> Float,
     /** 0 -> 1 (overshooting) as the card arrives: the record spins and grows into place. */
     entrance: () -> Float,
-    /** Cyber-Glass: a 2dp neon violet-cyan ring with a cyan glow. */
-    cyber: Boolean,
     onClick: () -> Unit,
     modifier: Modifier,
 ) {
+    val glass = CyberGlassColors
     val turn = remember { Animatable(0f) }
     var firstSong by remember { mutableStateOf(true) }
     LaunchedEffect(playing) {
@@ -520,15 +482,12 @@ private fun Disc(
                 rotationZ = turn.value + nudge * 0.4f - (1f - e) * 160f
                 alpha = e.coerceIn(0f, 1f)
             }
-            .shadow(
-                if (cyber) 16.dp else 14.dp,
-                CircleShape,
-                ambientColor = if (cyber) CyberGlassColors.Violet else MiniAccent.Purple,
-                spotColor = if (cyber) CyberGlassColors.Cyan else MiniAccent.Purple,
-            )
+            .shadow(16.dp, CircleShape, ambientColor = glass.Violet, spotColor = glass.Cyan)
             .clip(CircleShape)
+            // The record stays a dark object in either theme.
             .background(Color(0xFF0D0D10))
-            .border(2.dp, if (cyber) CyberGlassColors.IridescentSweep else Brush.sweepGradient(MiniAccent.Rim), CircleShape)
+            // A 2dp neon violet-cyan ring.
+            .border(2.dp, glass.IridescentSweep, CircleShape)
             .testTag(MiniPlayerTags.DISC)
             .clickable(role = Role.Button, onClickLabel = "Open the player", onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -538,7 +497,17 @@ private fun Disc(
             transitionSpec = { (fadeIn(tween(400)) + scaleIn(initialScale = 0.92f)).togetherWith(fadeOut(tween(250))) },
             label = "disc-art",
         ) { uri ->
-            Artwork(uri, null, Modifier.fillMaxSize().padding(3.dp).clip(CircleShape), cornerRadius = 999.dp)
+            Artwork(
+                uri, null, Modifier.fillMaxSize().padding(3.dp).clip(CircleShape), cornerRadius = 999.dp,
+                // The record stays dark in either theme: without a cover, a dark label, not the light theme's pale one.
+                fallback = if (glass.isDark) null else {
+                    {
+                        Box(Modifier.fillMaxSize().background(DiscLabel), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = DiscLabelInk)
+                        }
+                    }
+                },
+            )
         }
         // Grooves catching the light, and the spindle.
         Canvas(Modifier.fillMaxSize()) {
@@ -557,6 +526,10 @@ private fun Disc(
 
 private const val ROTATION_MS = 9_000
 
+/** A coverless record's label: the dark theme's own artwork well, so the record looks the same in light. */
+private val DiscLabel = Color(0xFF211F26)
+private val DiscLabelInk = Color(0xFFCAC4D0)
+
 // ---------------------------------------------------------------------------
 // Device, controls, up next
 // ---------------------------------------------------------------------------
@@ -566,8 +539,8 @@ private fun DeviceChip(label: String, icon: ImageVector, colors: MiniColors) {
     Row(
         Modifier
             .clip(RoundedCornerShape(50))
-            // Cyber-Glass: a dark cyan-tinted capsule with cyan ink.
-            .background(if (colors.cyber) CyberGlassColors.DevicePill else colors.chip)
+            // A cyan-tinted capsule with cyan ink.
+            .background(CyberGlassColors.DevicePill)
             .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -580,12 +553,12 @@ private fun DeviceChip(label: String, icon: ImageVector, colors: MiniColors) {
             label = "mini-device",
         ) { text ->
             Text(
-                if (colors.cyber) text.uppercase() else text,
-                fontSize = if (colors.cyber) 11.5.sp else 13.sp,
+                text.uppercase(),
+                fontSize = 11.5.sp,
                 lineHeight = 16.sp,
-                letterSpacing = if (colors.cyber) 0.6.sp else 0.sp,
+                letterSpacing = 0.6.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (colors.cyber) CyberGlassColors.Cyan else colors.chipInk,
+                color = colors.deviceDotInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 8.dp),
@@ -604,25 +577,16 @@ private fun RoundButton(
     active: Boolean = false,
     size: Dp = 38.dp,
 ) {
-    val tint = when {
-        colors.cyber && active -> CyberGlassColors.Cyan
-        active -> Color(0xFFB79CFF)
-        else -> colors.buttonInk
-    }
+    val glass = CyberGlassColors
+    val tint = if (active) glass.Cyan else colors.buttonInk
     Box(
         Modifier
             .size(size)
-            // Cyber-Glass: a glowing cyan ring on what is switched on, a faint sky rim on the rest.
-            .then(if (colors.cyber && active) Modifier.neonGlow(CyberGlassColors.Cyan, 5.dp, 0.30f) else Modifier)
+            // A glowing cyan ring on what is switched on, a faint sky rim on the rest.
+            .then(if (active) Modifier.neonGlow(glass.Cyan, 5.dp, 0.30f * glass.Glow) else Modifier)
             .clip(CircleShape)
             .background(colors.button)
-            .then(
-                when {
-                    colors.cyber -> Modifier.border(1.dp, if (active) tint.copy(alpha = 0.7f) else CyberGlassColors.Sky.copy(alpha = 0.18f), CircleShape)
-                    active -> Modifier.border(1.5.dp, tint.copy(alpha = 0.55f), CircleShape)
-                    else -> Modifier
-                },
-            )
+            .border(1.dp, if (active) tint.copy(alpha = 0.7f) else glass.Sky.copy(alpha = 0.18f), CircleShape)
             .testTag(tag)
             .clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -631,9 +595,10 @@ private fun RoundButton(
     }
 }
 
-/** The big purple button, with a soft halo breathing around it while the music plays. */
+/** The big violet button, with a soft halo breathing around it while the music plays. */
 @Composable
-private fun PlayButton(playing: Boolean, onClick: () -> Unit, cyber: Boolean = false, size: Dp = 50.dp) {
+private fun PlayButton(playing: Boolean, onClick: () -> Unit, size: Dp = 50.dp) {
+    val glass = CyberGlassColors
     val halo = remember { Animatable(0f) }
     LaunchedEffect(playing) {
         if (playing) {
@@ -645,7 +610,7 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit, cyber: Boolean = f
             halo.animateTo(0f, tween(300))
         }
     }
-    val haloColor = if (cyber) CyberGlassColors.Purple else MiniAccent.Purple
+    val haloColor = glass.Purple
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size)) {
         Canvas(Modifier.fillMaxSize()) {
             val t = halo.value
@@ -659,10 +624,10 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit, cyber: Boolean = f
         Box(
             Modifier
                 .size(size - 6.dp)
-                .then(if (cyber) Modifier.neonGlow(CyberGlassColors.Violet, 6.dp, 0.30f) else Modifier)
+                .neonGlow(glass.Violet, 6.dp, 0.30f * glass.Glow)
                 .clip(CircleShape)
-                .background(if (cyber) CyberGlassColors.PlayButton else Brush.linearGradient(listOf(MiniAccent.Purple, MiniAccent.PurpleDeep)))
-                .then(if (cyber) Modifier.border(1.dp, CyberGlassColors.Cyan.copy(alpha = 0.45f), CircleShape) else Modifier)
+                .background(glass.PlayButton)
+                .border(1.dp, glass.Cyan.copy(alpha = 0.45f), CircleShape)
                 .testTag(MiniPlayerTags.PLAY)
                 .clickable(role = Role.Button, onClickLabel = if (playing) "Pause" else "Play", onClick = onClick),
             contentAlignment = Alignment.Center,
@@ -688,13 +653,14 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit, cyber: Boolean = f
 
 @Composable
 private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNext: (Int) -> Unit) {
+    val divider = CyberGlassColors.Divider
     Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            if (colors.cyber) "UP NEXT" else "Up Next",
-            fontSize = if (colors.cyber) 11.sp else 13.sp,
+            "UP NEXT",
+            fontSize = 11.sp,
             lineHeight = 16.sp,
-            letterSpacing = if (colors.cyber) 0.8.sp else 0.sp,
-            fontWeight = if (colors.cyber) FontWeight.SemiBold else FontWeight.Normal,
+            letterSpacing = 0.8.sp,
+            fontWeight = FontWeight.SemiBold,
             color = colors.muted,
             modifier = Modifier.padding(end = 10.dp),
         )
@@ -726,8 +692,8 @@ private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNex
                         Modifier
                             .clip(RoundedCornerShape(50))
                             .background(colors.chip)
-                            // Cyber-Glass: recessed, a hairline of light round the inside edge.
-                            .then(if (colors.cyber) Modifier.border(1.dp, CyberGlassColors.Divider, RoundedCornerShape(50)) else Modifier)
+                            // Recessed, a hairline round the inside edge.
+                            .border(1.dp, divider, RoundedCornerShape(50))
                             .testTag(MiniPlayerTags.upNext(index))
                             .semantics { contentDescription = "${song.title} by ${song.artist}" }
                             .clickable(role = Role.Button, onClickLabel = "Play now") { onUpNext(index) }
@@ -768,11 +734,11 @@ private fun WaveProgress(
     durationMs: Long,
     playing: Boolean,
     track: Color,
-    /** Cyber-Glass: violet into cyan into mint, ending in a glowing laser spark. */
-    cyber: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier,
 ) {
+    // Violet into cyan into mint, ending in a glowing laser spark.
+    val glass = CyberGlassColors
     val seek by rememberUpdatedState(onSeek)
     // Where the song is now: the last reported position, carried on with the clock while playing.
     var shown by remember { mutableFloatStateOf(0f) }
@@ -854,47 +820,38 @@ private fun WaveProgress(
             }
             drawPath(
                 wave,
-                // The whole rainbow over what has been played, ending in blue at the thumb.
+                // Violet into cyan into mint over what has been played.
                 Brush.horizontalGradient(
-                    if (cyber) CyberGlassColors.ProgressColors else MiniAccent.Wave,
+                    glass.ProgressColors,
                     startX = left,
                     endX = maxOf(x, left + wavelength),
                 ),
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
         }
-        if (cyber) {
-            // The laser spark: a wide cyan bloom, a short streak along the line, a white-hot core.
-            drawCircle(
-                Brush.radialGradient(
-                    listOf(CyberGlassColors.Cyan.copy(alpha = 0.55f), CyberGlassColors.Cyan.copy(alpha = 0.12f), Color.Transparent),
-                    center = Offset(x, mid),
-                    radius = thumbR * 2.2f,
-                ),
+        // The laser spark: a wide cyan bloom, a short streak along the line, a white-hot core.
+        drawCircle(
+            Brush.radialGradient(
+                listOf(glass.Cyan.copy(alpha = 0.55f * glass.Glow), glass.Cyan.copy(alpha = 0.12f * glass.Glow), Color.Transparent),
+                center = Offset(x, mid),
                 radius = thumbR * 2.2f,
-                center = Offset(x, mid),
-            )
-            drawLine(
-                Brush.horizontalGradient(
-                    listOf(Color.Transparent, CyberGlassColors.Mint.copy(alpha = 0.9f), Color.Transparent),
-                    startX = x - thumbR * 2.4f,
-                    endX = x + thumbR * 2.4f,
-                ),
-                Offset(x - thumbR * 2.4f, mid),
-                Offset(x + thumbR * 2.4f, mid),
-                strokeWidth = 1.5.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-            drawCircle(CyberGlassColors.Cyan, radius = thumbR * 0.62f, center = Offset(x, mid))
-            drawCircle(Color.White, radius = thumbR * 0.34f, center = Offset(x, mid))
-        } else {
-            drawCircle(MiniAccent.Orange.copy(alpha = 0.25f), radius = thumbR * 1.5f, center = Offset(x, mid))
-            drawCircle(
-                Brush.linearGradient(listOf(MiniAccent.Purple, MiniAccent.Orange), start = Offset(x - thumbR, mid - thumbR), end = Offset(x + thumbR, mid + thumbR)),
-                radius = thumbR,
-                center = Offset(x, mid),
-            )
-        }
+            ),
+            radius = thumbR * 2.2f,
+            center = Offset(x, mid),
+        )
+        drawLine(
+            Brush.horizontalGradient(
+                listOf(Color.Transparent, glass.Mint.copy(alpha = 0.9f), Color.Transparent),
+                startX = x - thumbR * 2.4f,
+                endX = x + thumbR * 2.4f,
+            ),
+            Offset(x - thumbR * 2.4f, mid),
+            Offset(x + thumbR * 2.4f, mid),
+            strokeWidth = 1.5.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+        drawCircle(glass.Cyan, radius = thumbR * 0.62f, center = Offset(x, mid))
+        drawCircle(Color.White, radius = thumbR * 0.34f, center = Offset(x, mid))
     }
 }
 
@@ -916,6 +873,7 @@ private fun MiniSpectrum(playing: Boolean, modifier: Modifier) {
     val spectrum = remember { FloatArray(AudioLevels.SPECTRUM_BARS) }
     // Read only by the drawing: a new frame redraws without recomposing.
     var frame by remember { mutableIntStateOf(0) }
+    val glass = CyberGlassColors
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, playing) {
         val choreographer = android.view.Choreographer.getInstance()
@@ -977,7 +935,7 @@ private fun MiniSpectrum(playing: Boolean, modifier: Modifier) {
         if (frame < 0) return@Canvas // reading the frame redraws the bars each tick
         val slot = size.width / SPECTRUM_BARS
         val barWidth = slot * 0.52f
-        val brush = Brush.verticalGradient(listOf(CyberGlassColors.Cyan, CyberGlassColors.Violet, CyberGlassColors.Purple))
+        val brush = Brush.verticalGradient(listOf(glass.Cyan, glass.Violet, glass.Purple))
         for (i in 0 until SPECTRUM_BARS) {
             val h = (size.height * levels[i]).coerceAtLeast(barWidth)
             val x = i * slot + (slot - barWidth) / 2f
@@ -987,7 +945,7 @@ private fun MiniSpectrum(playing: Boolean, modifier: Modifier) {
                 topLeft = Offset(x - barWidth * 0.5f, top - barWidth * 0.4f),
                 size = Size(barWidth * 2f, h + barWidth * 0.8f),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth),
-                alpha = 0.16f,
+                alpha = 0.16f * glass.Glow,
             )
             drawRoundRect(
                 brush,

@@ -10,4 +10,7 @@
          rendering of this app. Same values as EditorialLook.kt's amber. -->
     <color name="harmony_amber">#F3A311</color>
     <color name="harmony_ink">#1A1403</color>
+    <!-- The window before the first frame: Home's field (EditorialLook.kt,
+         HarmonyLightField / HarmonyDarkField). values-night/ has the dark one. -->
+    <color name="harmony_window">#F4FDFF</color>
 </resources>

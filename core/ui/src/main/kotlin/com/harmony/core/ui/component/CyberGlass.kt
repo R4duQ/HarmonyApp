@@ -20,19 +20,20 @@ import com.harmony.core.ui.theme.CyberGlassColors
 
 /**
  * Artwork for a song without a cover, in Cyber-Glass: a glowing neon audio
- * waveform, cyan into violet, on a dark glass square.
+ * waveform, cyan into violet, on a glass square (dark or pearl, with the theme).
  *
  * Seven bars in a fixed, symmetric silhouette (a waveform, not a meter), so
  * every coverless song wears the same mark and it reads as an icon.
  */
 @Composable
 fun NeonWaveformArt(modifier: Modifier = Modifier, cornerRadius: Dp = 10.dp) {
+    val glass = CyberGlassColors
     Box(
         modifier
             .clip(RoundedCornerShape(cornerRadius))
             .background(
                 Brush.linearGradient(
-                    listOf(CyberGlassColors.ArtWell, CyberGlassColors.Obsidian),
+                    listOf(glass.ArtWell, glass.Obsidian),
                 ),
             ),
     ) {
@@ -46,7 +47,7 @@ fun NeonWaveformArt(modifier: Modifier = Modifier, cornerRadius: Dp = 10.dp) {
             val maxHeight = size.height * 0.58f
             val mid = size.height / 2f
             val brush = Brush.verticalGradient(
-                listOf(CyberGlassColors.Cyan, CyberGlassColors.Violet, CyberGlassColors.Purple),
+                listOf(glass.Cyan, glass.Violet, glass.Purple),
                 startY = mid - maxHeight / 2f,
                 endY = mid + maxHeight / 2f,
             )
@@ -59,7 +60,7 @@ fun NeonWaveformArt(modifier: Modifier = Modifier, cornerRadius: Dp = 10.dp) {
                     topLeft = Offset(x - barWidth * 0.6f, mid - h / 2f - barWidth * 0.6f),
                     size = Size(barWidth * 2.2f, h + barWidth * 1.2f),
                     cornerRadius = CornerRadius(barWidth * 1.1f),
-                    alpha = 0.18f,
+                    alpha = 0.18f * glass.Glow,
                 )
                 drawRoundRect(
                     brush = brush,

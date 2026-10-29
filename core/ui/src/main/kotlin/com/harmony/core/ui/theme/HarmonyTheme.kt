@@ -9,6 +9,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -19,6 +20,9 @@ import androidx.compose.ui.platform.LocalContext
  *  - AMOLED mode = dark scheme with true-black surfaces. Applied as a
  *    transform over whichever dark scheme is active (dynamic or static) so
  *    AMOLED and dynamic colors compose instead of fighting.
+ *
+ * It also provides the Cyber-Glass of the theme ([LocalCyberGlass]): the
+ * library and the floating chrome wear it in light as in dark.
  */
 @Composable
 fun HarmonyTheme(
@@ -43,5 +47,7 @@ fun HarmonyTheme(
             surfaceContainer = Color(0xFF111111),
         )
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    CompositionLocalProvider(LocalCyberGlass provides if (darkTheme) DarkCyberGlass else LightCyberGlass) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }

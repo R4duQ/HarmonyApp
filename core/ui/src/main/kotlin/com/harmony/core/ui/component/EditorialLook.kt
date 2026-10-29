@@ -61,7 +61,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.harmony.core.ui.theme.CyberGlassColors
 import com.harmony.core.ui.theme.CyberGlassPalette
-import com.harmony.core.ui.theme.cyberGlassActive
 import com.harmony.core.ui.theme.isCyberGlass
 
 /**
@@ -386,12 +385,11 @@ fun amberPalette(): EditorialPalette =
     if (MaterialTheme.colorScheme.background.luminance() < 0.5f) AmberDark else AmberLight
 
 /**
- * The library's palette: Cyber-Glass obsidian and cyan in dark theme
- * ([CyberGlassPalette]), the amber editorial look in light theme.
+ * The library's palette: Cyber-Glass ([CyberGlassPalette]), obsidian and
+ * cyan in dark theme, pearl and deep cyan in light.
  */
 @Composable
-fun libraryPalette(): EditorialPalette =
-    if (cyberGlassActive()) CyberGlassPalette else amberPalette()
+fun libraryPalette(): EditorialPalette = CyberGlassPalette
 
 @Composable
 fun greenPalette(): EditorialPalette =

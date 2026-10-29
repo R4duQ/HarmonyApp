@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.harmony.android.application)
     alias(libs.plugins.harmony.hilt)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -11,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.harmony.app"
-        versionCode = 146
+        versionCode = 147
         versionName = "1.0"
 
         // Optional single-ABI build: -PharmonyAbi=arm64-v8a
@@ -27,6 +28,18 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    // Robolectric renders the screenshot tests with the app's real resources.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // A failing screenshot says why in the build log, not only in the report.
+            test.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            }
+        }
     }
 
     // The download runtime (see feature/downloads): stable is SpotiFLAC 4.9.6's
@@ -191,4 +204,13 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
+
+    // ThemeShowcaseScreenshotTest: the screens in light and dark, rendered on the JVM.
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(composeBom)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

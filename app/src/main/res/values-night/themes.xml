@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dark theme's window: see values/themes.xml. Identical but for the
+     window's field and the status bar icons. -->
+<resources>
+    <style name="Theme.Harmony" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/harmony_amber</item>
+        <item name="android:colorPrimaryDark">@color/harmony_ink</item>
+        <item name="android:colorAccent">@color/harmony_amber</item>
+        <item name="android:colorBackground">@color/harmony_ink</item>
+        <!-- What shows before the first frame: Home's dark field. -->
+        <item name="android:windowBackground">@color/harmony_window</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Compose owns the window; edge-to-edge is handled in MainActivity. -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
