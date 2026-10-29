@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.harmony.android.application)
     alias(libs.plugins.harmony.hilt)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -27,6 +28,11 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    // Robolectric renders the screenshot tests with the app's real resources.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     // The download runtime (see feature/downloads): stable is SpotiFLAC 4.9.6's
@@ -191,4 +197,13 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
+
+    // ThemeShowcaseScreenshotTest: the screens in light and dark, rendered on the JVM.
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(composeBom)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }
