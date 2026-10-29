@@ -1,0 +1,196 @@
+%-------------------------------------------------------------
+%  CV Radu-Lucian Moldovan -- English ATS version
+%  Compile in Overleaf with pdfLaTeX (default setting)
+%
+%  >>> CHOOSE THE TARGET HERE (change only the word in braces):
+%      android   -> Junior Android / Mobile Developer
+%      embedded  -> Junior Embedded / Automation Engineer
+%      software  -> Junior Software Developer (general)
+%-------------------------------------------------------------
+\providecommand{\TINTA}{software}
+
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[scaled]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{combelow}
+\usepackage{newunicodechar}
+\newunicodechar{ș}{\cb{s}}
+\newunicodechar{Ș}{\cb{S}}
+\newunicodechar{ț}{\cb{t}}
+\newunicodechar{Ț}{\cb{T}}
+
+\usepackage[margin=1.4cm,top=1.0cm,bottom=1.0cm]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage{etoolbox}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{HTML}{1F4E79}
+\definecolor{muted}{HTML}{555555}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+\titleformat{\section}{\large\bfseries\color{accent}}{}{0pt}{\MakeUppercase}[\vspace{-6pt}{\color{accent}\rule{\linewidth}{0.6pt}}]
+\titlespacing*{\section}{0pt}{7pt}{4pt}
+
+\setlist[itemize]{leftmargin=1.2em,itemsep=1pt,topsep=2pt,parsep=0pt,label=\textbullet}
+
+% \entry{Titlu}{Perioadă}{Organizație}{Locație}
+\newcommand{\entry}[4]{%
+  \textbf{#1} \hfill {\color{muted}#2}\\
+  \textit{#3} \hfill {\color{muted}\small #4}\par\vspace{2pt}}
+
+% \project{Nume}{Tehnologii}{Link}
+\newcommand{\project}[3]{%
+  \textbf{#1} \hfill {\small\href{https://#3}{#3}}\\
+  {\small\color{muted}\textit{#2}}\par\vspace{1pt}}
+
+% \doar{android,software}{text} -> apare doar pentru țintele din listă
+\newtoggle{potrivit}
+\newcommand{\verificatinta}[1]{\ifdefstring{\TINTA}{#1}{\toggletrue{potrivit}}{}}
+\newcommand{\doar}[2]{\togglefalse{potrivit}\forcsvlist{\verificatinta}{#1}\iftoggle{potrivit}{#2}{}}
+
+%================ CONTENT BLOCKS =================
+
+\newcommand{\proiectHarmony}{%
+\project{Harmony -- Android Music Player}%
+  {\doar{android}{Kotlin, Jetpack Compose, MVVM, Hilt, Room, Coroutines, Media3/ExoPlayer, GitHub Actions}%
+   \doar{embedded}{Kotlin, C/C++ (Android NDK, CMake), audio DSP, TCP sockets, concurrent programming}%
+   \doar{software}{Kotlin, SQL (Room/SQLite), REST API, TCP sockets, Git, CI/CD (GitHub Actions)}}%
+  {github.com/R4duQ/HarmonyApp}
+\begin{itemize}
+  \item Built from scratch with a \textbf{multi-module (MVVM) architecture}, dependency injection (Hilt)
+        and a local \textbf{SQL (Room)} database with incremental full-text search (FTS4).
+  \doar{android}{%
+  \item \textbf{Jetpack Compose} UI with animations, gestures and landscape support, designed first in Figma;
+        background playback with \textbf{Media3/ExoPlayer} and state persistence.
+  \item \textbf{Android Auto} integration (MediaSession), automatic recovery from playback errors (retry, circuit breaker).}
+  \doar{embedded}{%
+  \item \textbf{Real-time signal processing (DSP)}: equalizer, ReplayGain and soft limiter on 16-bit PCM,
+        implemented as a native \textbf{C/C++} module built with the Android NDK and CMake.
+  \item Fixed \textbf{race conditions} in the audio processor and built crossfade with two synchronized playback engines.}
+  \doar{android,embedded}{%
+  \item \textbf{Custom audio engine}: lossless (FLAC) playback, equalizer, ReplayGain and crossfade.}
+  \doar{software}{%
+  \item \textbf{REST API integration} (public metadata service) to fetch cover art at runtime.
+  \item Concurrency \textbf{debugging} (race conditions) and automatic error recovery (retry, circuit breaker).}
+  \item \textbf{Soulseek} download feature: custom \textbf{peer-to-peer} client over TCP sockets, with
+        concurrent connection handling, download queues, timeouts, an LRU cache and search deduplication.
+  \item \textbf{Smart Shuffle} algorithm based on an acoustic similarity score between tracks.
+  \item Automatically signed releases through \textbf{CI/CD (GitHub Actions)}.
+\end{itemize}}
+
+\newcommand{\proiectSemafor}{%
+\textbf{Smart Traffic Light} \textbar\ {\small\textit{Arduino, C/C++, sensors}}\par\vspace{1pt}
+\begin{itemize}
+  \item Traffic light system that adapts its cycle based on \textbf{sensor} data;
+        an electronics, automation and \textbf{embedded programming} project on a microcontroller.
+\end{itemize}}
+
+% Rows for the skills table
+\newcommand{\rLimbajeMobile}{\textbf{Languages:} & Kotlin, Java, C, C++, C\#, Python, Go, Lua, SQL, Objective-C \\}
+\newcommand{\rLimbajeEmbedded}{\textbf{Languages:} & C, C++, Python, Lua, Kotlin, Java, C\#, Go, SQL \\}
+\newcommand{\rLimbajeSoftware}{\textbf{Languages:} & Java, Kotlin, C\#, Python, C, C++, Go, Lua, SQL \\}
+\newcommand{\rAndroid}{\textbf{Android:} & Jetpack Compose, MVVM, Hilt (Dependency Injection), Room, Coroutines, Media3/ExoPlayer, Android Auto, Android NDK \\}
+\newcommand{\rEmbedded}{\textbf{Embedded:} & Arduino, microcontrollers, sensors and actuators, DSP, automatic control (PID), IoT \\}
+\newcommand{\rConcepte}{\textbf{Concepts:} & OOP, data structures and algorithms, concurrent programming, REST API, relational databases, debugging \\}
+\newcommand{\rUnelte}{\textbf{Tools:} & Git, GitHub, GitHub Actions (CI/CD), Gradle, CMake, Android Studio, Figma, Google Colab \\}
+\newcommand{\rLimbi}{\textbf{Languages spoken:} & Romanian (native), English (C1) \\}
+\newcommand{\rPermis}{\textbf{Driving licence:} & Categories AM and B \\}
+
+%=====================================================
+
+\begin{document}
+
+%---------------- HEADER ----------------
+\begin{center}
+  {\Huge\bfseries Radu-Lucian Moldovan}\\[4pt]
+  {\large\color{accent} Systems Engineering Student}\\[5pt]
+  \small
+  Timișoara, Romania \;\textbar\;
+  \href{mailto:radu.moldovan2005@gmail.com}{radu.moldovan2005@gmail.com} \;\textbar\;
+  +40 732 815 096 \;\textbar\;
+  \href{https://github.com/R4duQ}{github.com/R4duQ}
+\end{center}
+
+%---------------- PROFILE ----------------
+\section{Profile}
+\doar{android}{%
+Third-year Systems Engineering student at Politehnica University of Timișoara, focused on \textbf{native Android development} in
+\textbf{Kotlin} and \textbf{Jetpack Compose}. I designed and built \textbf{Harmony} from scratch, a complete music
+player published on GitHub, with \textbf{multi-module MVVM} architecture, Hilt, Room, Coroutines,
+Media3/ExoPlayer, a custom audio engine and Android Auto integration. I ship automated releases through
+\textbf{CI/CD (GitHub Actions)} and care about performance, stability and user experience, from
+Figma design to concurrency debugging.}
+\doar{embedded}{%
+Third-year Systems Engineering student at Politehnica University of Timișoara, trained in \textbf{embedded systems},
+automatic control and \textbf{signal processing}. Hands-on experience with \textbf{C/C++} on
+microcontrollers (Arduino, sensors and actuators) and \textbf{real-time audio DSP}: equalizer,
+ReplayGain and limiter on 16-bit PCM, with native code integrated through the Android NDK and CMake. I debug
+concurrency and synchronization problems methodically and take projects from prototype to release.
+Seeking a position as \textbf{Junior Embedded Software Engineer}.}
+\doar{software}{%
+Third-year Systems Engineering student at Politehnica University of Timișoara, with a solid base in \textbf{programming, OOP, data
+structures and algorithms} and experience in several languages (Kotlin, Java, C/C++, C\#, Python, Go).
+I designed and delivered from scratch a complex application published on GitHub, with modular architecture,
+a \textbf{SQL} database, \textbf{REST API} integration, a peer-to-peer network client and a \textbf{CI/CD} pipeline.
+I learn fast, debug hard problems methodically (concurrency, network errors) and take projects through to
+release. Seeking a position as \textbf{Junior Software Developer} or \textbf{Working Student}.}
+
+%---------------- EDUCATION ----------------
+\section{Education}
+\entry{Systems Engineering -- Bachelor's degree}{2024 -- present}
+      {Politehnica University of Timișoara, Faculty of Automation and Computer Science}{Timișoara}
+\begin{itemize}
+  \item Programming and data structures: C, C++, Java, Python, algorithms
+  \item Embedded systems and microcontrollers: data acquisition, sensors, actuators
+  \item Mathematical modelling, system identification, automatic control (PID)
+  \item Industrial networks, real-time protocols / IoT, signal and image processing
+\end{itemize}
+\vspace{4pt}
+
+\entry{Mathematics-Informatics, Computer Science intensive track}{2020 -- 2024}
+      {``Carmen Sylva'' National College of Informatics}{Petroșani}
+
+%---------------- PROJECTS ----------------
+\section{Projects}
+\ifdefstring{\TINTA}{embedded}
+  {\proiectSemafor\vspace{4pt}\proiectHarmony}
+  {\proiectHarmony\vspace{4pt}\proiectSemafor}
+
+%---------------- VOLUNTEERING ----------------
+\section{Volunteering}
+\entry{Volunteer, Educational Department}{2024 -- present}{Liga AC}{Timișoara}
+\begin{itemize}
+  \item Involved in planning and coordinating the \textbf{UniHack} and \textbf{ITEC} events.
+\end{itemize}
+\vspace{4pt}
+
+\entry{Participant, Erasmus+ project}{2020 -- 2022}{``Carmen Sylva'' National College of Informatics, Petroșani}{Romania / Turkey}
+\begin{itemize}
+  \item Exchange experience in \textbf{Fethiye, Turkey}, together with students from other partner countries.
+  \item Helped organize the project's activities at school in Romania.
+\end{itemize}
+
+%---------------- SKILLS ----------------
+\section{Skills}
+\ifdefstring{\TINTA}{embedded}{%
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+  \rLimbajeEmbedded \rEmbedded \rConcepte \rUnelte \rAndroid \rLimbi \rPermis
+\end{tabularx}}{}%
+\ifdefstring{\TINTA}{software}{%
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+  \rLimbajeSoftware \rConcepte \rUnelte \rAndroid \rEmbedded \rLimbi \rPermis
+\end{tabularx}}{}%
+\ifdefstring{\TINTA}{android}{%
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+  \rLimbajeMobile \rAndroid \rConcepte \rUnelte \rEmbedded \rLimbi \rPermis
+\end{tabularx}}{}
+
+\end{document}
