@@ -58,6 +58,8 @@ class CyberGlassScheme(
     val IndigoDeep: Color,
     /** Ink on an accent fill (the selected chip, a cyan badge). */
     val OnAccent: Color,
+    /** Small live text in cyan (the mini player's "LIVE SPECTRAL EQ" line). */
+    val LiveInk: Color,
     // Text and lines
     val TextPrimary: Color,
     val TextSilver: Color,
@@ -123,6 +125,7 @@ val DarkCyberGlass = CyberGlassScheme(
     Indigo = Color(0xFF6D28D9),
     IndigoDeep = Color(0xFF4C1D95),
     OnAccent = Color(0xFF0B0F17),
+    LiveInk = Color(0xFF00E5FF).copy(alpha = 0.78f),
     TextPrimary = Color(0xFFFFFFFF),
     TextSilver = Color(0xFFE2E8F0),
     TextPlaceholder = Color(0xFFCBD5E1),
@@ -139,8 +142,10 @@ val DarkCyberGlass = CyberGlassScheme(
  * Cyber-Glass on pearl: the same surfaces, rims, gradients and glow as the
  * dark one, light. Cool white glass on a pale blue-grey field; the cyan,
  * violet and mint accents one or two steps deeper, so text and icons in them
- * stay legible on white (the duration's sky blue is 5.9:1, the secondary
- * slate 7.6:1, the quiet slate 4.8:1); white ink on the selected chip.
+ * stay legible (WCAG, measured): cyan 5.4:1 on white and 4.7:1 on the device
+ * pill, the duration's sky blue 5.5:1 and the secondary slate 7.1:1 on the
+ * page, white on the selected chip 5.5:1 and on the violet play button
+ * 5.7:1. Small live text is full-strength cyan here, not faded as in dark.
  */
 val LightCyberGlass = CyberGlassScheme(
     isDark = false,
@@ -157,7 +162,7 @@ val LightCyberGlass = CyberGlassScheme(
     NavGlass = Color(0xFFFFFFFF),
     NAV_ALPHA = 0.90f,
     NavRim = Color(0x590EA5E9),
-    Cyan = Color(0xFF0891B2),
+    Cyan = Color(0xFF0E7490),
     Mint = Color(0xFF0D9488),
     Azure = Color(0xFF0284C7),
     Sky = Color(0xFF0369A1),
@@ -166,13 +171,14 @@ val LightCyberGlass = CyberGlassScheme(
     Indigo = Color(0xFFC4B5FD),
     IndigoDeep = Color(0xFFA78BFA),
     OnAccent = Color(0xFFFFFFFF),
+    LiveInk = Color(0xFF0E7490),
     TextPrimary = Color(0xFF0B1220),
     TextSilver = Color(0xFF1E293B),
     TextPlaceholder = Color(0xFF475569),
     TextSecondary = Color(0xFF475569),
     TextQuiet = Color(0xFF64748B),
     Divider = Color(0x1A0B1220),
-    ThumbRim = Color(0x330891B2),
+    ThumbRim = Color(0x330E7490),
     Shadow = Color(0xFF1E293B),
     Glow = 0.55f,
     SelectedChip = Brush.horizontalGradient(listOf(Color(0xFF0F766E), Color(0xFF0369A1))),

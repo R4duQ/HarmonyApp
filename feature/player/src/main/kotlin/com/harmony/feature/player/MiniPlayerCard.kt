@@ -41,6 +41,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -354,7 +355,7 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                             lineHeight = 13.sp,
                             letterSpacing = 0.9.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = glass.Cyan.copy(alpha = 0.78f),
+                            color = glass.LiveInk,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 1.dp),
@@ -496,7 +497,17 @@ private fun Disc(
             transitionSpec = { (fadeIn(tween(400)) + scaleIn(initialScale = 0.92f)).togetherWith(fadeOut(tween(250))) },
             label = "disc-art",
         ) { uri ->
-            Artwork(uri, null, Modifier.fillMaxSize().padding(3.dp).clip(CircleShape), cornerRadius = 999.dp)
+            Artwork(
+                uri, null, Modifier.fillMaxSize().padding(3.dp).clip(CircleShape), cornerRadius = 999.dp,
+                // The record stays dark in either theme: without a cover, a dark label, not the light theme's pale one.
+                fallback = if (glass.isDark) null else {
+                    {
+                        Box(Modifier.fillMaxSize().background(DiscLabel), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = DiscLabelInk)
+                        }
+                    }
+                },
+            )
         }
         // Grooves catching the light, and the spindle.
         Canvas(Modifier.fillMaxSize()) {
@@ -514,6 +525,10 @@ private fun Disc(
 }
 
 private const val ROTATION_MS = 9_000
+
+/** A coverless record's label: the dark theme's own artwork well, so the record looks the same in light. */
+private val DiscLabel = Color(0xFF211F26)
+private val DiscLabelInk = Color(0xFFCAC4D0)
 
 // ---------------------------------------------------------------------------
 // Device, controls, up next
