@@ -1,0 +1,79 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=1.5cm,top=1.2cm,bottom=1.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+
+\definecolor{accent}{HTML}{1F4E79}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
+\titleformat{\section}{\large\bfseries\color{accent}}{}{0em}{}[\vspace{-0.6em}\color{accent}\rule{\linewidth}{0.5pt}]
+\titlespacing*{\section}{0pt}{7pt}{5pt}
+
+\setlist[itemize]{leftmargin=1.1em,itemsep=0pt,topsep=2pt,parsep=0pt}
+
+\newcommand{\entry}[3]{\textbf{#1} \hfill \textit{#3}\\[-0.1em]\textit{#2}}
+
+\begin{document}
+
+% ---------- HEADER ----------
+\begin{center}
+  {\Huge\bfseries Radu Moldovan}\\[3pt]
+  Android \& Cross-Platform Developer\\[3pt]
+  \small
+  \href{mailto:radu.moldovan2005@gmail.com}{radu.moldovan2005@gmail.com} \;|\;
+  \href{https://github.com/R4duQ}{github.com/R4duQ} \;|\;
+  % TODO: phone, city, LinkedIn
+  +40 XXX XXX XXX \;|\; City, Romania
+\end{center}
+
+% ---------- SUMMARY ----------
+\section{Profile}
+Developer focused on mobile and audio software. Designed and built \textbf{Harmony}, a
+music player shipped on Android, iOS and Windows, from the UI down to a native C++ audio
+engine, with CI pipelines and signed releases. Comfortable across Kotlin, Swift and C++,
+and used to owning a feature end to end: design, implementation, testing and release.
+
+% ---------- PROJECTS ----------
+\section{Projects}
+
+\entry{Harmony --- offline lossless music player (Android, iOS, Windows)}{Kotlin, Jetpack Compose, Swift, C++, Gradle, GitHub Actions}{Sep 2026 -- present}
+\begin{itemize}
+  \item Built the app solo: \textasciitilde92k lines of Kotlin, \textasciitilde11k Swift and \textasciitilde10k C++ in a multi-module architecture (core, data, domain, feature, playback, sync), 160+ commits and 77 test files; released as v1.0 on all three platforms.
+  \item \textbf{Smart Shuffle:} on-device C++ engine that describes every song with a 24-dimensional acoustic profile (octave-band levels, dynamics, pulse) and builds queues from the session ``vibe'', learned transitions and skip feedback, with a self-auditing check and repair step and a live diagnostic HUD.
+  \item \textbf{Equalizer engine:} 10-band 32-bit float EQ in C++ at the file's native rate (44.1--384\,kHz), look-ahead limiter, output-aware filtering (speaker, Bluetooth, USB DAC), real-time ``Auto Live'' tonal correction, 60\,fps FFT spectrum and bit-perfect USB mode.
+  \item \textbf{Playback:} gapless dual-player crossfade, ReplayGain, self-healing against corrupt frames and decoder failures, Android Auto support.
+  \item \textbf{Harmony Connect:} play from the phone on a PC over the local network with pairing, remote control and gap-free queue handoff.
+  \item \textbf{Discover \& Downloads:} personalised recommendations, Shazam-based song recognition, album downloads via SpotiFLAC and Soulseek with lossless verification and automatic tags and artwork; repairs mis-encoded Romanian diacritics in legacy tags.
+  \item \textbf{Release engineering:} GitHub Actions for Android checks, signed APK releases, Windows (MSIX) and unsigned iOS IPA builds, plus a project website; 135 JUnit tests in the audit suite.
+\end{itemize}
+
+\vspace{3pt}
+\entry{Harmony website}{HTML, CSS, JavaScript, GitHub Actions}{2026}
+\begin{itemize}
+  \item Static site presenting the app, with downloads and install guides, built and deployed through CI.
+\end{itemize}
+
+% ---------- EDUCATION ----------
+\section{Education}
+% TODO: replace with your real details
+\entry{University / High School name}{Program / Profile}{20XX -- present}
+
+% ---------- SKILLS ----------
+\section{Skills}
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{Languages:} Kotlin, Swift, C++, JavaScript, SQL
+  \item \textbf{Mobile \& audio:} Jetpack Compose, Android (Media3, Auto), SwiftUI, AVAudioEngine, JNI, DSP (EQ, FFT, limiting)
+  \item \textbf{Tools:} Git, Gradle, GitHub Actions (CI/CD), JUnit, Room/SQLite, XcodeGen
+  \item \textbf{Languages spoken:} Romanian (native), English (% TODO level
+  )
+\end{itemize}
+
+\end{document}
