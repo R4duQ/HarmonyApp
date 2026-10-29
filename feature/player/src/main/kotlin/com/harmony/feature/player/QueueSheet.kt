@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.harmony.core.model.Song
+import com.harmony.core.model.PlayerState
 import com.harmony.core.ui.component.Artwork
 import com.harmony.core.ui.component.formatDuration
 
@@ -81,8 +82,11 @@ import com.harmony.core.ui.component.formatDuration
  * the two views can never disagree.
  *
  * Section headers render INSIDE the row item at each boundary rather than as
- * separate LazyColumn items, which keeps list indices identical to queue
- * indices so the drag maths needs no offsetting.
+ * separate LazyColumn items, so a row's list index plus the index of the
+ * first upcoming song is its queue index.
+ *
+ * Each row is one queue ENTRY: the same song queued twice is two rows, and
+ * moving or removing one never touches the other.
  *
  * ## Drag
  *
@@ -95,32 +99,39 @@ import com.harmony.core.ui.component.formatDuration
  *    coincide while the queue sits at track 0, so every other time it silently
  *    fell back to a hard-coded 64f and the reorder threshold was wrong.
  *    Measuring also means the header on a boundary row cannot skew it.
- *  - The move commits when the accumulated offset crosses half a row, so the
- *    player reorders live rather than on drop.
+ *  - Half a row of travel moves the row one slot, locally; the player gets
+ *    one move, on drop, with the song it is moving. It refuses a move whose
+ *    song is no longer there and keeps moves after the song playing, so a
+ *    queue that changed under the finger (the song ended, Smart Shuffle
+ *    appended) can't move the wrong song or hide one in the history.
+ *  - The gesture finds its row by key at each start, never by a position
+ *    remembered from an earlier drag.
  */
 @Composable
 fun QueueSheet(viewModel: PlayerViewModel) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
+    QueueSheetContent(
+        state = state,
+        onPlay = viewModel::onQueueItemClick,
+        onRemove = viewModel::onRemoveQueueItem,
+        onMove = { from, to, songId, onDone -> viewModel.onMoveQueueItem(from, to, songId, onDone) },
+    )
+}
+
+/**
+ * The queue sheet for [state]. [onMove] moves the queue entry at `from`
+ * (holding song `songId`) to `to` and reports whether the player made the
+ * move; `from` and `to` are queue indices.
+ */
+@Composable
+internal fun QueueSheetContent(
+    state: PlayerState,
+    onPlay: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onMove: (from: Int, to: Int, songId: Long, onDone: (Boolean) -> Unit) -> Unit,
+) {
     val listState = rememberLazyListState()
     val palette = playerPalette()
-
-    // Drag state.
-    //
-    // `dragOrder` is a LOCAL copy of the upcoming list that the drag mutates.
-    // While it is non-null the list renders from it and NOTHING is sent to the
-    // player — the whole move commits once, on drop.
-    //
-    // The previous version called onMoveQueueItem on every row boundary
-    // crossed. Dragging five positions issued five separate moveMediaItem
-    // calls, each round-tripping through the media session and re-emitting
-    // player state mid-gesture. That is what made reordering advance one
-    // position at a time and fight the finger.
-    var dragOrder by remember { mutableStateOf<List<Song>?>(null) }
-    var dragFrom by remember { mutableIntStateOf(-1) }
-    var dragTo by remember { mutableIntStateOf(-1) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    // All rows are the same height, so one measurement serves every drag.
-    var rowHeightPx by remember { mutableFloatStateOf(0f) }
 
     val currentIndex = state.queueIndex.coerceAtLeast(0)
     val firstUpcoming = currentIndex + 1
@@ -129,25 +140,72 @@ fun QueueSheet(viewModel: PlayerViewModel) {
     // Already-played tracks stay in the player's queue so "previous" keeps
     // working; they are only filtered out of this view.
     val queueUpcoming = if (state.queue.isEmpty()) emptyList() else state.queue.drop(firstUpcoming)
-    val upcoming = dragOrder ?: queueUpcoming
 
-    // Hold the local order until the player's own state catches up, so the
-    // list does not snap back to the pre-drag order for a frame.
-    LaunchedEffect(state.queue) {
-        if (dragTo < 0) dragOrder = null
+    // Every row is keyed by its queue entry, not by its position or its song:
+    // the same song can be queued twice, and each copy is its own row (see
+    // QueueKeys). The key is also what the drag gesture is bound to.
+    val keys = remember { QueueKeys() }
+    val queueEntries = remember(queueUpcoming) { keys.entriesFor(queueUpcoming) }
+
+    // Drag state.
+    //
+    // `localOrder` is a LOCAL copy of the upcoming rows that the drag
+    // mutates. While it is non-null the list renders from it and nothing is
+    // sent to the player: the whole move commits once, on drop. It then
+    // stays until the player's queue comes back with the move (or the move is
+    // refused), so the list doesn't snap back to the old order for a frame.
+    var localOrder by remember { mutableStateOf<List<QueueEntry>?>(null) }
+    var draggedKey by remember { mutableStateOf<Long?>(null) }
+    var dragFrom by remember { mutableIntStateOf(-1) }
+    var dragTo by remember { mutableIntStateOf(-1) }
+    var dragBase by remember { mutableIntStateOf(0) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // All rows are the same height, so one measurement serves every drag.
+    var rowHeightPx by remember { mutableFloatStateOf(0f) }
+
+    val upcoming = localOrder ?: queueEntries
+
+    // A row's gesture keeps running for as long as the row exists, through
+    // every move and every change of song. Positions read when it started are
+    // stale by the next drag: that was the bug where the second move of a row
+    // (or a row shifted by an earlier move) moved another song, jumped the
+    // list back to an old order, or dropped a song behind the one playing.
+    // So the gesture finds its row in the list as it is NOW, at each start.
+    val latestUpcoming by rememberUpdatedState(upcoming)
+    val latestFirstUpcoming by rememberUpdatedState(firstUpcoming)
+    val latestOnMove by rememberUpdatedState(onMove)
+
+    // The player's answer (a new queue, or another song playing) replaces the local order.
+    LaunchedEffect(state.queue, state.queueIndex) {
+        if (draggedKey == null) localOrder = null
     }
 
-    // Keys must survive reordering, so they cannot contain the position — an
-    // index-based key changes for every row between source and destination,
-    // which makes Compose treat moved rows as new ones and destroys both the
-    // placement animation and the drag itself. Queues can legitimately hold
-    // the same song twice, so identity is song id plus its occurrence.
-    val keys = remember(upcoming) {
-        val seen = HashMap<Long, Int>()
-        upcoming.map { song ->
-            val n = (seen[song.id] ?: 0) + 1
-            seen[song.id] = n
-            "${song.id}#$n"
+    // A lazy list keeps its scroll position on the KEY of its first visible
+    // row. Reordering past that row then scrolls the list on its own: the row
+    // being dragged slid out of view, which ended the drag with nothing moved.
+    // Each reorder pins the viewport to where it is instead.
+    fun holdViewport() {
+        listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+    }
+
+    /**
+     * Sends one move: the row at [from] of [before] to [to], [base] being the
+     * queue index of the first row. The player checks the song is still
+     * there and keeps the move among the upcoming songs.
+     */
+    fun commitMove(before: List<QueueEntry>, from: Int, to: Int, base: Int) {
+        if (from == to || from !in before.indices || to !in before.indices) {
+            localOrder = null
+            return
+        }
+        val after = before.moved(from, to)
+        keys.onMoved(after)
+        holdViewport()
+        // Two copies of one song swapped: nothing visible changes, and the
+        // player's queue won't either, so there is no answer to wait for.
+        localOrder = if (after.map { it.song.id } == before.map { it.song.id }) null else after
+        latestOnMove(base + from, base + to, before[from].song.id) { moved ->
+            if (!moved) localOrder = null
         }
     }
 
@@ -178,9 +236,10 @@ fun QueueSheet(viewModel: PlayerViewModel) {
                 .fillMaxWidth()
                 .heightIn(max = maxSheetHeight),
         ) {
-            itemsIndexed(items = upcoming, key = { i, _ -> keys.getOrElse(i) { i } }) { rel, song ->
+            itemsIndexed(items = upcoming, key = { _, entry -> entry.key }) { rel, entry ->
+                val song = entry.song
                 val absolute = firstUpcoming + rel
-                val isDragging = rel == dragTo
+                val isDragging = entry.key == draggedKey
                 val liftScale by animateFloatAsState(
                     targetValue = if (isDragging) 1.02f else 1f,
                     animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
@@ -210,10 +269,10 @@ fun QueueSheet(viewModel: PlayerViewModel) {
                         isDragging = isDragging,
                         canMoveUp = rel > 0,
                         canMoveDown = rel < upcoming.lastIndex,
-                        onClick = { viewModel.onQueueItemClick(absolute) },
-                        onRemove = { viewModel.onRemoveQueueItem(absolute) },
-                        onMoveUp = { viewModel.onMoveQueueItem(absolute, absolute - 1) },
-                        onMoveDown = { viewModel.onMoveQueueItem(absolute, absolute + 1) },
+                        onClick = { onPlay(absolute) },
+                        onRemove = { onRemove(absolute) },
+                        onMoveUp = { commitMove(upcoming, rel, rel - 1, firstUpcoming) },
+                        onMoveDown = { commitMove(upcoming, rel, rel + 1, firstUpcoming) },
                         onMeasured = { height -> if (height > 0) rowHeightPx = height.toFloat() },
                         modifier = Modifier
                             // Non-dragged rows slide out of the way; the dragged
@@ -226,67 +285,77 @@ fun QueueSheet(viewModel: PlayerViewModel) {
                                 scaleY = liftScale
                                 shadowElevation = liftShadow
                             },
-                        dragModifier = Modifier.pointerInput(keys.getOrNull(rel)) {
+                        dragModifier = Modifier.pointerInput(entry.key) {
                             var rowHeight = 0f
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
-                                    dragOrder = queueUpcoming
-                                    dragFrom = rel
-                                    dragTo = rel
-                                    dragOffset = 0f
-                                    rowHeight = rowHeightPx.takeIf { it > 0f } ?: 72.dp.toPx()
+                                    // This row's place now: the list as shown
+                                    // (a move still on its way to the player
+                                    // included) and the queue index it starts at.
+                                    val order = latestUpcoming
+                                    val index = order.indexOfFirst { it.key == entry.key }
+                                    if (index >= 0) {
+                                        localOrder = order
+                                        draggedKey = entry.key
+                                        dragFrom = index
+                                        dragTo = index
+                                        dragBase = latestFirstUpcoming
+                                        dragOffset = 0f
+                                        rowHeight = rowHeightPx.takeIf { it > 0f } ?: 72.dp.toPx()
+                                    }
                                 },
                                 onDrag = { change, amount ->
-                                    change.consume()
-                                    dragOffset += amount.y
-                                    val current = dragOrder
-                                    if (current != null) {
+                                    val current = localOrder
+                                    if (draggedKey == entry.key && current != null) {
+                                        change.consume()
+                                        dragOffset += amount.y
                                         // Explicitly typed non-null: reassigning
                                         // a var inside the loop invalidates the
                                         // smart cast from the null check above.
-                                        var order: List<Song> = current
+                                        var order: List<QueueEntry> = current
                                         // Reorder LOCALLY only. Half a row of
                                         // travel moves one slot, and the offset
                                         // is reduced by that slot so the row
                                         // keeps tracking the finger.
                                         while (dragOffset > rowHeight / 2 && dragTo < order.lastIndex) {
-                                            order = order.toMutableList()
-                                                .also { it.add(dragTo + 1, it.removeAt(dragTo)) }
+                                            order = order.moved(dragTo, dragTo + 1)
                                             dragTo += 1
                                             dragOffset -= rowHeight
                                         }
                                         while (dragOffset < -rowHeight / 2 && dragTo > 0) {
-                                            order = order.toMutableList()
-                                                .also { it.add(dragTo - 1, it.removeAt(dragTo)) }
+                                            order = order.moved(dragTo, dragTo - 1)
                                             dragTo -= 1
                                             dragOffset += rowHeight
                                         }
-                                        dragOrder = order
+                                        if (order !== current) {
+                                            holdViewport()
+                                            localOrder = order
+                                        }
                                     }
                                 },
                                 onDragEnd = {
-                                    val from = dragFrom
-                                    val to = dragTo
-                                    dragFrom = -1
-                                    dragTo = -1
-                                    dragOffset = 0f
-                                    if (from >= 0 && to >= 0 && from != to) {
-                                        // One move for the whole gesture.
-                                        // dragOrder stays until the player's
-                                        // state comes back, avoiding a snap.
-                                        viewModel.onMoveQueueItem(
-                                            firstUpcoming + from,
-                                            firstUpcoming + to,
-                                        )
-                                    } else {
-                                        dragOrder = null
+                                    if (draggedKey == entry.key) {
+                                        val order = localOrder
+                                        val from = dragFrom
+                                        val to = dragTo
+                                        draggedKey = null
+                                        dragFrom = -1
+                                        dragTo = -1
+                                        dragOffset = 0f
+                                        // One move for the whole gesture, from
+                                        // the order the drag started on.
+                                        if (order != null) commitMove(order.moved(to, from), from, to, dragBase)
+                                        else localOrder = null
                                     }
                                 },
                                 onDragCancel = {
-                                    dragFrom = -1
-                                    dragTo = -1
-                                    dragOffset = 0f
-                                    dragOrder = null
+                                    if (draggedKey == entry.key) {
+                                        draggedKey = null
+                                        dragFrom = -1
+                                        dragTo = -1
+                                        dragOffset = 0f
+                                        localOrder = null
+                                    }
                                 },
                             )
                         },
