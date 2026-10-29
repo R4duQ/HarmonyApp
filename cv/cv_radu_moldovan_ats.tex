@@ -1,0 +1,196 @@
+%-------------------------------------------------------------
+%  CV Radu-Lucian Moldovan -- versiune cu cuvinte cheie ATS
+%  Compilează în Overleaf cu pdfLaTeX (setarea implicită)
+%
+%  >>> ALEGE ȚINTA AICI (modifici doar cuvântul dintre acolade):
+%      android   -> Junior Android / Mobile Developer
+%      embedded  -> Junior Embedded / Automation Engineer
+%      software  -> Junior Software Developer (general)
+%-------------------------------------------------------------
+\providecommand{\TINTA}{android}
+
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[scaled]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{combelow}
+\usepackage{newunicodechar}
+\newunicodechar{ș}{\cb{s}}
+\newunicodechar{Ș}{\cb{S}}
+\newunicodechar{ț}{\cb{t}}
+\newunicodechar{Ț}{\cb{T}}
+
+\usepackage[margin=1.4cm,top=1.0cm,bottom=1.0cm]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage{etoolbox}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{HTML}{1F4E79}
+\definecolor{muted}{HTML}{555555}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+\titleformat{\section}{\large\bfseries\color{accent}}{}{0pt}{\MakeUppercase}[\vspace{-6pt}{\color{accent}\rule{\linewidth}{0.6pt}}]
+\titlespacing*{\section}{0pt}{7pt}{4pt}
+
+\setlist[itemize]{leftmargin=1.2em,itemsep=1pt,topsep=2pt,parsep=0pt,label=\textbullet}
+
+% \entry{Titlu}{Perioadă}{Organizație}{Locație}
+\newcommand{\entry}[4]{%
+  \textbf{#1} \hfill {\color{muted}#2}\\
+  \textit{#3} \hfill {\color{muted}\small #4}\par\vspace{2pt}}
+
+% \project{Nume}{Tehnologii}{Link}
+\newcommand{\project}[3]{%
+  \textbf{#1} \hfill {\small\href{https://#3}{#3}}\\
+  {\small\color{muted}\textit{#2}}\par\vspace{1pt}}
+
+% \doar{android,software}{text} -> apare doar pentru țintele din listă
+\newtoggle{potrivit}
+\newcommand{\verificatinta}[1]{\ifdefstring{\TINTA}{#1}{\toggletrue{potrivit}}{}}
+\newcommand{\doar}[2]{\togglefalse{potrivit}\forcsvlist{\verificatinta}{#1}\iftoggle{potrivit}{#2}{}}
+
+%================ BLOCURI DE CONȚINUT =================
+
+\newcommand{\proiectHarmony}{%
+\project{Harmony -- Player muzical Android}%
+  {\doar{android}{Kotlin, Jetpack Compose, MVVM, Hilt, Room, Coroutines, Media3/ExoPlayer, GitHub Actions}%
+   \doar{embedded}{Kotlin, C/C++ (Android NDK, CMake), DSP audio, TCP sockets, programare concurentă}%
+   \doar{software}{Kotlin, SQL (Room/SQLite), REST API, TCP sockets, Git, CI/CD (GitHub Actions)}}%
+  {github.com/R4duQ/HarmonyApp}
+\begin{itemize}
+  \item Aplicație construită de la zero, cu \textbf{arhitectură multi-modul (MVVM)}, injecție de dependențe (Hilt)
+        și bază de date locală \textbf{SQL (Room)} cu căutare full-text (FTS4) incrementală.
+  \doar{android}{%
+  \item UI în \textbf{Jetpack Compose} cu animații, gesturi și suport landscape, proiectat întâi în Figma;
+        playback în fundal cu \textbf{Media3/ExoPlayer} și persistența stării.
+  \item Integrare \textbf{Android Auto} (MediaSession), recuperare automată din erori de playback (retry, circuit breaker).}
+  \doar{embedded}{%
+  \item \textbf{Procesare de semnal (DSP) în timp real}: egalizator, ReplayGain și limiter soft pe PCM 16-bit,
+        cu un modul nativ \textbf{C/C++} compilat prin Android NDK și CMake.
+  \item Rezolvarea unor \textbf{race conditions} în procesorul audio și crossfade cu două motoare de redare sincronizate.}
+  \doar{android,embedded}{%
+  \item \textbf{Motor audio custom}: playback lossless (FLAC), egalizator, ReplayGain și crossfade.}
+  \doar{software}{%
+  \item \textbf{Integrare REST API} (serviciu public de metadate) pentru preluarea coperților la runtime.
+  \item \textbf{Debugging} de concurență (race conditions) și recuperare automată din erori (retry, circuit breaker).}
+  \item Funcție de descărcare prin \textbf{Soulseek}: client \textbf{peer-to-peer} propriu peste TCP sockets, cu
+        gestionarea conexiunilor concurente, cozi de descărcare, timeout-uri, cache LRU și deduplicarea căutărilor.
+  \item Algoritm \textbf{Smart Shuffle} bazat pe scor de similaritate acustică între piese.
+  \item Release-uri semnate automat prin \textbf{CI/CD (GitHub Actions)}.
+\end{itemize}}
+
+\newcommand{\proiectSemafor}{%
+\textbf{Semafor inteligent} \textbar\ {\small\textit{Arduino, C/C++, senzori}}\par\vspace{1pt}
+\begin{itemize}
+  \item Sistem de semaforizare care își adaptează ciclul pe baza datelor de la \textbf{senzori};
+        proiect de electronică, automatizare și \textbf{programare embedded} pe microcontroler.
+\end{itemize}}
+
+% Rânduri pentru tabelul de competențe
+\newcommand{\rLimbajeMobile}{\textbf{Limbaje:} & Kotlin, Java, C, C++, C\#, Python, Go, Lua, SQL, Objective-C \\}
+\newcommand{\rLimbajeEmbedded}{\textbf{Limbaje:} & C, C++, Python, Lua, Kotlin, Java, C\#, Go, SQL \\}
+\newcommand{\rLimbajeSoftware}{\textbf{Limbaje:} & Java, Kotlin, C\#, Python, C, C++, Go, Lua, SQL \\}
+\newcommand{\rAndroid}{\textbf{Android:} & Jetpack Compose, MVVM, Hilt (Dependency Injection), Room, Coroutines, Media3/ExoPlayer, Android Auto, Android NDK \\}
+\newcommand{\rEmbedded}{\textbf{Embedded:} & Arduino, microcontrolere, senzori și actuatoare, DSP, reglare automată (PID), IoT \\}
+\newcommand{\rConcepte}{\textbf{Concepte:} & OOP, structuri de date și algoritmi, programare concurentă, REST API, baze de date relaționale, debugging \\}
+\newcommand{\rUnelte}{\textbf{Unelte:} & Git, GitHub, GitHub Actions (CI/CD), Gradle, CMake, Android Studio, Figma, Google Colab \\}
+\newcommand{\rLimbi}{\textbf{Limbi străine:} & Română (nativ), Engleză (C1) \\}
+\newcommand{\rPermis}{\textbf{Permis:} & Categoriile AM și B \\}
+
+%=====================================================
+
+\begin{document}
+
+%---------------- ANTET ----------------
+\begin{center}
+  {\Huge\bfseries Radu-Lucian Moldovan}\\[4pt]
+  {\large\color{accent} Student Ingineria Sistemelor}\\[5pt]
+  \small
+  Timișoara, România \;\textbar\;
+  \href{mailto:radu.moldovan2005@gmail.com}{radu.moldovan2005@gmail.com} \;\textbar\;
+  +40 732 815 096 \;\textbar\;
+  \href{https://github.com/R4duQ}{github.com/R4duQ}
+\end{center}
+
+%---------------- PROFIL ----------------
+\section{Profil}
+\doar{android}{%
+Student în anul III la Ingineria Sistemelor (UPT), orientat spre \textbf{dezvoltare Android nativă} în
+\textbf{Kotlin} și \textbf{Jetpack Compose}. Am proiectat și dezvoltat de la zero \textbf{Harmony}, un player
+muzical complet, publicat pe GitHub, cu arhitectură \textbf{MVVM multi-modul}, Hilt, Room, Coroutines,
+Media3/ExoPlayer, motor audio propriu și integrare Android Auto. Livrez release-uri automate prin
+\textbf{CI/CD (GitHub Actions)} și urmăresc performanța, stabilitatea și experiența utilizatorului, de la
+design în Figma până la debugging de concurență.}
+\doar{embedded}{%
+Student în anul III la Ingineria Sistemelor (UPT), cu pregătire în \textbf{sisteme embedded},
+reglare automată și \textbf{procesarea semnalelor}. Am experiență practică în \textbf{C/C++} pe
+microcontrolere (Arduino, senzori și actuatoare) și în \textbf{DSP audio în timp real}: egalizator,
+ReplayGain și limiter pe PCM 16-bit, cu cod nativ integrat prin Android NDK și CMake. Depanez metodic
+probleme de concurență și sincronizare și duc proiectele de la prototip până la release.
+Caut o poziție de \textbf{Junior Embedded Software Engineer}.}
+\doar{software}{%
+Student în anul III la Ingineria Sistemelor (UPT), cu bază solidă în \textbf{programare, OOP, structuri
+de date și algoritmi} și experiență în mai multe limbaje (Kotlin, Java, C/C++, C\#, Python, Go).
+Am proiectat și livrat de la zero o aplicație complexă, publicată pe GitHub, cu arhitectură modulară,
+bază de date \textbf{SQL}, integrare \textbf{REST API}, client de rețea peer-to-peer și pipeline \textbf{CI/CD}.
+Învăț rapid, depanez metodic probleme dificile (concurență, erori de rețea) și duc proiectele până la
+release. Caut o poziție de \textbf{Junior Software Developer}.}
+
+%---------------- EDUCAȚIE ----------------
+\section{Educație}
+\entry{Ingineria Sistemelor -- Licență}{2024 -- prezent}
+      {Universitatea Politehnica Timișoara, Facultatea de Automatică și Calculatoare}{Timișoara}
+\begin{itemize}
+  \item Programare și structuri de date: C, C++, Java, Python, algoritmi
+  \item Sisteme embedded și microcontrolere: achiziție de date, senzori, actuatoare
+  \item Modelare matematică, identificarea sistemelor, reglare automată (PID)
+  \item Rețele industriale, protocoale în timp real / IoT, prelucrarea semnalelor și a imaginilor
+\end{itemize}
+\vspace{4pt}
+
+\entry{Matematică-Informatică, intensiv Informatică}{2020 -- 2024}
+      {Colegiul Național de Informatică ,,Carmen Sylva''}{Petroșani}
+
+%---------------- PROIECTE ----------------
+\section{Proiecte}
+\ifdefstring{\TINTA}{embedded}
+  {\proiectSemafor\vspace{4pt}\proiectHarmony}
+  {\proiectHarmony\vspace{4pt}\proiectSemafor}
+
+%---------------- VOLUNTARIAT ----------------
+\section{Voluntariat}
+\entry{Voluntar, Departamentul Educațional}{2024 -- prezent}{Liga AC}{Timișoara}
+\begin{itemize}
+  \item Implicat în planificarea și coordonarea evenimentelor \textbf{UniHack} și \textbf{ITEC}.
+\end{itemize}
+\vspace{4pt}
+
+\entry{Participant, proiect Erasmus+}{2020 -- 2022}{Colegiul Național de Informatică ,,Carmen Sylva'', Petroșani}{România / Turcia}
+\begin{itemize}
+  \item Schimb de experiență în \textbf{Fethiye, Turcia}, alături de elevi din alte țări partenere.
+  \item Implicat în organizarea activităților proiectului la liceu, în România.
+\end{itemize}
+
+%---------------- COMPETENȚE ----------------
+\section{Competențe}
+\ifdefstring{\TINTA}{embedded}{%
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+  \rLimbajeEmbedded \rEmbedded \rConcepte \rUnelte \rAndroid \rLimbi \rPermis
+\end{tabularx}}{}%
+\ifdefstring{\TINTA}{software}{%
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+  \rLimbajeSoftware \rConcepte \rUnelte \rAndroid \rEmbedded \rLimbi \rPermis
+\end{tabularx}}{}%
+\ifdefstring{\TINTA}{android}{%
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+  \rLimbajeMobile \rAndroid \rConcepte \rUnelte \rEmbedded \rLimbi \rPermis
+\end{tabularx}}{}
+
+\end{document}
