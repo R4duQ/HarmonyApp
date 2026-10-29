@@ -18,6 +18,7 @@ import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.library.repository.PlaybackHistoryRepository
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
+import com.harmony.domain.playback.QueueMoves
 import com.harmony.domain.shuffle.brain.QueuePlan
 import com.harmony.domain.shuffle.brain.QueueRequest
 import com.harmony.domain.shuffle.brain.ShuffleBrain
@@ -100,7 +101,16 @@ private class FakePlayback : PlaybackController {
         if (to <= idx) idx -= to - from
         repeat(to - from) { q.removeAt(from) }; sync()
     }
-    override suspend fun moveQueueItem(from: Int, to: Int) {}
+    /** As PlaybackConnection: checked by QueueMoves, the play-next run following its entries. */
+    override suspend fun moveQueueItem(from: Int, to: Int, expectedSongId: Long?): Boolean {
+        val move = QueueMoves.resolve(q.map { it.id.toString() }, idx, from, to, expectedSongId?.toString()) ?: return false
+        if (q.getOrNull(idx)?.id == anchor) {
+            run = QueueMoves.runAfterMove(idx, run.coerceIn(0, (q.size - idx - 1).coerceAtLeast(0)), move.from, move.to)
+        }
+        writes += "move"
+        q.add(move.to, q.removeAt(move.from)); sync()
+        return true
+    }
     override fun play() {}
     override fun pause() {}
     override fun seekTo(positionMs: Long) {}
@@ -336,6 +346,76 @@ class SmartQueueManagerQueueTest {
         advanceUntilIdle()
         assertEquals(listOf(1L, 2L, 3L, 50L, 51L, 4L, 5L, 6L, 7L, 8L, 9L, 10L), ids(p))
         assertTrue("session ended with Smart Shuffle", brain.resets >= 2)
+    }
+
+    @Test
+    fun aSongMovedAbovePlayNextSongsDoesNotPushThemOut() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this)
+        p.setQueue((1L..10L).map(::song), 2, true)       // playing song 3
+        p.addNext(song(50)); p.addNext(song(51))         // 1 2 3 [50 51] 4 .. 10
+        advanceUntilIdle()
+        // Song 9 dragged to the top, above the two queued songs.
+        assertTrue(p.moveQueueItem(10, 3, 9L))
+        advanceUntilIdle()
+        assertEquals(listOf(1L, 2L, 3L, 9L, 50L, 51L, 4L), ids(p).take(7))
+        assertEquals("the run covers the queued songs and the one placed among them", 3, p.playerState.value.playNextCount)
+        toggle(p, c, ShuffleMode.SMART)
+        advanceUntilIdle()
+        val on = ids(p)
+        assertEquals("hand-placed songs kept, in the order set: $on", listOf(1L, 2L, 3L, 9L, 50L, 51L), on.take(6))
+        assertTrue("shuffle picks after them: $on", on.drop(6).isNotEmpty() && on.drop(6).all { it in pickPool })
+    }
+
+    @Test
+    fun reorderedPlayNextSongsKeepTheirOrderThroughShuffle() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this)
+        p.setQueue((1L..10L).map(::song), 2, true)
+        p.addNext(song(50)); p.addNext(song(51)); p.addNext(song(52))
+        advanceUntilIdle()
+        assertTrue(p.moveQueueItem(5, 3, 52L))           // 52 first, within the run
+        assertTrue(p.moveQueueItem(4, 5, 50L))           // 50 after 51, still within it
+        advanceUntilIdle()
+        assertEquals(listOf(3L, 52L, 51L, 50L, 4L), ids(p).subList(2, 7))
+        assertEquals(3, p.playerState.value.playNextCount)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        assertEquals(listOf(1L, 2L, 3L, 52L, 51L, 50L), ids(p).take(6))
+        toggle(p, c, ShuffleMode.OFF); advanceUntilIdle()
+        assertEquals(listOf(1L, 2L, 3L, 52L, 51L, 50L, 4L, 5L, 6L, 7L, 8L, 9L, 10L), ids(p))
+    }
+
+    @Test
+    fun aMoveUnderSmartShuffleStaysAndNextFollowsIt() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this)
+        p.setQueue(listOf(song(1)), 0, true)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        val before = ids(p)
+        val last = before.last()
+        val requests = brain.requests.size
+        // The last pick dragged up to play next, as the current song nears its end.
+        assertTrue(p.moveQueueItem(before.lastIndex, 1, last))
+        settle()
+        val moved = before.toMutableList().apply { add(1, removeAt(lastIndex)) }
+        assertEquals("the new order is not rewritten", moved, ids(p))
+        assertEquals("no batch, no rewrite", requests, brain.requests.size)
+        assertEquals("move", p.writes.last())
+        p.skipAfter(0.95f); advanceUntilIdle()
+        assertEquals("Next plays the song moved there", last, p.playerState.value.currentSong?.id)
+        assertEquals(moved, ids(p).take(moved.size))
+    }
+
+    @Test
+    fun aMoveFromAStaleScreenIsRefused() = runTest(UnconfinedTestDispatcher()) {
+        val (p, _, _) = build(this)
+        p.setQueue((1L..6L).map(::song), 0, true)
+        advanceUntilIdle()
+        // The screen saw song 4 at index 3; it was removed meanwhile.
+        p.removeFromQueue(3)
+        assertFalse(p.moveQueueItem(3, 1, 4L))
+        assertEquals(listOf(1L, 2L, 3L, 5L, 6L), ids(p))
+        // And a move can't take the song playing or reach behind it.
+        assertFalse(p.moveQueueItem(0, 3, 1L))
+        assertTrue(p.moveQueueItem(4, 0, 6L))
+        assertEquals(listOf(1L, 6L, 2L, 3L, 5L), ids(p))
     }
 
     @Test

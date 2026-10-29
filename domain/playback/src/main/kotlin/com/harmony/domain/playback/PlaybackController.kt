@@ -73,7 +73,15 @@ interface PlaybackController {
         removeQueueRange(fromIndex, toIndexExclusive)
         if (songs.isNotEmpty()) addToQueueAll(songs)
     }
-    suspend fun moveQueueItem(from: Int, to: Int)
+
+    /**
+     * Moves the upcoming entry at [from] to [to], checked by [QueueMoves.resolve]
+     * against the queue as it is now: refused when [expectedSongId] is no longer
+     * at [from], and never moving the song playing or into the history.
+     *
+     * @return whether the entry moved.
+     */
+    suspend fun moveQueueItem(from: Int, to: Int, expectedSongId: Long? = null): Boolean
 
     // -- Transport ----------------------------------------------------------
     fun play()

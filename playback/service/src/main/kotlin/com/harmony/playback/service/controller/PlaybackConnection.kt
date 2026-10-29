@@ -389,11 +389,12 @@ class PlaybackConnection @Inject constructor(
                 ),
             )
         }
+        val previousIndex = trackingIndex
         trackingIndex = newIndex
         trackingSongId = newMediaId
         trackingListenedMs = 0
         listeningClock.reset()
-        carryPlayNextRun(newMediaId)
+        carryPlayNextRun(newMediaId, previousIndex)
     }
 
     /**
@@ -409,7 +410,7 @@ class PlaybackConnection @Inject constructor(
      * songs by hand, hear the first, and shuffle takes back over. Re-anchoring
      * keeps the remaining run addressable for exactly as long as it lasts.
      */
-    private fun carryPlayNextRun(newMediaId: String?) {
+    private fun carryPlayNextRun(newMediaId: String?, previousIndex: Int) {
         if (playNextRunLength <= 0 || newMediaId == null) return
         val c = controller ?: return
         // Only advance when playback moved FORWARD into the run's first
@@ -417,8 +418,11 @@ class PlaybackConnection @Inject constructor(
         // something else out of the queue — means the run no longer
         // describes what's coming, so it ends here rather than being
         // re-pointed at an unrelated track.
-        val anchorIndex = (0 until c.mediaItemCount)
-            .firstOrNull { c.getMediaItemAt(it).mediaId == playNextAnchorId }
+        // The entry that was playing, by its index: the same song can also sit
+        // earlier in the queue, and that occurrence is not the anchor.
+        val anchorIndex = previousIndex
+            .takeIf { it in 0 until c.mediaItemCount && c.getMediaItemAt(it).mediaId == playNextAnchorId }
+            ?: (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == playNextAnchorId }
         if (anchorIndex == null || c.currentMediaItemIndex != anchorIndex + 1) {
             playNextAnchorId = null
             playNextRunLength = 0
@@ -589,9 +593,24 @@ class PlaybackConnection @Inject constructor(
         settingsRepository.saveLastPlaybackState(ids, c.currentMediaItemIndex.coerceAtLeast(0), c.currentPosition.coerceAtLeast(0))
     }
 
-    override suspend fun moveQueueItem(from: Int, to: Int) {
-        val c = controllerOrNull() ?: return
-        if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount) c.moveMediaItem(from, to)
+    override suspend fun moveQueueItem(from: Int, to: Int, expectedSongId: Long?): Boolean {
+        val c = controllerOrNull() ?: return false
+        val ids = (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
+        val current = c.currentMediaItemIndex
+        val move = com.harmony.domain.playback.QueueMoves
+            .resolve(ids, current, from, to, expectedSongId?.toString()) ?: return false
+        // The Play next run is a length after the song playing: keep it on the
+        // same entries, or a move across its edge would swap which songs it
+        // protects (see QueueMoves.runAfterMove).
+        if (c.currentMediaItem?.mediaId == playNextAnchorId) {
+            val run = playNextRunLength.coerceIn(0, (ids.size - current - 1).coerceAtLeast(0))
+            playNextRunLength = com.harmony.domain.playback.QueueMoves.runAfterMove(current, run, move.from, move.to)
+        }
+        // Moving upcoming entries never touches the one playing: no restart,
+        // no seek. Media3 updates the timeline at once (the next state and
+        // the session's own saving see the new order).
+        c.moveMediaItem(move.from, move.to)
+        return true
     }
 
     // -- Transport ----------------------------------------------------------

@@ -246,7 +246,12 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { playback.removeFromQueue(index) }
     }
 
-    fun onMoveQueueItem(from: Int, to: Int) {
-        viewModelScope.launch { playback.moveQueueItem(from, to) }
+    /**
+     * Moves the queue entry at [from] (holding [expectedSongId]) to [to]; the
+     * player checks both against its queue as it is now. [onDone] hears
+     * whether it moved (false: the queue changed under the gesture).
+     */
+    fun onMoveQueueItem(from: Int, to: Int, expectedSongId: Long? = null, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch { onDone(playback.moveQueueItem(from, to, expectedSongId)) }
     }
 }

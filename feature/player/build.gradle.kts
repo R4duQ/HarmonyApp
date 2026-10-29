@@ -7,6 +7,17 @@ plugins {
 android {
     namespace = "com.harmony.feature.player"
     buildFeatures { compose = true }
+
+    // QueueSheetInteractionTest drags the queue's rows on Robolectric.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            test.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            }
+        }
+    }
 }
 
 dependencies {
@@ -18,4 +29,12 @@ dependencies {
     implementation(projects.domain.shuffle)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
+
+    val composeBom = platform(libs.compose.bom)
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(composeBom)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(composeBom)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

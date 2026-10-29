@@ -435,8 +435,13 @@ class ConnectSession @Inject constructor(
     private fun followComputer(id: String, status: RemoteStatus) {
         val exo = exo ?: return
         val next = exo.nextMediaItemIndex
+        // The queue may have been reordered since the computer was told what
+        // comes next: find the song after the one playing first (the same
+        // song can also be in the history), anywhere else only if it isn't.
+        val ahead = (exo.currentMediaItemIndex + 1 until exo.mediaItemCount)
         val target = if (next != C.INDEX_UNSET && exo.getMediaItemAt(next).mediaId == id) next
-        else (0 until exo.mediaItemCount).firstOrNull { exo.getMediaItemAt(it).mediaId == id } ?: return
+        else ahead.firstOrNull { exo.getMediaItemAt(it).mediaId == id }
+            ?: (0 until exo.mediaItemCount).firstOrNull { exo.getMediaItemAt(it).mediaId == id } ?: return
         sentId = id
         advanceId = null
         endHandledFor = null
