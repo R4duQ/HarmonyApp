@@ -1,9 +1,10 @@
 name: UI screenshots
 
 # Renders ThemeShowcaseScreenshotTest (the same screens in light and dark) on
-# the JVM with Roborazzi + Robolectric, and keeps the PNGs on the branch
-# ui-screenshots/<label>, so they can be looked at and compared without an
-# emulator. Runs on pushes to work branches that touch the UI (the label is
+# the JVM with Roborazzi + Robolectric, twice: on this commit (after_*.png)
+# and with the UI code put back as it is on main (before_*.png), so a change
+# can be judged side by side. The PNGs go to the branch
+# ui-screenshots/<label>, to be looked at without an emulator. Runs on pushes to work branches that touch the UI (the label is
 # the commit), or by hand from the Actions tab with a label of your choice.
 
 on:
@@ -45,6 +46,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -85,13 +88,32 @@ jobs:
           EXPECTED_GO_VERSION: ${{ env.GO_VERSION }}
         run: bash ./scripts/ci/build-spotiflac-backend.sh
 
-      - name: Render the screenshots
-        run: >-
-          chmod +x ./gradlew &&
-          ./gradlew :app:testStableDebugUnitTest
-          --tests 'com.harmony.app.ThemeShowcaseScreenshotTest'
-          -Proborazzi.test.record=true
-          --no-daemon --stacktrace
+      - name: Render the screenshots (this commit)
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :app:testStableDebugUnitTest \
+            --tests 'com.harmony.app.ThemeShowcaseScreenshotTest' \
+            -Proborazzi.test.record=true --no-daemon --stacktrace
+          mkdir -p "$RUNNER_TEMP/shots"
+          for f in app/build/outputs/roborazzi/*.png; do cp "$f" "$RUNNER_TEMP/shots/after_$(basename "$f")"; done
+
+      - name: Render the screenshots (UI code as on main)
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          git fetch -q origin main
+          base="$(git merge-base HEAD origin/main)"
+          echo "before = $base"
+          # The test stays as on this commit; the screens it renders go back to main.
+          git checkout "$base" -- core/ui/src/main feature/player/src/main feature/library/src/main app/src/main
+          rm -rf app/build/outputs/roborazzi
+          ./gradlew :app:testStableDebugUnitTest \
+            --tests 'com.harmony.app.ThemeShowcaseScreenshotTest' \
+            -Proborazzi.test.record=true --no-daemon --stacktrace
+          for f in app/build/outputs/roborazzi/*.png; do cp "$f" "$RUNNER_TEMP/shots/before_$(basename "$f")"; done
+          git checkout HEAD -- core/ui/src/main feature/player/src/main feature/library/src/main app/src/main
 
       - name: Keep them on a ui-screenshots branch
         env:
@@ -99,12 +121,9 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          src="$PWD/app/build/outputs/roborazzi"
-          ls -la "$src"
-          out="$(mktemp -d)"
-          cp "$src"/*.png "$out"/
-          cd "$out"
-          printf 'Screenshots from %s (%s), run %s.\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" > README.md
+          cd "$RUNNER_TEMP/shots"
+          ls -la
+          printf 'Screenshots from %s (%s), run %s. after_ = this commit, before_ = UI code as on main.\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" > README.md
           git init -q -b screenshots
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
