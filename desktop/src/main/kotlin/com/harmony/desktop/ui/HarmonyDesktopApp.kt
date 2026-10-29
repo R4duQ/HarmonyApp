@@ -95,6 +95,7 @@ fun HarmonyDesktopApp(app: DesktopApp) {
     val loader = remember(app) { ImageLoader(app.covers) }
     var place by remember { mutableStateOf<Place>(Place.Top(Section.HOME)) }
     val phone by app.player.phone.collectAsState()
+    val link by app.connect.link.collectAsState()
 
     HarmonyTheme(dark = settings.darkTheme) {
         val c = LocalHarmonyColors.current
@@ -103,6 +104,7 @@ fun HarmonyDesktopApp(app: DesktopApp) {
                 Sidebar(
                     current = (place as? Place.Top)?.section,
                     phone = phone,
+                    reconnecting = link is com.harmony.core.remote.PhoneLink.Reconnecting,
                     dark = settings.darkTheme,
                     onSelect = { place = Place.Top(it) },
                     onToggleTheme = { app.setDarkTheme(!settings.darkTheme) },
@@ -136,7 +138,7 @@ fun HarmonyDesktopApp(app: DesktopApp) {
 }
 
 @Composable
-private fun Sidebar(current: Section?, phone: String?, dark: Boolean, onSelect: (Section) -> Unit, onToggleTheme: () -> Unit) {
+private fun Sidebar(current: Section?, phone: String?, reconnecting: Boolean, dark: Boolean, onSelect: (Section) -> Unit, onToggleTheme: () -> Unit) {
     val c = LocalHarmonyColors.current
     Column(
         Modifier
@@ -160,7 +162,15 @@ private fun Sidebar(current: Section?, phone: String?, dark: Boolean, onSelect: 
         listOf(Section.SONGS, Section.ALBUMS, Section.ARTISTS, Section.FAVORITES).forEach { NavItem(it, it == current, onSelect) }
         SectionLabel("Player")
         listOf(Section.NOW_PLAYING, Section.EQUALIZER).forEach { NavItem(it, it == current, onSelect) }
-        NavItem(Section.CONNECT, Section.CONNECT == current, onSelect, badge = phone)
+        // Green while the phone answers, amber while it is being waited for.
+        NavItem(
+            Section.CONNECT, Section.CONNECT == current, onSelect,
+            badge = when {
+                reconnecting -> Color(0xFFF2B33D)
+                phone != null -> Color(0xFF3CDB5A)
+                else -> null
+            },
+        )
         Spacer(Modifier.weight(1f))
         ThemeSwitch(dark, onToggleTheme)
     }
@@ -179,7 +189,7 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun NavItem(section: Section, selected: Boolean, onSelect: (Section) -> Unit, badge: String? = null) {
+private fun NavItem(section: Section, selected: Boolean, onSelect: (Section) -> Unit, badge: Color? = null) {
     val c = LocalHarmonyColors.current
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -219,7 +229,7 @@ private fun NavItem(section: Section, selected: Boolean, onSelect: (Section) -> 
             modifier = Modifier.padding(start = 13.dp).weight(1f),
         )
         if (badge != null) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF3CDB5A)))
+            Box(Modifier.size(8.dp).clip(CircleShape).background(badge))
         }
     }
 }

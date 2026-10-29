@@ -2,6 +2,7 @@ package com.harmony.desktop.player
 
 import com.harmony.core.remote.ControlAction
 import com.harmony.core.remote.ControlRequest
+import com.harmony.core.remote.PhoneLink
 import com.harmony.core.remote.PlayRequest
 import com.harmony.core.remote.RemoteRenderer
 import com.harmony.core.remote.RemoteRepeat
@@ -104,6 +105,19 @@ class PlayerController(
     /** Tries left to get a broken-off phone song going again. */
     private var recoveries = 0
     private val pending = mutableListOf<RemoteRequest>()
+
+    /**
+     * False while the phone has gone quiet ([PhoneLink.Reconnecting]): what is
+     * pressed here for it then is dropped, not saved up and sent all at once
+     * when it comes back (five nexts pressed into the void would skip five songs).
+     */
+    private var phoneAnswers = true
+
+    /**
+     * Counts the phone's songs started and left: a background job (a retry, a
+     * probe) started for one does nothing once another, or none, has come.
+     */
+    private var remoteGeneration = 0L
     /** The order songs play in when shuffling: positions in the queue. */
     private var order: List<Int> = emptyList()
 
@@ -202,6 +216,8 @@ class PlayerController(
     fun toggleShuffle() {
         if (_phone.value != null) {
             // The phone's queue: the phone shuffles it and sends the new "up next".
+            // Not while it doesn't answer: the button would show a mode the phone never got.
+            if (!phoneAnswers) return
             remoteShuffle = remoteShuffle?.not()
             request(RemoteRequest.SHUFFLE)
             return publishModes()
@@ -215,6 +231,7 @@ class PlayerController(
     @Synchronized
     fun cycleRepeat() {
         if (_phone.value != null) {
+            if (!phoneAnswers) return
             remoteRepeat = remoteRepeat?.let { RemoteRepeat.entries[(it.ordinal + 1) % RemoteRepeat.entries.size] }
             request(RemoteRequest.REPEAT)
             return publishModes()
@@ -384,11 +401,12 @@ class PlayerController(
         if (recoveries >= MAX_RECOVERIES) return
         recoveries++
         val attempt = recoveries
+        val generation = remoteGeneration
         Thread({
             Thread.sleep(RECOVERY_DELAY_MS * attempt)
             synchronized(this) {
                 // Only if nothing else happened meanwhile.
-                if (remoteTrack?.id != t.id || engine.state.value.status != EngineStatus.ERROR) return@synchronized
+                if (generation != remoteGeneration || remoteTrack?.id != t.id || engine.state.value.status != EngineStatus.ERROR) return@synchronized
                 engine.load(sourceFor(t), at, play = true, t.durationMs)
             }
         }, "harmony-recover").apply { isDaemon = true }.start()
@@ -396,6 +414,7 @@ class PlayerController(
 
     private fun startRemote(t: RemoteTrack, upNext: List<RemoteTrack>, positionMs: Long, play: Boolean) {
         if (remoteTrack?.id != t.id) recoveries = 0
+        remoteGeneration++
         setAside = null
         remoteTrack = t
         remoteUpNext = upNext
@@ -413,11 +432,12 @@ class PlayerController(
     private fun learnAbout(t: RemoteTrack) {
         if (t.durationMs > 0 && t.quality != null) return
         val source = sourceFor(t)
+        val generation = remoteGeneration
         Thread({
             val probed = runCatching { com.harmony.desktop.library.Ffprobe.probe(source) }.getOrNull() ?: return@Thread
             synchronized(this) {
                 val now = remoteTrack ?: return@synchronized
-                if (now.id != t.id) return@synchronized
+                if (generation != remoteGeneration || now.id != t.id) return@synchronized
                 val better = now.copy(
                     durationMs = now.durationMs.takeIf { it > 0 } ?: probed.durationMs,
                     quality = now.quality ?: probed.quality,
@@ -516,11 +536,21 @@ class PlayerController(
 
     @Synchronized
     private fun request(r: RemoteRequest) {
-        pending += r
+        if (phoneAnswers) pending += r
+    }
+
+    @Synchronized
+    override fun linkChanged(link: PhoneLink) {
+        val answers = link !is PhoneLink.Reconnecting
+        if (answers == phoneAnswers) return
+        phoneAnswers = answers
+        // Pressed before it went quiet and not collected yet: stale by the time it's back.
+        if (!answers) pending.clear()
     }
 
     private fun leaveRemote() {
         val phone = _phone.value ?: return
+        remoteGeneration++
         remoteTrack?.let { setAside = SetAside(phone, it, remoteUpNext, autoAdvance, engine.positionMs()) }
         engine.stop()
         remoteTrack = null

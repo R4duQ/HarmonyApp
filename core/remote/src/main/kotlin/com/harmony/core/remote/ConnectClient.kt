@@ -11,6 +11,13 @@ import java.net.Socket
 class ConnectRefused(message: String) : IOException(message)
 
 /**
+ * The computer ended this session: stopped there, another phone took over, or
+ * it gave up waiting for this phone. [reason] is its word for which
+ * ("stopped_on_computer", "replaced", "lost", ...).
+ */
+class ConnectSessionEnded(val reason: String) : IOException("session ended: $reason")
+
+/**
  * The phone's side of Connect: talks to one computer. Blocking; call it off
  * the main thread.
  */
@@ -19,6 +26,8 @@ class ConnectClient(
     val port: Int,
     @Volatile var token: String? = null,
     private val timeoutMs: Int = 4_000,
+    /** This session's id ([Connect.SESSION_HEADER]); null sends none, as older phones did. */
+    val session: String? = null,
 ) {
     fun info(): PcInfo = PcInfo.fromJson(call("GET", Connect.PATH_INFO, null, auth = false), host)
         ?: throw IOException("not a Harmony computer")
@@ -59,6 +68,7 @@ class ConnectClient(
                 .append("Host: ").append(host).append(':').append(port).append("\r\n")
                 .append("Connection: close\r\n")
             if (auth) token?.let { head.append(Connect.TOKEN_HEADER).append(": ").append(it).append("\r\n") }
+            if (auth) session?.let { head.append(Connect.SESSION_HEADER).append(": ").append(it).append("\r\n") }
             if (bytes != null) {
                 head.append("Content-Type: application/json; charset=utf-8\r\n")
                 head.append("Content-Length: ").append(bytes.size).append("\r\n")
@@ -82,6 +92,7 @@ class ConnectClient(
             }
             val text = String(if (length >= 0) readExactly(input, length) else input.readBytes(), Charsets.UTF_8)
             if (code == 403) throw ConnectRefused(text.ifEmpty { "refused" })
+            if (code == Connect.SESSION_ENDED) throw ConnectSessionEnded(text.trim().ifEmpty { "ended" })
             if (code !in 200..299) throw IOException("HTTP $code: $text")
             return text
         }

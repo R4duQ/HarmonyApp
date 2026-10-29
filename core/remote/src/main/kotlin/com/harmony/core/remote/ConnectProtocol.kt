@@ -28,6 +28,18 @@ object Connect {
     const val DISCOVER_MESSAGE = "HARMONY-DISCOVER 1"
     const val TOKEN_HEADER = "X-Harmony-Token"
 
+    /**
+     * A random id the phone makes for each time it starts playing on a
+     * computer, sent with every request of that session. The computer refuses
+     * requests from a session that has ended (HTTP [SESSION_ENDED]), so a late
+     * request from an old connection can't start or stop anything. Phones
+     * from before it send none; their token alone is the session then.
+     */
+    const val SESSION_HEADER = "X-Harmony-Session"
+
+    /** The answer to a request from a session that is over: the phone ends its side too. */
+    const val SESSION_ENDED = 409
+
     const val PATH_INFO = "/info"
     const val PATH_PAIR = "/pair"
     const val PATH_PLAY = "/play"

@@ -294,6 +294,8 @@ fun ConnectPage(app: DesktopApp) {
     val c = LocalHarmonyColors.current
     val state by app.connect.state.collectAsState()
     val phone by app.player.phone.collectAsState()
+    val link by app.connect.link.collectAsState()
+    val reconnecting = link is com.harmony.core.remote.PhoneLink.Reconnecting
     val settings by app.settingsFlow.collectAsState()
     // The code changes once a phone uses it; the host refreshes this state when that happens.
     LaunchedEffect(Unit) { app.connect.refresh() }
@@ -309,7 +311,12 @@ fun ConnectPage(app: DesktopApp) {
                         Icon(Icons.Rounded.Cast, contentDescription = null, tint = Color.White, modifier = Modifier.size(34.dp))
                     }
                     Text(
-                        if (phone != null) "Playing from $phone" else if (state.running) "Ready for your phone" else "Not listening",
+                        when {
+                            phone != null && reconnecting -> "Reconnecting to $phone…"
+                            phone != null -> "Playing from $phone"
+                            state.running -> "Ready for your phone"
+                            else -> "Not listening"
+                        },
                         fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.padding(top = 14.dp),
                     )
                     Text(settings.pcName, fontSize = 14.sp, color = c.muted)
@@ -360,7 +367,9 @@ fun ConnectPage(app: DesktopApp) {
                     Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, tint = Accent.PurpleLight, modifier = Modifier.size(20.dp))
                         Text(name, fontSize = 14.sp, color = c.ink, modifier = Modifier.padding(start = 10.dp).weight(1f))
-                        if (name == phone) Pill("PLAYING", Color(0xFF3CDB5A))
+                        if (name == phone) {
+                            if (reconnecting) Pill("RECONNECTING", Color(0xFFF2B33D)) else Pill("PLAYING", Color(0xFF3CDB5A))
+                        }
                         Text("Forget", fontSize = 13.sp, color = Accent.Pink, modifier = Modifier.clickable { app.connect.forget(token) }.padding(8.dp))
                     }
                 }
