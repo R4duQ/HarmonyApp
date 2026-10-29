@@ -98,6 +98,7 @@ fun PlayerBar(app: DesktopApp, loader: ImageLoader, onOpenNowPlaying: () -> Unit
     val shuffle by app.player.shuffle.collectAsState()
     val repeat by app.player.repeat.collectAsState()
     val settings by app.settingsFlow.collectAsState()
+    val reconnecting = app.connect.link.collectAsState().value is com.harmony.core.remote.PhoneLink.Reconnecting
     val muted by app.muted.collectAsState()
     val playing = engine.status == EngineStatus.PLAYING || engine.status == EngineStatus.LOADING
     val position = rememberPosition(playing) { app.player.positionMs() }
@@ -133,7 +134,11 @@ fun PlayerBar(app: DesktopApp, loader: ImageLoader, onOpenNowPlaying: () -> Unit
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                             if (error == null && s?.fromPhone != null) {
                                 Icon(Icons.Rounded.Cast, contentDescription = null, tint = Accent.PurpleLight, modifier = Modifier.size(13.dp))
-                                Text(s.fromPhone, fontSize = 12.sp, color = Accent.PurpleLight, maxLines = 1, modifier = Modifier.padding(start = 4.dp, end = 6.dp))
+                                Text(
+                                    if (reconnecting) "${s.fromPhone} · Reconnecting…" else s.fromPhone,
+                                    fontSize = 12.sp, color = if (reconnecting) Color(0xFFF2B33D) else Accent.PurpleLight, maxLines = 1,
+                                    modifier = Modifier.padding(start = 4.dp, end = 6.dp),
+                                )
                             }
                             Text(
                                 error ?: s?.let { listOf(it.artist, it.album).filter(String::isNotBlank).joinToString(" • ") }

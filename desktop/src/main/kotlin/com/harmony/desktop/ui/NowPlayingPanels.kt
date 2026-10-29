@@ -198,6 +198,8 @@ fun DevicesPanel(app: DesktopApp, onClose: () -> Unit, onOpenConnect: () -> Unit
     val settings by app.settingsFlow.collectAsState()
     val phone by app.player.phone.collectAsState()
     val connect by app.connect.state.collectAsState()
+    val link by app.connect.link.collectAsState()
+    val reconnecting = link is com.harmony.core.remote.PhoneLink.Reconnecting
     val outputs by produceState<List<String>?>(null) { value = withContext(Dispatchers.IO) { app.outputDevices() } }
     val chosen = settings.outputDevice
     Column(Modifier.fillMaxSize()) {
@@ -254,9 +256,13 @@ fun DevicesPanel(app: DesktopApp, onClose: () -> Unit, onOpenConnect: () -> Unit
                         selected = playing,
                         leading = { RoundIcon(Icons.Rounded.Smartphone, accent = playing) },
                         title = name,
-                        subtitle = if (playing) "Playing here now" else "Paired",
+                        subtitle = when {
+                            playing && reconnecting -> "Reconnecting…"
+                            playing -> "Playing here now"
+                            else -> "Paired"
+                        },
                         trailing = {
-                            if (playing) SmallButton("Stop") { app.player.disconnect(name) }
+                            if (playing) SmallButton("Stop") { app.connect.stopPhone() }
                         },
                     )
                 }

@@ -42,6 +42,8 @@ dependencies {
 tasks.test {
     systemProperty("java.awt.headless", "true")
     (findProperty("ffmpegDir") as String?)?.let { systemProperty("harmony.ffmpeg.dir", it) }
+    // The ten-minute Connect fault simulation (ConnectSoakTest) runs only when asked: -PconnectSoak=true.
+    (findProperty("connectSoak") as String?)?.let { systemProperty("connect.soak", it) }
     systemProperty("screenshots.dir", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
     testLogging { events("passed", "failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }

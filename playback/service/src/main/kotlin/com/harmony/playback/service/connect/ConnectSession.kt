@@ -14,6 +14,7 @@ import com.harmony.core.media.artwork.ArtworkCache
 import com.harmony.core.remote.Connect
 import com.harmony.core.remote.ConnectClient
 import com.harmony.core.remote.ConnectRefused
+import com.harmony.core.remote.ConnectSessionEnded
 import com.harmony.core.remote.ControlAction
 import com.harmony.core.remote.ControlRequest
 import com.harmony.core.remote.Discovery
@@ -318,7 +319,9 @@ class ConnectSession @Inject constructor(
         val repeat = repeatOf(exo)
         _state.update { it.copy(busyWith = target.id, error = null, needsCode = null) }
         scope.launch {
-            val fresh = ConnectClient(target.host, target.port, token)
+            // A new id for every session, so the computer can refuse what a late
+            // request from an earlier one would do.
+            val fresh = ConnectClient(target.host, target.port, token, session = java.util.UUID.randomUUID().toString())
             val result = withContext(net) {
                 runCatching {
                     previous?.disconnect()
@@ -621,7 +624,7 @@ class ConnectSession @Inject constructor(
         val c = client ?: return
         pollJob = scope.launch {
             while (isActive && client === c) {
-                delay(POLL_MS)
+                delay(nextPollDelay())
                 val result = withContext(net) { runCatching { c.status() } }
                 if (client !== c) break
                 result.onSuccess { onStatus(it) }.onFailure { onFailure(it) }
@@ -629,8 +632,33 @@ class ConnectSession @Inject constructor(
         }
     }
 
+    /**
+     * Twice a second while the computer answers. While it doesn't, the reads
+     * back off (1, 2, then every 2 to 2.5 s, with a little jitter): no point
+     * knocking twice a second on a computer that isn't there, and the phone's
+     * radio gets to rest. Each failed read can also take up to the client's
+     * 4 s timeout on its own.
+     */
+    private fun nextPollDelay(): Long {
+        if (failures == 0) return POLL_MS
+        val base = (POLL_MS shl failures.coerceAtMost(2)).coerceAtMost(MAX_POLL_BACKOFF_MS)
+        return base + kotlin.random.Random.nextLong(base / 4 + 1)
+    }
+
     private fun onFailure(e: Throwable) {
         val name = computer?.name ?: "the computer"
+        if (e is ConnectSessionEnded) {
+            // The computer let go of this session; carrying on would only fight it.
+            end(
+                error = when (e.reason) {
+                    "replaced" -> "Another phone is playing on $name now. The music is back on this phone."
+                    "stopped_on_computer" -> "Stopped on $name. The music is back on this phone."
+                    else -> "Lost the connection to $name. The music is back on this phone."
+                },
+                tellComputer = false,
+            )
+            return
+        }
         if (e is ConnectRefused) {
             computer?.let { pc -> savePaired(loadPaired().filter { it.computer.id != pc.id }) }
             end(error = "$name doesn't know this phone any more. Connect again to pair.", tellComputer = false)
@@ -855,6 +883,8 @@ class ConnectSession @Inject constructor(
         const val KEY_COMPUTERS = "computers"
         const val SEARCH_MS = 1_800
         const val POLL_MS = 500L
+        /** The longest pause between reads while the computer doesn't answer (plus up to a quarter of jitter). */
+        const val MAX_POLL_BACKOFF_MS = 2_000L
         const val TRUST_LOCAL_MS = 1_500L
         const val DRIFT_MS = 1_500L
         const val MIN_FAILURES = 6
