@@ -180,6 +180,14 @@ internal fun QueueSheetContent(
         if (draggedKey == null) localOrder = null
     }
 
+    // A lazy list keeps its scroll position on the KEY of its first visible
+    // row. Reordering past that row then scrolls the list on its own: the row
+    // being dragged slid out of view, which ended the drag with nothing moved.
+    // Each reorder pins the viewport to where it is instead.
+    fun holdViewport() {
+        listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+    }
+
     /**
      * Sends one move: the row at [from] of [before] to [to], [base] being the
      * queue index of the first row. The player checks the song is still
@@ -192,6 +200,7 @@ internal fun QueueSheetContent(
         }
         val after = before.moved(from, to)
         keys.onMoved(after)
+        holdViewport()
         // Two copies of one song swapped: nothing visible changes, and the
         // player's queue won't either, so there is no answer to wait for.
         localOrder = if (after.map { it.song.id } == before.map { it.song.id }) null else after
@@ -318,7 +327,10 @@ internal fun QueueSheetContent(
                                             dragTo -= 1
                                             dragOffset += rowHeight
                                         }
-                                        localOrder = order
+                                        if (order !== current) {
+                                            holdViewport()
+                                            localOrder = order
+                                        }
                                     }
                                 },
                                 onDragEnd = {
