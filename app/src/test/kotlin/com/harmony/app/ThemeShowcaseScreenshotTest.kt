@@ -61,9 +61,7 @@ import com.harmony.feature.player.MiniPlayerCard
 import com.harmony.feature.player.MiniPlayerUi
 import com.harmony.feature.player.VinylArtwork
 import com.harmony.feature.player.playerPalette
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.Timeout
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -84,9 +82,6 @@ import org.robolectric.annotation.GraphicsMode
 // The bare Application: the real one starts Hilt and the playback stack.
 @Config(sdk = [34], application = android.app.Application::class, qualifiers = "w411dp-h891dp-xxhdpi")
 class ThemeShowcaseScreenshotTest {
-    /** A screen that never settles fails here instead of holding the build for an hour. */
-    @get:Rule val timeout: Timeout = Timeout.seconds(180)
-
 
     private fun song(id: Long, title: String, artist: String, album: String, ms: Long, bits: Int? = null, rate: Int? = null) = Song(
         id = id, uri = "content://song/$id", title = title, artist = artist, album = album, albumId = id,

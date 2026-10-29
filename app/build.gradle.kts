@@ -33,6 +33,13 @@ android {
     // Robolectric renders the screenshot tests with the app's real resources.
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // A failing screenshot says why in the build log, not only in the report.
+            test.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            }
+        }
     }
 
     // The download runtime (see feature/downloads): stable is SpotiFLAC 4.9.6's
