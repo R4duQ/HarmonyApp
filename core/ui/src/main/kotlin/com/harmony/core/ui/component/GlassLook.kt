@@ -178,7 +178,7 @@ fun GlassSearchBar(
     autoFocus: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    // Cyber-Glass: a dark translucent pill with a 1dp neon indigo rim.
+    // Cyber-Glass: a glass pill (obsidian in dark, white in light) with a 1dp neon indigo rim.
     val cyber = palette.isCyberGlass
     val placeholderColor = if (cyber) CyberGlassColors.TextPlaceholder else palette.muted
     Row(
@@ -343,7 +343,10 @@ fun GlassCircleButton(
         modifier = modifier
             .size(size)
             // Cyber-Glass: a soft glowing ring, brighter while the button is on.
-            .then(if (cyber) Modifier.neonGlow(CyberGlassColors.Cyan, 6.dp, if (filled) 0.40f else 0.16f) else Modifier)
+            .then(
+                if (cyber) Modifier.neonGlow(CyberGlassColors.Cyan, 6.dp, (if (filled) 0.40f else 0.16f) * CyberGlassColors.Glow)
+                else Modifier,
+            )
             .clip(CircleShape)
             .background(container)
             .then(
@@ -482,9 +485,10 @@ fun GlassSegmentedTabs(
 /**
  * The Songs / Albums / Artists pills in Cyber-Glass. Same geometry as the
  * editorial chips (equal-width capsules, nothing reflows): the selected one
- * fills with a mint-to-azure gradient, glows cyan and carries dark bold ink;
- * the others are dark glass capsules with a slate-cyan rim and silver ink;
- * an empty section sits one tier quieter.
+ * fills with a mint-to-azure gradient, glows cyan and carries bold ink in
+ * the scheme's on-accent (obsidian in dark, white in light); the others are
+ * glass capsules with a slate rim and silver ink; an empty section sits one
+ * tier quieter.
  */
 @Composable
 private fun CyberSegmentedTabs(
@@ -493,6 +497,7 @@ private fun CyberSegmentedTabs(
     onSelect: (Int) -> Unit,
     modifier: Modifier,
 ) {
+    val glass = CyberGlassColors
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -508,9 +513,9 @@ private fun CyberSegmentedTabs(
             )
             val content by animateColorAsState(
                 targetValue = when {
-                    isSelected -> CyberGlassColors.Obsidian
-                    isQuiet -> CyberGlassColors.TextQuiet
-                    else -> CyberGlassColors.TextSilver
+                    isSelected -> glass.OnAccent
+                    isQuiet -> glass.TextQuiet
+                    else -> glass.TextSilver
                 },
                 animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                 label = "cyber-segment-ink-$index",
@@ -521,20 +526,20 @@ private fun CyberSegmentedTabs(
                     .height(40.dp)
                     // The glow: a cyan shadow that rises with the selection.
                     .shadow(
-                        elevation = (10f * selection).dp,
+                        elevation = (10f * selection * glass.Glow).dp,
                         shape = Capsule,
                         clip = false,
-                        ambientColor = CyberGlassColors.Cyan,
-                        spotColor = CyberGlassColors.Cyan,
+                        ambientColor = glass.Cyan,
+                        spotColor = glass.Cyan,
                     )
                     .clip(Capsule)
-                    .background(CyberGlassColors.Chip)
+                    .background(glass.Chip)
                     .drawBehind {
-                        if (selection > 0f) drawRect(CyberGlassColors.SelectedChip, alpha = selection)
+                        if (selection > 0f) drawRect(glass.SelectedChip, alpha = selection)
                     }
                     .border(
                         1.dp,
-                        CyberGlassColors.ChipBorder.copy(alpha = (if (isQuiet) 0.6f else 1f) * (1f - selection)),
+                        glass.ChipBorder.copy(alpha = (if (isQuiet) 0.6f else 1f) * (1f - selection)),
                         Capsule,
                     )
                     .clickable(
@@ -863,8 +868,8 @@ private fun GlassSongRowContent(
  * A song row in Cyber-Glass. The same row as the glass one (artwork, title
  * over artist, duration and the overflow menu on the right): a 50dp cover
  * with a faint cyan rim, a neon waveform for songs without a cover, a bold
- * white title, a cool grey artist, a cyan monospace duration and a divider
- * barely there.
+ * title in the scheme's primary ink, a cool grey artist, a cyan monospace
+ * duration and a divider barely there.
  */
 @Composable
 fun TrackListItem(

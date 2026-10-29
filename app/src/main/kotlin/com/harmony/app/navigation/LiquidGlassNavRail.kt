@@ -34,7 +34,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -46,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.theme.CyberGlassColors
-import com.harmony.core.ui.theme.cyberGlassActive
 import kotlin.math.roundToInt
 
 /** Width of the rail's glass capsule. */
@@ -59,17 +57,17 @@ val NavRailInset: Dp = 12.dp
 val NavRailClearance: Dp = NavRailWidth + NavRailInset * 2
 
 private val RailShape = RoundedCornerShape(32.dp)
-private val PillShape = RoundedCornerShape(22.dp)
 private val ItemHeight = 68.dp
 
 /**
- * The tablet form of [LiquidGlassNavBar]: the same frosted glass and sliding
- * selection pill, stood upright at the left edge where a hand holding a
- * tablet can reach it. Phones keep the bottom bar.
+ * The tablet form of [LiquidGlassNavBar]: the same Cyber-Glass and sliding
+ * cyan glow, stood upright at the left edge where a hand holding a tablet
+ * can reach it. Phones keep the bottom bar. [palette] stays for parity with
+ * the bar; the glass doesn't tint to it.
  *
  * [selectedIndex] may be -1 on pages that aren't one of the destinations
  * (an album, a playlist, Settings). The rail stays so you can jump straight
- * to another section, and no pill is drawn.
+ * to another section, and no glow is drawn.
  */
 @Composable
 fun LiquidGlassNavRail(
@@ -86,31 +84,17 @@ fun LiquidGlassNavRail(
     val select by rememberUpdatedState(onSelect)
 
     // Same derivations as the bottom bar, so switching a device between
-    // the two layouts never changes the look of the glass.
-    // Dark theme: the bottom bar's Cyber-Glass, upright.
-    val cyber = cyberGlassActive()
-    val base = if (cyber) CyberGlassColors.Obsidian else palette.field
-    val glass = if (cyber) CyberGlassColors.NavGlass.copy(alpha = CyberGlassColors.NAV_ALPHA) else remember(palette.field) {
-        lerp(palette.field, Color.White, 0.62f).copy(alpha = 0.55f)
+    // the two layouts never changes the look of the glass: the bottom bar's
+    // Cyber-Glass, upright, in either theme's scheme.
+    val cyber = CyberGlassColors
+    val base = cyber.Obsidian
+    val glass = cyber.NavGlass.copy(alpha = cyber.NAV_ALPHA)
+    val rim = remember(cyber) {
+        Brush.verticalGradient(listOf(cyber.NavRim, cyber.NavRim.copy(alpha = 0.08f)))
     }
-    val rim = if (cyber) {
-        remember {
-            Brush.verticalGradient(listOf(CyberGlassColors.NavRim, CyberGlassColors.NavRim.copy(alpha = 0.08f)))
-        }
-    } else {
-        remember(palette.ink) {
-            Brush.verticalGradient(
-                listOf(
-                    Color.White.copy(alpha = 0.75f),
-                    Color.White.copy(alpha = 0.18f),
-                    palette.ink.copy(alpha = 0.06f),
-                ),
-            )
-        }
-    }
-    val shadowColor = if (cyber) Color.Black else palette.ink
-    val selectedInk = if (cyber) CyberGlassColors.Cyan else palette.ink
-    val idleInk = if (cyber) CyberGlassColors.TextSecondary else palette.muted
+    val shadowColor = cyber.Shadow
+    val selectedInk = cyber.Cyan
+    val idleInk = cyber.TextSecondary
 
     Box(
         modifier
@@ -169,42 +153,29 @@ fun LiquidGlassNavRail(
                 ),
                 label = "glass-rail-indicator",
             )
-            if (cyber) {
-                Box(
-                    Modifier
-                        .offset(y = indicatorY)
-                        .fillMaxWidth()
-                        .height(ItemHeight)
-                        .drawBehind {
-                            val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
-                            val radius = 24.dp.toPx()
-                            drawCircle(
-                                Brush.radialGradient(
-                                    listOf(
-                                        CyberGlassColors.Cyan.copy(alpha = 0.34f),
-                                        CyberGlassColors.Cyan.copy(alpha = 0.10f),
-                                        Color.Transparent,
-                                    ),
-                                    center = center,
-                                    radius = radius,
+            Box(
+                Modifier
+                    .offset(y = indicatorY)
+                    .fillMaxWidth()
+                    .height(ItemHeight)
+                    .drawBehind {
+                        val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
+                        val radius = 24.dp.toPx()
+                        drawCircle(
+                            Brush.radialGradient(
+                                listOf(
+                                    cyber.Cyan.copy(alpha = 0.34f * cyber.Glow),
+                                    cyber.Cyan.copy(alpha = 0.10f * cyber.Glow),
+                                    Color.Transparent,
                                 ),
-                                radius = radius,
                                 center = center,
-                            )
-                        },
-                )
-            } else {
-                Box(
-                    Modifier
-                        .offset(y = indicatorY)
-                        .fillMaxWidth()
-                        .height(ItemHeight)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .clip(PillShape)
-                        .background(palette.ink.copy(alpha = 0.10f))
-                        .border(width = 0.5.dp, color = Color.White.copy(alpha = 0.45f), shape = PillShape),
-                )
-            }
+                                radius = radius,
+                            ),
+                            radius = radius,
+                            center = center,
+                        )
+                    },
+            )
         }
 
         Column(Modifier.fillMaxWidth()) {

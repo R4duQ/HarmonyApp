@@ -43,8 +43,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIncomingIntent(intent)
         setContent {
-            val settings by settingsRepository.settings
-                .collectAsStateWithLifecycle(initialValue = UserSettings())
+            // Null until the saved settings are read. Composing with the
+            // defaults meanwhile drew the first frame in the system's theme
+            // even when the listener had chosen the other one; the window's
+            // own background (the theme's Home field) shows for those few
+            // milliseconds instead.
+            val loaded by settingsRepository.settings
+                .collectAsStateWithLifecycle<UserSettings?>(initialValue = null)
+            val settings = loaded ?: return@setContent
 
             val dark = when (settings.themeMode) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()

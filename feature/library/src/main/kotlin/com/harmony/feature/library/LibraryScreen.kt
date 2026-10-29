@@ -130,7 +130,7 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    // Cyber-Glass obsidian and cyan in dark theme, the amber editorial look in light.
+    // Cyber-Glass: obsidian and cyan in dark theme, pearl and deep cyan in light.
     val palette = libraryPalette()
     val audioPermission = if (Build.VERSION.SDK_INT >= 33) {
         Manifest.permission.READ_MEDIA_AUDIO

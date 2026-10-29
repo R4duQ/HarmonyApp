@@ -37,7 +37,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -48,7 +47,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
 import com.harmony.core.ui.theme.CyberGlassColors
-import com.harmony.core.ui.theme.cyberGlassActive
 import kotlin.math.roundToInt
 
 /**
@@ -77,16 +75,17 @@ private val BarInset = 16.dp
  * sitting on top of content" illusion — without it the translucency has
  * nothing to be translucent against.
  *
- * The surface is frosted, not opaque. The bar's fill is the section palette
- * blended toward white and held below full alpha, with a bright hairline rim
- * along the edge. Real backdrop blur needs a library (see the note at the
- * bottom of this file); the blend plus rim gets most of the way there and
- * costs nothing.
+ * The surface is frosted, not opaque: Cyber-Glass nav glass (obsidian in
+ * dark theme, pearl in light) held below full alpha, with a top-lit cyan
+ * rim. Real backdrop blur needs a library (see the note at the bottom of
+ * this file); the fill plus rim gets most of the way there and costs
+ * nothing. [palette] stays in the signature so the bar remains a drop-in
+ * for [EditorialNavBar]; the glass no longer tints to it.
  *
- * The selection is a capsule that slides. The indicator travels on a spring
- * between destinations rather than cutting, and the selected item's icon
- * scales up very slightly as it lands — iOS leans on that little bit of
- * physics to make the bar feel responsive under the thumb.
+ * The selection is a cyan glow that slides. It travels on a spring between
+ * destinations rather than cutting, and the selected item's icon scales up
+ * very slightly as it lands — iOS leans on that little bit of physics to
+ * make the bar feel responsive under the thumb.
  *
  * The swipe gesture is carried over unchanged: dragging horizontally walks
  * the selection through destinations, one per item-width of travel, with a
@@ -110,46 +109,18 @@ fun LiquidGlassNavBar(
     val currentIndex by rememberUpdatedState(selectedIndex)
     val select by rememberUpdatedState(onSelect)
 
-    // Dark theme: Cyber-Glass. Darker, denser frost (labels stay crisp over
-    // the list), a top-lit cyan rim, and the selection as a cyan glow.
-    val cyber = cyberGlassActive()
-
-    // Glass is the section's own field colour pulled toward white. Deriving
-    // it from the palette rather than hardcoding a grey means the bar still
-    // belongs to whichever screen is above it — amber Library and blue EQ
-    // each get their own tint of frost instead of one neutral slab.
-    val glass = if (cyber) CyberGlassColors.NavGlass.copy(alpha = CyberGlassColors.NAV_ALPHA) else remember(palette.field) {
-        // 0.72 was set back when the list scrolled underneath and competed
-        // with these labels for contrast. It no longer does — the shell
-        // ends content at the chrome's top edge — so the backdrop here is
-        // the page's own flat field, and thinning the glass costs nothing.
-        // Measured, the labels stay above 14:1 in both themes at this
-        // value, because the frost is derived from the very field showing
-        // through it.
-        lerp(palette.field, Color.White, 0.62f).copy(alpha = 0.55f)
-    }
+    // Cyber-Glass, in either theme's scheme: dense frost (labels stay crisp
+    // over the list), a top-lit cyan rim, and the selection as a cyan glow.
+    val cyber = CyberGlassColors
+    val glass = cyber.NavGlass.copy(alpha = cyber.NAV_ALPHA)
     // The rim: brighter along the top edge, fading out by the bottom. This
     // is the single cheapest cue that a surface is glass rather than paint.
-    val rim = if (cyber) {
-        remember {
-            Brush.verticalGradient(
-                listOf(CyberGlassColors.NavRim, CyberGlassColors.NavRim.copy(alpha = 0.08f)),
-            )
-        }
-    } else {
-        remember(palette.ink) {
-            Brush.verticalGradient(
-                listOf(
-                    Color.White.copy(alpha = 0.75f),
-                    Color.White.copy(alpha = 0.18f),
-                    palette.ink.copy(alpha = 0.06f),
-                ),
-            )
-        }
+    val rim = remember(cyber) {
+        Brush.verticalGradient(listOf(cyber.NavRim, cyber.NavRim.copy(alpha = 0.08f)))
     }
-    val shadowColor = if (cyber) Color.Black else palette.ink
-    val selectedInk = if (cyber) CyberGlassColors.Cyan else palette.ink
-    val idleInk = if (cyber) CyberGlassColors.TextSecondary else palette.muted
+    val shadowColor = cyber.Shadow
+    val selectedInk = cyber.Cyan
+    val idleInk = cyber.TextSecondary
 
     Box(
         modifier
@@ -217,48 +188,29 @@ fun LiquidGlassNavBar(
                 label = "glass-nav-indicator",
             )
 
-            if (cyber) {
-                // A soft cyan glow behind the selected icon, sliding with the selection.
-                Box(
-                    Modifier
-                        .offset(x = indicatorX)
-                        .width(itemWidth)
-                        .fillMaxHeight()
-                        .drawBehind {
-                            val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
-                            val radius = 24.dp.toPx()
-                            drawCircle(
-                                Brush.radialGradient(
-                                    listOf(
-                                        CyberGlassColors.Cyan.copy(alpha = 0.34f),
-                                        CyberGlassColors.Cyan.copy(alpha = 0.10f),
-                                        Color.Transparent,
-                                    ),
-                                    center = center,
-                                    radius = radius,
-                                ),
-                                radius = radius,
-                                center = center,
-                            )
-                        },
-                )
-            } else Box(
+            // A soft cyan glow behind the selected icon, sliding with the selection.
+            Box(
                 Modifier
                     .offset(x = indicatorX)
                     .width(itemWidth)
                     .fillMaxHeight()
-                    .padding(horizontal = 4.dp, vertical = 6.dp)
-                    .clip(Capsule)
-                    // Deliberately faint. On iOS the selected pill is barely
-                    // darker than the bar — the colour lift on the icon and
-                    // label is what actually signals selection, and a heavy
-                    // pill here would fight it.
-                    .background(palette.ink.copy(alpha = 0.10f))
-                    .border(
-                        width = 0.5.dp,
-                        color = Color.White.copy(alpha = 0.45f),
-                        shape = Capsule,
-                    ),
+                    .drawBehind {
+                        val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
+                        val radius = 24.dp.toPx()
+                        drawCircle(
+                            Brush.radialGradient(
+                                listOf(
+                                    cyber.Cyan.copy(alpha = 0.34f * cyber.Glow),
+                                    cyber.Cyan.copy(alpha = 0.10f * cyber.Glow),
+                                    Color.Transparent,
+                                ),
+                                center = center,
+                                radius = radius,
+                            ),
+                            radius = radius,
+                            center = center,
+                        )
+                    },
             )
 
             Row(Modifier.fillMaxWidth().fillMaxHeight()) {

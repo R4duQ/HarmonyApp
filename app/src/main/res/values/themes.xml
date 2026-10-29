@@ -18,10 +18,13 @@
         <item name="android:colorPrimaryDark">@color/harmony_ink</item>
         <item name="android:colorAccent">@color/harmony_amber</item>
         <item name="android:colorBackground">@color/harmony_ink</item>
-        <item name="android:windowBackground">@color/harmony_ink</item>
+        <!-- What shows before the first frame: the field of the first page
+             (Home) in this theme, so a light start doesn't flash near-black.
+             values-night/ has the dark one. -->
+        <item name="android:windowBackground">@color/harmony_window</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <!-- Compose owns the window; edge-to-edge is handled in MainActivity. -->
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
