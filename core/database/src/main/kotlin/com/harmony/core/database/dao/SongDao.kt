@@ -184,6 +184,14 @@ interface SongDao {
 
     data class IdHashRow(val id: Long, val fileHash: String)
 
+    /**
+     * A song with exactly this content (the scanner's partial hash and size),
+     * for "Send to phone" to tell a song the phone already has. Blocking: call
+     * it off the main thread.
+     */
+    @Query("SELECT uri FROM songs WHERE fileHash = :hash AND fileSizeBytes = :size LIMIT 1")
+    fun uriWithContent(hash: String, size: Long): String?
+
     /** Smart Shuffle's library snapshot: who made each song (edits applied), for anti-clumping. */
     @Query("SELECT id, artist, albumId FROM songs_effective")
     suspend fun shuffleRows(): List<ShuffleSongRow>

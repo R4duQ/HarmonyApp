@@ -32,7 +32,10 @@ class SocketFetcher(
     private val connectTimeoutMs: Int = 5_000,
     private val readTimeoutMs: Int = 15_000,
 ) : Fetcher {
-    override fun get(url: String, offset: Long, etag: String?): FetchResponse {
+    override fun get(url: String, offset: Long, etag: String?): FetchResponse = get(url, offset, etag, emptyMap())
+
+    /** As [get], with [headers] of the caller's own (a token: kept out of the address, so out of logs). */
+    fun get(url: String, offset: Long, etag: String?, headers: Map<String, String>): FetchResponse {
         val uri = URI(url)
         if (uri.scheme != "http") throw IOException("only http: $url")
         val host = uri.host ?: throw IOException("no host: $url")
@@ -49,6 +52,10 @@ class SocketFetcher(
             if (offset > 0) {
                 head.append("Range: bytes=").append(offset).append("-\r\n")
                 if (etag != null) head.append("If-Range: ").append(etag).append("\r\n")
+            }
+            headers.forEach { (k, v) ->
+                require('\r' !in k && '\n' !in k && '\r' !in v && '\n' !in v) { "bad header" }
+                head.append(k).append(": ").append(v).append("\r\n")
             }
             head.append("\r\n")
             socket.getOutputStream().apply { write(head.toString().toByteArray(Charsets.ISO_8859_1)); flush() }

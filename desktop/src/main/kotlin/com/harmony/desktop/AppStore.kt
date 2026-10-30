@@ -20,6 +20,9 @@ object AppDirs {
     val settings: File get() = File(root, "settings.json")
     val plays: File get() = File(root, "plays.json")
 
+    /** "Send to phone": what was sent to which phone and how far it got (no music, only the list). */
+    val transfers: File get() = File(root, "transfers.json")
+
     /**
      * Songs from the phone kept for playing here (Universal Queue cache): in
      * the local, not roaming, app data, away from the music folders, so it is

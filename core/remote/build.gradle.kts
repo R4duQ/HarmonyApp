@@ -3,6 +3,8 @@ plugins {
 }
 
 dependencies {
+    // The library's file hash recipe (PartialHash), shared with the phone's scanner.
+    implementation(projects.core.model)
     // Android ships org.json in the platform; the Windows app bundles it. Not packaged from here,
     // so the APK never carries a second copy of platform classes.
     compileOnly("org.json:json:20240303")

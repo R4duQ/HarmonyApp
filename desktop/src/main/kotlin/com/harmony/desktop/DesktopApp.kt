@@ -41,6 +41,8 @@ class DesktopApp(
     val cache: com.harmony.core.remote.cache.MediaCache? = null,
     /** This computer's songs for phones; null in tests. */
     val media: com.harmony.desktop.connect.PcMedia? = null,
+    /** "Send to phone": the files offered to paired phones; null in tests. */
+    val transfers: com.harmony.core.remote.transfer.TransferOutbox? = null,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -58,7 +60,13 @@ class DesktopApp(
     private val _muted = MutableStateFlow(false)
     val muted: StateFlow<Boolean> = _muted.asStateFlow()
 
+    private val _sends = MutableStateFlow(transfers?.entries() ?: emptyList())
+
+    /** Everything sent to phones, as it stands (the phone's last word on each file). */
+    val sends: StateFlow<List<com.harmony.core.remote.transfer.OutboxEntry>> = _sends.asStateFlow()
+
     init {
+        transfers?.onChange = { _sends.value = transfers.entries() }
         engine.volume = settings.current.volume
         engine.eq = settings.current.eq
         countPlays()
@@ -143,6 +151,36 @@ class DesktopApp(
         if (!on) player.sharedQueue(null)
     }
 
+    /** The phones paired with this computer: token -> name. */
+    fun pairedPhones(): Map<String, String> = connect.state.value.phones
+
+    /**
+     * Sends [tracks] to the paired phone of [token] for good ("Send to phone"):
+     * the original files, which it saves in its library. Songs in a format the
+     * phone can't play go only with [includeUnsupported]. Returns the send's
+     * id, or null when nothing was left to send.
+     */
+    fun sendToPhone(token: String, tracks: List<LocalTrack>, includeUnsupported: Boolean): String? {
+        val box = transfers ?: return null
+        val phone = pairedPhones()[token] ?: return null
+        val files = tracks.distinctBy { it.path }
+            .filter { File(it.path).isFile }
+            .filter { includeUnsupported || com.harmony.desktop.connect.PcMedia.phoneCanPlay(it) }
+            .map {
+                com.harmony.core.remote.transfer.OutgoingFile(
+                    path = it.path, title = it.title, artist = it.artist, album = it.album, durationMs = it.durationMs,
+                    mime = com.harmony.desktop.connect.PcMedia.contentTypeOf(File(it.path).extension),
+                    playableOnPhone = com.harmony.desktop.connect.PcMedia.phoneCanPlay(it),
+                )
+            }
+        if (files.isEmpty()) return null
+        return box.create(token, phone, settings.current.pcId, settings.current.pcName, files)
+    }
+
+    fun cancelSend(id: String) = transfers?.cancel(id)
+    fun retrySend(id: String) = transfers?.retry(id)
+    fun removeSend(id: String) = transfers?.remove(id)
+
     /** The sound outputs there are now (asks Windows: call it off the UI thread). */
     fun outputDevices(): List<String> = outputs()
 
@@ -161,6 +199,7 @@ class DesktopApp(
         connect.close()
         cache?.close()
         media?.close()
+        transfers?.close()
         engine.shutdown()
         settings.flush()
         plays.flush()
@@ -188,6 +227,10 @@ class DesktopApp(
                 log = { java.util.logging.Logger.getLogger("com.harmony.connect").info(it) },
             )
             val player = PlayerController(engine, cache, pcId = settings.current.pcId, localFile = media::file)
+            val transfers = com.harmony.core.remote.transfer.TransferOutbox(
+                AppDirs.transfers,
+                log = { java.util.logging.Logger.getLogger("com.harmony.transfer").info(it) },
+            )
             // The shared queue lives as long as the app; it is offered to phones only while switched on.
             val sharedQueue = com.harmony.core.remote.queue.QueueService(onChange = { state, _ -> player.sharedQueue(state) })
             val connect = ConnectHost(
@@ -199,6 +242,7 @@ class DesktopApp(
                 queue = { sharedQueue.takeIf { settings.current.sharedQueue } },
                 // Offered with the shared queue: phones only ask for songs it has given them.
                 media = { id -> if (settings.current.sharedQueue) media(id) else com.harmony.core.remote.ServedMedia.Missing },
+                transfers = transfers,
             )
             // Edits made in the queue panel: the computer is the coordinator, so they go straight in.
             player.onSharedEdit = { op ->
@@ -208,7 +252,7 @@ class DesktopApp(
                     )
                 }
             }
-            val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers), cache = cache, media = media)
+            val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers), cache = cache, media = media, transfers = transfers)
             library = { app.tracks.value }
             connect.start()
             app.rescan()

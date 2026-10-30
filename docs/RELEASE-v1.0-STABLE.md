@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **149**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 148), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **150**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 149), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -203,6 +203,15 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   from the computer's own library takes over, the phone shows its song paused and play
   brings it back. The computer is told each song's length, so its progress bar follows
   along. Choose **This phone** to bring the music back, paused where it was.
+- **Send to phone: songs from your PC, kept for good.** In Harmony for Windows, choose
+  **Send to phone** on a song, on songs you pick, or on an album, then the paired phone.
+  With Harmony open on the phone, it asks once (or never again, if you choose to always
+  accept from that computer) and saves the original files in Music/Harmony/From PC (or
+  your download folder), where the library picks them up. Each file is checked against
+  the computer's (size and SHA-256) before it is saved, so nothing arrives damaged; a cut
+  connection or a restart carries on from where it stopped; songs you already have are not
+  copied twice. The transfer runs in the background with a notification (progress,
+  Cancel) and slows down while music plays. Only the phone it was sent to can take it.
 - **Closing the app closes the notification.** Swiping Harmony away stops playback and
   removes its notification unless Android Auto is connected. Before, the system's media
   controls, Bluetooth or a watch could be mistaken for the car, leaving music and a

@@ -57,6 +57,8 @@ class ConnectHost(
     private val queue: () -> com.harmony.core.remote.queue.QueueService? = { null },
     /** This computer's songs for paired phones (Universal Queue, stage 6); null: none. */
     private val media: ((String) -> com.harmony.core.remote.ServedMedia)? = null,
+    /** "Send to phone": this computer's offers to paired phones; null: none. */
+    private val transfers: com.harmony.core.remote.transfer.TransferOutbox? = null,
 ) : AutoCloseable {
     private val _state = MutableStateFlow(ConnectState())
     val state: StateFlow<ConnectState> = _state.asStateFlow()
@@ -89,6 +91,7 @@ class ConnectHost(
             lostAfterMs = lostAfterMs,
             queue = queue,
             media = media,
+            transfers = transfers,
         )
         this.receiver = receiver
         // The usual port, or any free one if something else has it; discovery tells phones which.

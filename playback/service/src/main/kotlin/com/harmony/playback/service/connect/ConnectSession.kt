@@ -72,7 +72,7 @@ class ConnectSession @Inject constructor(
     @ApplicationContext private val context: Context,
     private val artworkCache: ArtworkCache,
     private val remoteMedia: RemoteMedia,
-) : ConnectController {
+) : ConnectController, com.harmony.domain.playback.PairedComputers {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val net = Executors.newSingleThreadExecutor { Thread(it, "harmony-connect").apply { isDaemon = true } }
         .asCoroutineDispatcher()
@@ -889,6 +889,30 @@ class ConnectSession @Inject constructor(
         }
         prefs.edit().putString(KEY_COMPUTERS, array.toString()).apply()
     }
+
+    // ---- Paired computers, for "Send to phone" -------------------------------------
+
+    override fun paired(): List<com.harmony.domain.playback.PairedComputer> = synchronized(pairedLock) {
+        loadPaired().map { com.harmony.domain.playback.PairedComputer(it.computer.id, it.computer.name, it.computer.host, it.computer.port, it.token) }
+    }
+
+    override fun relocate(id: String): com.harmony.domain.playback.PairedComputer? {
+        val found = runCatching { Discovery.find(SEARCH_MS) }.getOrDefault(emptyList()).firstOrNull { it.id == id } ?: return null
+        return synchronized(pairedLock) {
+            val saved = loadPaired()
+            val updated = saved.map { s ->
+                if (s.computer.id == id) s.copy(computer = s.computer.copy(host = found.host, port = found.port)) else s
+            }
+            if (updated != saved) savePaired(updated)
+            updated.firstOrNull { it.computer.id == id }?.let {
+                com.harmony.domain.playback.PairedComputer(it.computer.id, it.computer.name, it.computer.host, it.computer.port, it.token)
+            }
+        }
+    }
+
+    override val playingOnComputer: Boolean get() = isActive
+
+    private val pairedLock = Any()
 
     /** The audio of [mediaId] on this phone, as the shared queue and the computer's cache name it. */
     private fun contentKey(mediaId: String) =

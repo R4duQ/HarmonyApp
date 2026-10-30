@@ -37,6 +37,8 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Refresh
@@ -172,6 +174,11 @@ fun SongsPage(
     val phone by app.player.phone.collectAsState()
     val toPhone = settings.sharedQueue && phone != null
     var query by remember(initialQuery) { mutableStateOf(initialQuery) }
+    // "Send to phone": songs picked with the round buttons, then sent together.
+    var selecting by remember { mutableStateOf(false) }
+    var picked by remember { mutableStateOf(emptySet<String>()) }
+    var sending by remember { mutableStateOf<List<LocalTrack>?>(null) }
+    sending?.let { list -> SendToPhoneDialog(app, list, onDismiss = { sending = null }, onSent = { selecting = false; picked = emptySet() }) }
     val covers = remember(all) { albumCovers(all) }
     val favorites = settings.favorites.toSet()
     val shown = remember(all, query, filterArtist, favoritesOnly, favorites) {
@@ -190,6 +197,15 @@ fun SongsPage(
             onBack = onBack,
         ) {
             SearchBox(query) { query = it }
+            // Picking songs to send to a phone for good.
+            if (selecting) {
+                ActionButton(if (picked.isEmpty()) "Pick songs" else "Send ${picked.size} to phone", Icons.Rounded.PhoneAndroid, {
+                    if (picked.isNotEmpty()) sending = shown.filter { it.path in picked }
+                }, primary = picked.isNotEmpty())
+                ActionButton("Done", Icons.Rounded.Close, { selecting = false; picked = emptySet() })
+            } else {
+                ActionButton("Send to phone", Icons.Rounded.PhoneAndroid, { selecting = true })
+            }
             ActionButton("Shuffle", Icons.Rounded.Shuffle, {
                 if (shown.isNotEmpty()) {
                     if (!app.player.shuffle.value) app.player.toggleShuffle()
@@ -231,6 +247,9 @@ fun SongsPage(
                     onPlay = { app.player.playLocal(shown, i) },
                     onAlbum = { onOpenAlbum(t.album, t.albumArtist ?: t.artist) },
                     toPhone = if (toPhone) { next -> app.player.sharedAdd(t, next) } else null,
+                    picked = if (selecting) t.path in picked else null,
+                    onPick = { picked = if (t.path in picked) picked - t.path else picked + t.path },
+                    onSend = { sending = listOf(t) },
                 )
             }
         }
@@ -255,6 +274,11 @@ private fun SongRow(
     onAlbum: () -> Unit,
     /** Into the phone's queue (true: play next); null while no phone shares its queue here. */
     toPhone: ((Boolean) -> Unit)? = null,
+    /** Picked for sending to the phone (null: not picking). */
+    picked: Boolean? = null,
+    onPick: () -> Unit = {},
+    /** Send this song to a phone for good. */
+    onSend: () -> Unit = {},
 ) {
     val c = LocalHarmonyColors.current
     val accent = if (c.dark) Accent.PurpleLight else Accent.Purple
@@ -273,11 +297,13 @@ private fun SongRow(
             )
             .hoverable(hover)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(role = Role.Button, onClick = onPlay)
+            .clickable(role = Role.Button, onClick = if (picked != null) onPick else onPlay)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(44.dp)) {
+        if (picked != null) {
+            androidx.compose.material3.Checkbox(picked, { onPick() }, Modifier.size(44.dp).testTag("pick_${index}"))
+        } else Box(Modifier.width(44.dp)) {
             when {
                 current -> Icon(Icons.Rounded.GraphicEq, contentDescription = "Playing", tint = accent, modifier = Modifier.size(18.dp))
                 hovered -> Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = c.ink, modifier = Modifier.size(18.dp))
@@ -294,6 +320,7 @@ private fun SongRow(
                 PhoneQueueAction(Icons.Rounded.PlaylistPlay, "Play next on the phone") { toPhone(true) }
                 PhoneQueueAction(Icons.Rounded.PlaylistAdd, "Add to the phone's queue") { toPhone(false) }
             }
+            if (hovered && picked == null) SendToPhoneButton(onSend)
         }
         Text(
             track.album, fontSize = 13.sp, color = c.ink.copy(alpha = if (hovered) 0.9f else 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -392,6 +419,9 @@ fun AlbumPage(app: DesktopApp, loader: ImageLoader, album: String, artist: Strin
                         if (tracks.isNotEmpty()) app.player.playLocal(tracks, tracks.indices.random())
                     })
                 }
+                var sendAlbum by remember { mutableStateOf(false) }
+                ActionButton("Send to phone", Icons.Rounded.PhoneAndroid, { sendAlbum = true }, modifier = Modifier.padding(top = 10.dp))
+                if (sendAlbum) SendToPhoneDialog(app, tracks, onDismiss = { sendAlbum = false })
             }
             LazyColumn(Modifier.weight(1f).padding(start = 32.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                 itemsIndexed(tracks, key = { _, t -> t.path }) { i, t ->
