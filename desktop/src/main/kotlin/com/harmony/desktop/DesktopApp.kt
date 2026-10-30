@@ -37,6 +37,8 @@ class DesktopApp(
     val plays: PlayStats = PlayStats(),
     /** The sound outputs to choose from (Windows' own list; a fixed one in tests). */
     private val outputs: () -> List<String> = { com.harmony.desktop.engine.AudioOutputs.list() },
+    /** The phone's songs kept here (Universal Queue cache); null in tests. */
+    val cache: com.harmony.core.remote.cache.MediaCache? = null,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -130,6 +132,9 @@ class DesktopApp(
 
     fun setDarkTheme(dark: Boolean) = update { it.copy(darkTheme = dark) }
 
+    /** How much disk the phone's songs kept here may take (GB). Applies to the next download. */
+    fun setCacheLimit(gb: Int) = update { it.copy(cacheLimitGb = gb.coerceIn(1, 100)) }
+
     /** Universal Queue (beta). Off, the phone's link ends at its next request and the phone keeps its own queue. */
     fun setSharedQueue(on: Boolean) {
         update { it.copy(sharedQueue = on) }
@@ -152,6 +157,7 @@ class DesktopApp(
 
     override fun close() {
         connect.close()
+        cache?.close()
         engine.shutdown()
         settings.flush()
         plays.flush()
@@ -164,7 +170,14 @@ class DesktopApp(
         fun create(): DesktopApp {
             val settings = SettingsStore()
             val engine = AudioEngine({ com.harmony.desktop.engine.JavaSoundSink { settings.current.outputDevice } })
-            val player = PlayerController(engine, com.harmony.desktop.connect.RemoteCache())
+            // The temporary folder the first Connect cache used: emptied for good.
+            runCatching { java.io.File(System.getProperty("java.io.tmpdir"), "harmony-connect").deleteRecursively() }
+            val cache = com.harmony.core.remote.cache.MediaCache(
+                AppDirs.connectCache,
+                limits = { com.harmony.core.remote.cache.CacheLimits(maxBytes = settings.current.cacheLimitGb * 1024L * 1024 * 1024) },
+                log = { java.util.logging.Logger.getLogger("com.harmony.cache").info(it) },
+            )
+            val player = PlayerController(engine, cache)
             // The shared queue lives as long as the app; it is offered to phones only while switched on.
             val sharedQueue = com.harmony.core.remote.queue.QueueService(onChange = { state, _ -> player.sharedQueue(state) })
             val connect = ConnectHost(
@@ -183,7 +196,7 @@ class DesktopApp(
                     )
                 }
             }
-            val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers))
+            val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers), cache = cache)
             connect.start()
             app.rescan()
             return app

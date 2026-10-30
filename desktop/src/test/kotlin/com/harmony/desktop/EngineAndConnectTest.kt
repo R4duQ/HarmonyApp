@@ -529,7 +529,10 @@ class EngineAndConnectTest {
             }
         }.start()
         val engine = AudioEngine({ CountingSink(realTime = true) })
-        val cache = com.harmony.desktop.connect.RemoteCache(createTempDir("harmony-cache"))
+        val cache = com.harmony.core.remote.cache.MediaCache(
+            createTempDir("harmony-cache"),
+            { com.harmony.core.remote.cache.CacheLimits(maxBytes = 1L shl 30) },
+        )
         val player = PlayerController(engine, cache)
         try {
             val base = "http://127.0.0.1:${phoneFiles.boundPort}"
@@ -538,10 +541,13 @@ class EngineAndConnectTest {
             player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8", upNext = listOf(b), autoAdvance = true))
             waitFor(what = "playing") { player.status().state == RemoteState.PLAYING }
             // Both songs are fetched in the background; a seek then plays from the copy.
-            waitFor(what = "the copies") { cache.localFor(a.url) != null && cache.localFor(b.url) != null }
+            // Older phones send no content key: the computer names the songs by phone and id.
+            val keyA = "phone:Pixel 8:7"
+            val keyB = "phone:Pixel 8:8"
+            waitFor(what = "the copies") { cache.localFor(keyA) != null && cache.localFor(keyB) != null }
             player.seek(2_200)
             waitFor(what = "playing after the seek") { engine.state.value.status == EngineStatus.PLAYING }
-            assertEquals(cache.localFor(a.url), engine.state.value.source)
+            assertEquals(cache.localFor(keyA), engine.state.value.source)
             // At the end it goes straight on to the phone's next song, and says so.
             waitFor(what = "the next song") { player.status().trackId == "8" }
             assertEquals("Short Tone", player.nowPlaying.value?.title)
@@ -564,6 +570,42 @@ class EngineAndConnectTest {
         } finally {
             engine.stop()
             phoneFiles.close()
+            cache.close()
+        }
+    }
+
+    @Test fun `a broken copy in the cache plays on from the phone and is fetched again`() {
+        val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
+            if (req.path == "/track/7") HttpResponse.ranged(FileRangeSource(flac), req.header("Range"), "audio/flac", req.header("If-Range"))
+            else HttpResponse.text(404, "no")
+        }.start()
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val cache = com.harmony.core.remote.cache.MediaCache(
+            createTempDir("harmony-cache"),
+            { com.harmony.core.remote.cache.CacheLimits(maxBytes = 1L shl 30) },
+        )
+        val player = PlayerController(engine, cache)
+        try {
+            val url = "http://127.0.0.1:${phoneFiles.boundPort}/track/7"
+            val a = RemoteTrack("7", "Tone Song", "Test Artist", "Test Album", 3_000, url, key = "dev:phone:7")
+            player.play(PlayRequest(a, 0, playing = true, phoneName = "Pixel 8"))
+            waitFor(what = "the copy") { cache.localFor("dev:phone:7") != null }
+            // The copy is damaged on disk (same size, garbage inside).
+            val copy = java.io.File(cache.localFor("dev:phone:7")!!)
+            copy.writeBytes(ByteArray(copy.length().toInt()) { 0x55 })
+            player.seek(500)
+            // The bad copy fails to decode: it is dropped and fetched again, and the song plays on
+            // (from the phone, or from the new copy when that is already here).
+            waitFor(what = "fetched again, whole") {
+                cache.localFor("dev:phone:7")?.let { java.io.File(it).readBytes().contentEquals(flac.readBytes()) } == true
+            }
+            waitFor(what = "playing again") { player.status().state == RemoteState.PLAYING }
+            val source = engine.state.value.source
+            assertTrue("not the broken copy: $source", source == url || source == cache.localFor("dev:phone:7"))
+        } finally {
+            engine.stop()
+            phoneFiles.close()
+            cache.close()
         }
     }
 }

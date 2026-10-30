@@ -110,6 +110,12 @@ data class RemoteTrack(
     val artUrl: String? = null,
     /** Lossless, bit depth, sample rate: shown as is ("FLAC 24/96"). */
     val quality: String? = null,
+    /**
+     * Which audio this is, the same in every session (the shared queue's
+     * content key, "dev:<phone>:<song>"), so a copy cached before is used
+     * again. Null from older phones: the computer then makes one up.
+     */
+    val key: String? = null,
 ) {
     fun toJsonObject(): JSONObject = JSONObject()
         .put("id", id)
@@ -120,6 +126,7 @@ data class RemoteTrack(
         .put("url", url)
         .putOpt("artUrl", artUrl)
         .putOpt("quality", quality)
+        .putOpt("key", key)
 
     companion object {
         fun fromJson(o: JSONObject): RemoteTrack = RemoteTrack(
@@ -131,6 +138,7 @@ data class RemoteTrack(
             url = o.getString("url"),
             artUrl = o.optString("artUrl").takeIf { it.isNotEmpty() },
             quality = o.optString("quality").takeIf { it.isNotEmpty() },
+            key = o.optString("key").takeIf { it.isNotEmpty() },
         )
     }
 }

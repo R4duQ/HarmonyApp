@@ -10,7 +10,8 @@ import com.harmony.core.remote.RemoteRequest
 import com.harmony.core.remote.RemoteState
 import com.harmony.core.remote.RemoteStatus
 import com.harmony.core.remote.RemoteTrack
-import com.harmony.desktop.connect.RemoteCache
+import com.harmony.core.remote.cache.CacheWant
+import com.harmony.core.remote.cache.MediaCache
 import com.harmony.desktop.engine.AudioEngine
 import com.harmony.desktop.engine.EngineStatus
 import com.harmony.desktop.engine.Upcoming
@@ -65,12 +66,12 @@ enum class Repeat { OFF, ALL, ONE }
  * here, and then follows; otherwise next and previous are passed to the
  * phone as requests and the end of a song is only reported.
  *
- * The phone's songs are fetched whole in the background ([RemoteCache]), so
+ * The phone's songs are fetched whole in the background ([MediaCache]), so
  * seeking and the next song don't wait on the Wi-Fi.
  */
 class PlayerController(
     private val engine: AudioEngine,
-    private val cache: RemoteCache? = null,
+    private val cache: MediaCache? = null,
 ) : RemoteRenderer {
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
@@ -405,7 +406,7 @@ class PlayerController(
      */
     private fun resumeFromCopy(): Boolean {
         val t = remoteTrack ?: return false
-        val local = cache?.localFor(t.url) ?: return false
+        val local = cache?.localFor(keyOf(t)) ?: return false
         val s = engine.state.value
         if (s.source == local || s.status != EngineStatus.PAUSED) return false
         engine.load(local, engine.positionMs(), play = true, s.durationMs.takeIf { it > 0 } ?: t.durationMs)
@@ -416,7 +417,11 @@ class PlayerController(
     @Synchronized
     private fun onEngineError(source: String, at: Long) {
         val t = remoteTrack ?: return
-        if (_phone.value == null || (source != t.url && source != cache?.localFor(t.url))) return
+        if (_phone.value == null) return
+        val copy = cache?.localFor(keyOf(t))
+        if (source != t.url && source != copy) return
+        // The copy kept here wouldn't play: it goes (fetched once more), and the song carries on from the phone.
+        if (copy != null && source == copy) cache?.corrupt(keyOf(t))
         if (recoveries >= MAX_RECOVERIES) return
         recoveries++
         val attempt = recoveries
@@ -536,12 +541,23 @@ class PlayerController(
     }
 
     /** The fetched copy when it's complete, else straight from the phone. */
-    private fun sourceFor(t: RemoteTrack): String = cache?.localFor(t.url) ?: t.url
+    private fun sourceFor(t: RemoteTrack): String = cache?.localFor(keyOf(t)) ?: t.url
 
-    /** Fetches the song playing, then the next, and forgets the rest. */
+    /**
+     * Which audio [t] is, for the cache: the phone's content key, the same in
+     * every session; older phones send none, so their name and song id stand in.
+     */
+    private fun keyOf(t: RemoteTrack): String = t.key ?: ("phone:" + (_phone.value ?: setAside?.phone ?: "") + ":" + t.id)
+
+    /**
+     * Fetches the song playing, then the next, then the one or two after it
+     * (those the phone shared), most urgent first; anything else stops.
+     */
     private fun fetch() {
         val c = cache ?: return
-        c.keep(listOfNotNull(remoteTrack?.url, remoteUpNext.firstOrNull()?.url?.takeIf { autoAdvance }))
+        val t = remoteTrack ?: return c.want(emptyList())
+        val ahead = if (autoAdvance) remoteUpNext.filter { it.url.isNotBlank() }.take(FETCH_AHEAD) else emptyList()
+        c.want(listOf(CacheWant(keyOf(t), t.url, 0)) + ahead.mapIndexed { i, n -> CacheWant(keyOf(n), n.url, i + 1) })
     }
 
     @Synchronized
@@ -638,13 +654,16 @@ class PlayerController(
         remoteRepeat = null
         publishModes()
         pending.clear()
-        cache?.clear()
+        // The songs fetched stay for next time (the cache keeps itself within bounds); downloads stop.
+        cache?.want(emptyList())
         _nowPlaying.value = _queue.value.getOrNull(_index.value)?.let { t -> localNowPlaying(t, _index.value) }
     }
 
     private companion object {
         /** What the queue shows after the song playing. */
         const val UP_NEXT = 30
+        /** Songs after the one playing fetched ahead of time. */
+        const val FETCH_AHEAD = 3
         /** The shared queue can be long; the panel shows this much of it. */
         const val SHARED_UP_NEXT = 500
         const val RESTART_AFTER_MS = 3_000L

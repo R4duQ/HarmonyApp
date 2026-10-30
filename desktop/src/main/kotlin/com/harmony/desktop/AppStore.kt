@@ -19,6 +19,16 @@ object AppDirs {
     val covers: File get() = File(root, "covers")
     val settings: File get() = File(root, "settings.json")
     val plays: File get() = File(root, "plays.json")
+
+    /**
+     * Songs from the phone kept for playing here (Universal Queue cache): in
+     * the local, not roaming, app data, away from the music folders, so it is
+     * never scanned into the library.
+     */
+    val connectCache: File by lazy {
+        val local = System.getenv("LOCALAPPDATA")
+        (if (!local.isNullOrBlank()) File(local, "Harmony") else root).resolve("connect-cache").apply { mkdirs() }
+    }
 }
 
 /** Everything the desktop app remembers between runs. */
@@ -37,6 +47,8 @@ data class DesktopSettings(
     val outputDevice: String? = null,
     /** Universal Queue (beta): this computer keeps a queue the phone shares while it plays here. */
     val sharedQueue: Boolean = false,
+    /** How much of the disk the phone's songs kept here may take, in GB (never more than a tenth of the free space). */
+    val cacheLimitGb: Int = 2,
 ) {
     fun toJson(): String = JSONObject()
         .put("folders", JSONArray(folders))
@@ -62,6 +74,7 @@ data class DesktopSettings(
         .put("favorites", JSONArray(favorites))
         .putOpt("outputDevice", outputDevice)
         .put("sharedQueue", sharedQueue)
+        .put("cacheLimitGb", cacheLimitGb)
         .toString(2)
 
     companion object {
@@ -104,6 +117,7 @@ data class DesktopSettings(
                 favorites = o.optJSONArray("favorites")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
                 outputDevice = o.optString("outputDevice").takeIf { it.isNotEmpty() },
                 sharedQueue = o.optBoolean("sharedQueue", false),
+                cacheLimitGb = o.optInt("cacheLimitGb", d.cacheLimitGb).coerceIn(1, 100),
             )
         }.getOrDefault(DesktopSettings())
     }

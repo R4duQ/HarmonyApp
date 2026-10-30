@@ -493,18 +493,20 @@ class ConnectSession @Inject constructor(
             durationMs = durationMs.takeIf { it > 0 } ?: md.durationMs ?: 0L,
             url = url,
             artUrl = art,
+            key = contentKey(item.mediaId),
         )
         val next = upNext.mapIndexed { i, it ->
             val m = it.mediaMetadata
-            // The first one can be played straight on: the computer fetches it ahead of time.
+            // The first one can be played straight on; the computer fetches it and the
+            // one or two after it ahead of time, so a skip there doesn't wait on the Wi-Fi.
             val nextUri = it.localConfiguration?.uri
             val (nextUrl, nextArt) = when {
-                i == 0 && autoAdvance && nextUri != null -> files.share(it.mediaId, nextUri, coverFor(it), host)
+                i < FETCHED_AHEAD && autoAdvance && nextUri != null -> files.share(it.mediaId, nextUri, coverFor(it), host)
                 // Covers for the first few, so the computer's queue has pictures.
                 i < COVERED_UP_NEXT -> "" to files.shareCover(it.mediaId, coverFor(it), host)
                 else -> "" to null
             }
-            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt)
+            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt, key = contentKey(it.mediaId))
         }
         return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat)
     }
@@ -878,6 +880,9 @@ class ConnectSession @Inject constructor(
         prefs.edit().putString(KEY_COMPUTERS, array.toString()).apply()
     }
 
+    /** The audio of [mediaId] on this phone, as the shared queue and the computer's cache name it. */
+    private fun contentKey(mediaId: String) = "dev:$deviceId:$mediaId"
+
     /** This phone, as the shared queue names the device a song lives on: random, kept for good. */
     val deviceId: String by lazy {
         prefs.getString(KEY_DEVICE_ID, null) ?: java.util.UUID.randomUUID().toString().also {
@@ -919,6 +924,8 @@ class ConnectSession @Inject constructor(
         /** What comes next, for the computer's queue (only the first can be played straight on). */
         const val UP_NEXT = 20
         const val COVERED_UP_NEXT = 8
+        /** How many of "up next" the computer may fetch ahead of time (the next song and two more). */
+        const val FETCHED_AHEAD = 3
         const val REFRESH_DELAY_MS = 400L
         const val VOLUME_STEPS = 25
         const val MAX_COVER_BYTES = 2_000_000

@@ -194,7 +194,7 @@ Diferențe față de `RemoteCache` actual:
 | 3a | Protocolul cozii pe rețea (Kotlin pur) | rute `/queue/commands` și `/queue/since` (long-poll, max 4 s, sub pragul „Reconnecting” de 6 s); cererea ținută deschisă nu blochează play, pauză sau status; un PC fără coadă răspunde 404, iar legătura se oprește liniștit; sesiunile încheiate sunt refuzate | ✅ implementat, 8 teste pe socket-uri reale, cu proxy care pierde, refuză și întârzie |
 | 3b-1 | Telefonul își oglindește coada pe PC; PC-ul o afișează. Opțiunea „Shared queue (beta)” e pe PC, oprită implicit | coada de pe PC devine exact cea a telefonului (ordine, piesa curentă, proveniență) prin căderi de rețea; fără ecou (nimic de retrimis la final); fiecare operație aplicată o dată; legătura nu atinge redarea; PC fără opțiune → telefonul lucrează ca înainte | ✅ implementat. Automat: 2000 de ținte aleatoare atinse exact; pe socket-uri cu cădere de rețea, 120 de schimbări → 141 de operații, toate aplicate exact; afișarea pe PC testată. **Neverificat pe dispozitive** |
 | 3b-2 | Editările de pe PC ajung în playerul telefonului: Play next, sus, jos, ștergere, redare (clic pe rând) | aplicate prin aceleași apeluri verificate ca drag-ul telefonului (melodia așteptată trebuie să fie la locul ei), fără restart; ce refuză telefonul e anulat în coada comună; editările simultane telefon + PC converg prin căderi de rețea | ✅ implementat. Automat, pe socket-uri: 150 de pași cu editări pe ambele părți și o cădere de rețea → aceeași coadă pe ambele, fiecare operație aplicată o dată; o editare refuzată de telefon e anulată pe PC; butoanele PC-ului produc exact operațiile așteptate. **Neverificat pe dispozitive** |
-| 4 | Cache v2 pe PC | reluare după întrerupere (testat cu proxy-ul de erori), fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | |
+| 4 | Cache v2 pe PC (`core/remote/cache/MediaCache`, refolosibil pe telefon în etapa 6) | reluare după întrerupere, fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | ✅ implementat. Automat: transfer tăiat → reluat de la octetul unde s-a oprit, cu `If-Range` (descărcat ≈ o dată); fișier schimbat între încercări → vine întreg, nelipit; piesa curentă preia transferul, cealaltă se reia după; limită de viteză doar la pre-încărcare; LRU fără curenta/următoarea; fără spațiu → stream; copie coruptă → încă o descărcare, apoi doar stream; după repornire: copiile rămân, parțialele se reiau; pe PC, cu ffmpeg real: redare și căutare din copie, copie stricată → redarea continuă și copia e refăcută. **Neverificat pe dispozitive** |
 | 5 | Telefonul folosește coada comună | Smart Shuffle lucrează pe proveniență; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un `mediaId` per intrare | necesită testare pe telefon |
 | 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | |
 | 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | |
@@ -213,6 +213,15 @@ Diferențe față de `RemoteCache` actual:
 - **Ce nu face încă:**
   - melodiile adăugate cu „Add to queue” la final apar pe telefon ca listă, nu ca manuale, fiindcă playerul telefonului nu ține minte proveniența lor (etapa 5);
   - piesele de pe PC nu intră încă în coada comună.
+
+### Ce face etapa 4 concret
+
+- **Locul:** `%LOCALAPPDATA%\Harmony\connect-cache` (local, nu roaming), departe de folderele de muzică, deci niciodată scanat în bibliotecă. Vechiul folder temporar e golit la pornire.
+- **Cheia:** cheia de conținut trimisă de telefon (`dev:<telefon>:<melodie>`), aceeași în toate sesiunile. O melodie ascultată din nou mâine nu se mai descarcă. Telefoanele vechi folosesc „telefon + id”.
+- **Ce se descarcă:** piesa curentă, următoarea și încă două, în ordinea asta. Telefonul trimite acum URL-uri pentru primele 3 din „up next”, nu doar pentru prima. Pre-încărcarea are limită de 8 MB/s, ca să lase loc pe Wi-Fi; piesa curentă nu are limită.
+- **Limita** se alege în Connect: 1, 2 (implicit), 5, 10 sau 20 GB, dar niciodată peste 10% din spațiul liber. Tot acolo e și butonul „Empty”.
+- **Validare:** telefonul trimite acum un `ETag` pentru fiecare fișier (mărime, data modificării, document) și răspunde la `If-Range` / `If-None-Match`.
+- **Telefonul:** cache-ul de pe telefon (redarea pieselor de pe PC) vine în etapa 6, cu același cod.
 
 ## 5. Ce testăm și cum
 
