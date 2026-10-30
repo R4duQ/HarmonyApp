@@ -86,6 +86,8 @@ class ConnectReceiver(
     lostAfterMs: Long = PhoneSessions.LOST_AFTER_MS,
     /** Milliseconds, monotonic. */
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    /** The Universal Queue this computer coordinates; null: not offered (404, as on older computers). */
+    private val queue: com.harmony.core.remote.queue.QueueService? = null,
 ) {
     private val lock = Any()
     private val sessions = PhoneSessions(suspectAfterMs, lostAfterMs, log) { link ->
@@ -108,6 +110,9 @@ class ConnectReceiver(
             else -> {
                 val phone = pairing.phoneFor(token) ?: return HttpResponse.text(403, "not paired")
                 val phoneSession = request.header(Connect.SESSION_HEADER)?.trim()?.take(MAX_SESSION_ID)?.takeIf { it.isNotEmpty() }
+                if (request.path == Connect.PATH_QUEUE_COMMANDS || request.path == Connect.PATH_QUEUE_SINCE) {
+                    return queue(request, token!!, phoneSession)
+                }
                 synchronized(lock) { paired(request, token!!, phoneSession, phone) }
             }
         }
@@ -158,6 +163,31 @@ class ConnectReceiver(
                 HttpResponse.empty()
             }
             else -> HttpResponse.text(404, "no such thing")
+        }
+    }
+
+    /**
+     * The Universal Queue's routes. They count as word from the phone (a held
+     * request keeps the session alive), but don't start one: a phone may share
+     * the queue without playing here. A session that has ended is refused, so a
+     * late command from an old connection changes nothing. The long wait of
+     * [Connect.PATH_QUEUE_SINCE] happens outside the lock, so it never holds up
+     * play, pause or the status.
+     */
+    private fun queue(request: HttpRequest, token: String, phoneSession: String?): HttpResponse {
+        val q = queue ?: return HttpResponse.text(404, "no such thing")
+        val verdict = synchronized(lock) { sessions.check(token, phoneSession, clock()) }
+        if (verdict is PhoneSessions.Verdict.Ended) return ended(verdict.reason)
+        return when (request.path) {
+            Connect.PATH_QUEUE_COMMANDS -> q.commands(request.text)
+            else -> {
+                val from = request.query["from"]?.toLongOrNull() ?: -1
+                val wait = request.query["wait"]?.toLongOrNull() ?: 0
+                val answer = q.since(from, wait)
+                // The phone was there the whole time the request was held.
+                synchronized(lock) { sessions.check(token, phoneSession, clock()) }
+                answer
+            }
         }
     }
 

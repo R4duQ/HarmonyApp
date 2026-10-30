@@ -47,6 +47,14 @@ object Connect {
     const val PATH_VOLUME = "/volume"
     const val PATH_STATUS = "/status"
     const val PATH_DISCONNECT = "/disconnect"
+
+    /**
+     * Universal Queue (see core/remote/queue): commands, and what changed
+     * since a revision (`?from=<revision>&wait=<ms>`). A computer without it
+     * answers 404, and the phone keeps to the queue of its own.
+     */
+    const val PATH_QUEUE_COMMANDS = "/queue/commands"
+    const val PATH_QUEUE_SINCE = "/queue/since"
 }
 
 /** A Harmony computer, as it answers discovery and [Connect.PATH_INFO]. */

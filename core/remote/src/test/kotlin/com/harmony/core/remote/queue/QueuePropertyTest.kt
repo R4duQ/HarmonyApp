@@ -17,7 +17,8 @@ class QueuePropertyTest {
         return when (rnd.nextInt(10)) {
             0 -> QueueOp.PlayNext(fresh(1 + rnd.nextInt(2)))
             1 -> QueueOp.Add(fresh(1 + rnd.nextInt(2)))
-            2 -> QueueOp.AppendAuto(fresh(1 + rnd.nextInt(3)))
+            2 -> if (rnd.nextBoolean()) QueueOp.AppendAuto(fresh(1 + rnd.nextInt(3)))
+            else QueueOp.Merge(fresh(1 + rnd.nextInt(3)).map { it.copy(origin = Origin.entries.random(rnd), pinned = rnd.nextBoolean()) })
             3, 4 -> if (up.isEmpty()) QueueOp.SetRepeat(QueueRepeat.OFF)
             else QueueOp.Move(up.random(rnd), if (rnd.nextInt(4) == 0) null else up.random(rnd))
             5 -> QueueOp.Remove(up.shuffled(rnd).take(rnd.nextInt(2)))

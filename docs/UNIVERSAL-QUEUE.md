@@ -191,7 +191,8 @@ Diferențe față de `RemoteCache` actual:
 | 0 | Reordonare corectă pe Android (PR #58) | mutări pe id, nu indici vechi; 12 teste de drag reale | ✅ publicat (v1.0, versionCode 148) |
 | 1 | **Modelul cozii comune** (Kotlin pur, partajat Android + Windows) | regulile din §3.1 verificate de teste fixe și de ~10.000 de editări aleatoare | ✅ implementat, testat local |
 | 2 | **Sincronizare** (coordonator + replici) | rețea cu 25% pierderi, 15% duplicate, întârzieri și reordonare, două căderi de rețea, 3 dispozitive care editează simultan: după vindecare toate arată exact coada coordonatorului; nicio comandă aplicată de două ori; nicio intrare manuală pierdută fără Remove; comenzi de redare cu epocă veche refuzate | ✅ implementat, testat local (50 de scenarii) |
-| 3 | Protocol v2 pe rețea (PC = coordonator, în spatele unei opțiuni) | rute `/uq/command`, `/uq/since` (long-poll); compatibil cu telefoanele vechi (v1); testul de rezistență existent (`ConnectSoakTest`) extins cu editări: zero alarme false pe rețea curată, recuperare după căderi de 3–25 s | următoarea etapă |
+| 3a | Protocolul cozii pe rețea (Kotlin pur) | rute `/queue/commands` și `/queue/since` (long-poll, max 4 s, sub pragul „Reconnecting” de 6 s); cererea ținută deschisă nu blochează play, pauză sau status; un PC fără coadă răspunde 404, iar legătura se oprește liniștit; sesiunile încheiate sunt refuzate | ✅ implementat, 8 teste pe socket-uri reale, cu proxy care pierde, refuză și întârzie |
+| 3b | Conectarea la PC (`ConnectHost` + `PlayerController`) și la telefon (`ConnectSession`), în spatele unei opțiuni; `ConnectSoakTest` extins cu editări | zero alarme false pe rețea curată, recuperare după căderi de 3–25 s, nicio editare pierdută sau dublată | următoarea etapă |
 | 4 | Cache v2 pe PC | reluare după întrerupere (testat cu proxy-ul de erori), fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | |
 | 5 | Telefonul folosește coada comună | Smart Shuffle lucrează pe proveniență; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un `mediaId` per intrare | necesită testare pe telefon |
 | 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | |
@@ -222,19 +223,24 @@ Ce măsurăm (etapele 3–9): goluri audio (număr și durată), timpul de hando
 - **Verificat automat:**
   - regulile cozii;
   - sincronizarea pe o rețea simulată cu pierderi;
-  - formatul JSON (inclusiv refuzul operațiilor necunoscute, ca un dispozitiv nou să poată vorbi cu unul vechi).
+  - formatul JSON (inclusiv refuzul operațiilor necunoscute, ca un dispozitiv nou să poată vorbi cu unul vechi);
+  - legătura pe socket-uri reale (`QueueLinkTest`):
+    - o editare de pe PC ajunge pe telefon în sub 0,5 s;
+    - după o cădere cu editări pe ambele părți, coada e din nou sincronizată la ~0,2 s de la revenire, fiecare editare o singură dată;
+    - o conexiune refuzată e reîncercată cu backoff, nu în buclă;
+    - o coadă inactivă costă 3 cereri la 12 s, față de 24 cu polling-ul la 0,5 s.
 - **Pe dispozitive reale:** nimic încă. Etapele 1–2 nu ating playerul și nici rețeaua reală.
 - **Neconfirmat:** golul la handoff, efectul transferurilor asupra latenței comenzilor pe Wi-Fi real, comportamentul în Doze.
 
-## 7. Întrebări pentru tine
+## 7. Decizii (răspunsurile tale)
 
-1. **Pornirea unui album nou** păstrează melodiile puse manual (Play next / Add), cum face Spotify, sau golește tot?
-2. **La prima conectare**, cele două cozi:
-   - se **combină** (a telefonului după cea a PC-ului);
-   - sau câștigă **cea care redă**;
-   - sau te întreabă de fiecare dată?
-3. **Limitele cache-ului:** propun 2 GB pe PC și 1 GB pe telefon. Le vrei setabile?
-4. **Piese în formate pe care telefonul nu le citește** (APE, WavPack, WMA, DSD): convertire în FLAC pe PC (calitate păstrată), sau rămân doar pentru PC?
+1. **Album nou:** melodiile puse manual (Play next / Add) se păstrează, imediat după piesa nouă (`QueueOp.StartList`, testat).
+2. **Prima conectare:** cozile se **combină**. Coada celuilalt dispozitiv vine după a celui care redă, cu proveniența păstrată (`QueueOp.Merge`, testat):
+   - lista lui și selecțiile lui manuale intră după selecțiile de aici și înaintea recomandărilor;
+   - recomandările lui merg la final;
+   - nimic din coada de aici nu se mută.
+3. **Cache:** limitele vor fi **setabile**. Valorile implicite propuse sunt 2 GB pe PC și 1 GB pe telefon; plafonul de 10% din spațiul liber rămâne activ (etapa 4).
+4. **Formate nesuportate de telefon** (APE, WavPack, WMA, DSD): PC-ul le **convertește în FLAC** cu ffmpeg (etapa 6). Copia convertită are cheia ei de cache, derivată din original, ca să nu se convertească de două ori.
 
 ## Surse
 

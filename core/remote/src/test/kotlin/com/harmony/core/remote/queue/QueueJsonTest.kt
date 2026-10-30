@@ -10,6 +10,7 @@ class QueueJsonTest {
         QueueOp.PlayNext(listOf(entry("p1"))),
         QueueOp.Add(listOf(entry("m1"), entry("m2", song = "X"))),
         QueueOp.AppendAuto(listOf(entry("a1", Origin.AUTO))),
+        QueueOp.Merge(listOf(entry("x1", Origin.MANUAL).copy(pinned = true), entry("x2", Origin.AUTO))),
         QueueOp.StartList(listOf(entry("b1"), entry("b2")), "b1", listOf("b2")),
         QueueOp.StartList(listOf(entry("b1")), "b1"),
         QueueOp.Move("l1", "l3"),

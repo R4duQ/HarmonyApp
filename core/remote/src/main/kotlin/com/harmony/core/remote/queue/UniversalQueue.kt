@@ -107,6 +107,14 @@ sealed interface QueueOp {
     data class AppendAuto(val entries: List<QueueEntry>) : QueueOp
 
     /**
+     * Combining queues when devices connect: [entries] (the other device's
+     * queue) join this one, keeping their origins. Its list and its user's
+     * choices go after this queue's, before the recommendations; its
+     * recommendations go at the end. Nothing already here moves.
+     */
+    data class Merge(val entries: List<QueueEntry>) : QueueOp
+
+    /**
      * A new list from [startId] (an album, a playlist). The history and the
      * song playing go; protected upcoming entries stay, right after the new
      * song, in their order (what the user queued survives starting an album).
@@ -164,15 +172,21 @@ fun QueueState.apply(op: QueueOp): ApplyResult {
             fresh(op.entries)?.let(no) ?: run {
                 val added = op.entries.map { it.copy(origin = Origin.MANUAL, priority = false, pinned = false) }
                 // Before the first recommendation still free to move: the user's choices come first.
-                val firstAuto = (currentIndex + 1 until entries.size)
-                    .firstOrNull { entries[it].origin == Origin.AUTO && !entries[it].pinned } ?: entries.size
-                ok(copy(entries = entries.inserted(firstAuto, added)))
+                ok(copy(entries = entries.inserted(firstFreeAuto(), added)))
             }
         }
         is QueueOp.AppendAuto -> {
             fresh(op.entries)?.let(no) ?: run {
                 val added = op.entries.map { it.copy(origin = Origin.AUTO, priority = false, pinned = false) }
                 ok(copy(entries = entries + added))
+            }
+        }
+        is QueueOp.Merge -> {
+            fresh(op.entries)?.let(no) ?: run {
+                val incoming = op.entries.map { it.copy(priority = false) }
+                val (autos, chosen) = incoming.partition { it.origin == Origin.AUTO && !it.pinned }
+                val withChosen = entries.inserted(firstFreeAuto(), chosen)
+                ok(copy(entries = withChosen + autos))
             }
         }
         is QueueOp.StartList -> {
@@ -246,6 +260,10 @@ private fun QueueState.fresh(added: List<QueueEntry>): Refusal? {
     val existing = entries.mapTo(HashSet()) { it.id }
     return if (ids.any { it in existing }) Refusal.DUPLICATE_ID else null
 }
+
+/** The first upcoming recommendation still free to move (the end when there is none). */
+private fun QueueState.firstFreeAuto(): Int = (currentIndex + 1 until entries.size)
+    .firstOrNull { entries[it].origin == Origin.AUTO && !entries[it].pinned } ?: entries.size
 
 /** Where the next Play next song goes: after the song playing and the run already there. */
 private fun QueueState.priorityEnd(): Int {

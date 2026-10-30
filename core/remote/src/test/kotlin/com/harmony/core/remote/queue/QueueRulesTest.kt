@@ -152,6 +152,20 @@ class QueueRulesTest {
         assertEquals("h1", last.must(QueueOp.SetRepeat(QueueRepeat.ALL)).nextId())
     }
 
+    @Test fun combiningQueuesKeepsBothAndTheirOrigins() {
+        val pc = album().must(QueueOp.Add(listOf(entry("m1")))).must(QueueOp.AppendAuto(listOf(entry("a1"))))
+        val phone = listOf(
+            entry("ph-l1"), entry("ph-m1", Origin.MANUAL), entry("ph-a1", Origin.AUTO),
+            entry("ph-a2", Origin.AUTO).copy(pinned = true),
+        )
+        val q = pc.must(QueueOp.Merge(phone))
+        assertEquals(listOf("l1", "l2", "l3", "l4", "m1", "ph-l1", "ph-m1", "ph-a2", "a1", "ph-a1"), q.upcomingIds())
+        assertEquals("c", q.currentId)
+        assertTrue(q["ph-m1"]!!.isProtected && q["ph-a2"]!!.isProtected)
+        assertFalse(q["ph-a1"]!!.isProtected)
+        assertEquals(Refusal.DUPLICATE_ID, q.refusal(QueueOp.Merge(listOf(entry("m1")))))
+    }
+
     @Test fun ownerChangesRaiseTheEpoch() {
         val q = album().must(QueueOp.SetOwner("pc"))
         assertEquals("pc", q.owner)
