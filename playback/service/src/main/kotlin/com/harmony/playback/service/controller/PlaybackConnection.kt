@@ -20,6 +20,7 @@ import com.harmony.core.model.Song
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.QueueRestoration
 import com.harmony.domain.playback.QueueShadow
+import com.harmony.domain.playback.RemoteSongs
 import com.harmony.domain.library.repository.ListeningClock
 import com.harmony.playback.service.PlaybackService
 import com.harmony.playback.service.session.HarmonyMediaLibraryCallback
@@ -65,6 +66,7 @@ class PlaybackConnection @Inject constructor(
     private val settingsRepository: com.harmony.core.datastore.SettingsRepository,
     private val audioOutputMonitor: com.harmony.playback.service.player.AudioOutputMonitor,
     private val connect: com.harmony.playback.service.connect.ConnectSession,
+    private val remoteMedia: com.harmony.playback.service.connect.RemoteMedia,
 ) : PlaybackController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -291,9 +293,9 @@ class PlaybackConnection @Inject constructor(
         // slow restore could stomp on a queue they just started — which
         // would look exactly like "it keeps playing the old song."
         if (c.mediaItemCount != 0) return
-        songs.forEach { songCache[it.id.toString()] = it }
+        songs.forEach { songCache[mediaIdFor(it)] = it }
         // What was the user's and what was Smart Shuffle's isn't saved: after a restart the queue is a list.
-        shadow.setAll(songs.map { it.id.toString() to null })
+        shadow.setAll(songs.map { mediaIdFor(it) to null })
         c.setMediaItems(songs.map(::toMediaItem), restored.index, restored.positionMs)
         c.playWhenReady = false
         c.prepare()
@@ -452,7 +454,7 @@ class PlaybackConnection @Inject constructor(
         pendingLookups += missing
         scope.launch {
             val found = libraryRepository.songsByIds(missing.mapNotNull { it.toLongOrNull() })
-            found.forEach { songCache[it.id.toString()] = it }
+            found.forEach { songCache[mediaIdFor(it)] = it }
             pendingLookups -= missing.toSet()
             if (found.isNotEmpty()) syncState()
         }
@@ -461,7 +463,14 @@ class PlaybackConnection @Inject constructor(
     private fun syncState() {
         val c = controller ?: return
         val ids = (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
-        resolveMissing(ids)
+        // A computer's songs aren't in the library: their entries say what they are.
+        ids.forEachIndexed { i, id ->
+            if (id !in songCache && RemoteSongs.isRemoteKey(id)) {
+                val md = c.getMediaItemAt(i).mediaMetadata
+                songCache[id] = RemoteSongs.song(id, md.title?.toString() ?: "", md.artist?.toString() ?: "", md.albumTitle?.toString() ?: "", md.durationMs ?: 0L)
+            }
+        }
+        resolveMissing(ids.filterNot(RemoteSongs::isRemoteKey))
         val queue = ids.mapNotNull(songCache::get)
         val known = shadow.align(ids)
         // Beside [queue], so without the songs it can't show yet.
@@ -469,6 +478,8 @@ class PlaybackConnection @Inject constructor(
         val positionMs = c.currentPosition.coerceAtLeast(0)
         val durationMs = c.duration.coerceAtLeast(0)
         val queueIndex = c.currentMediaItemIndex
+        // The computer's songs among the one playing and the next few: the phone fetches its own copies, in order.
+        remoteMedia.focus(ids.drop(queueIndex.coerceAtLeast(0)).take(REMOTE_AHEAD + 1).filter(RemoteSongs::isRemoteKey))
         // Purely a display prediction: once we're within the crossfade
         // window of the current track's end, show what's coming next. Uses
         // only values already being computed here, so it stays in step with
@@ -529,11 +540,11 @@ class PlaybackConnection @Inject constructor(
         val start = if (songs.isEmpty()) 0 else startIndex.coerceIn(songs.indices)
         alignShadow(c)
         // The user's songs still to come stay, right after the song started.
-        val kept = shadow.startList(songs.map { it.id.toString() }, start, c.currentMediaItemIndex)
+        val kept = shadow.startList(songs.map { mediaIdFor(it) }, start, c.currentMediaItemIndex)
         val keptItems = kept.map(c::getMediaItemAt)
         val keptSongs = keptItems.mapNotNull { songCache[it.mediaId] }
         songCache.clear()
-        (songs + keptSongs).forEach { songCache[it.id.toString()] = it }
+        (songs + keptSongs).forEach { songCache[mediaIdFor(it)] = it }
         val items = songs.map(::toMediaItem)
         val cut = if (songs.isEmpty()) 0 else start + 1
         // A new list: the one and only place the generation moves (Smart Shuffle hands over on it).
@@ -545,9 +556,9 @@ class PlaybackConnection @Inject constructor(
 
     override suspend fun addToQueue(song: Song, origin: QueueOrigin) {
         val c = controllerOrNull() ?: return
-        songCache[song.id.toString()] = song
+        songCache[mediaIdFor(song)] = song
         alignShadow(c)
-        shadow.insert(c.mediaItemCount, listOf(song.id.toString()), origin)
+        shadow.insert(c.mediaItemCount, listOf(mediaIdFor(song)), origin)
         c.addMediaItem(toMediaItem(song))
     }
 
@@ -565,15 +576,15 @@ class PlaybackConnection @Inject constructor(
     override suspend fun addToQueueAll(songs: List<Song>, origin: QueueOrigin) {
         if (songs.isEmpty()) return
         val c = controllerOrNull() ?: return
-        songs.forEach { songCache[it.id.toString()] = it }
+        songs.forEach { songCache[mediaIdFor(it)] = it }
         alignShadow(c)
-        shadow.insert(c.mediaItemCount, songs.map { it.id.toString() }, origin)
+        shadow.insert(c.mediaItemCount, songs.map { mediaIdFor(it) }, origin)
         c.addMediaItems(songs.map(::toMediaItem))
     }
 
     override suspend fun addNext(song: Song) {
         val c = controllerOrNull() ?: return
-        songCache[song.id.toString()] = song
+        songCache[mediaIdFor(song)] = song
         val currentId = c.currentMediaItem?.mediaId
         if (currentId != playNextAnchorId) {
             playNextAnchorId = currentId
@@ -583,7 +594,7 @@ class PlaybackConnection @Inject constructor(
         val index = (c.currentMediaItemIndex + playNextRunLength)
             .coerceIn(0, c.mediaItemCount)
         alignShadow(c)
-        shadow.insert(index, listOf(song.id.toString()), QueueOrigin.MANUAL)
+        shadow.insert(index, listOf(mediaIdFor(song)), QueueOrigin.MANUAL)
         c.addMediaItem(index, toMediaItem(song))
     }
 
@@ -600,12 +611,12 @@ class PlaybackConnection @Inject constructor(
 
     override suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>, origin: QueueOrigin) {
         val c = controllerOrNull() ?: return
-        songs.forEach { songCache[it.id.toString()] = it }
+        songs.forEach { songCache[mediaIdFor(it)] = it }
         val from = fromIndex.coerceIn(0, c.mediaItemCount)
         val to = toIndexExclusive.coerceIn(from, c.mediaItemCount)
         if (to > from || songs.isNotEmpty()) {
             alignShadow(c)
-            shadow.replace(from, to, songs.map { it.id.toString() }, origin)
+            shadow.replace(from, to, songs.map { mediaIdFor(it) }, origin)
         }
         // One Media3 operation: the timeline changes once, the song playing
         // (always before [from]) never stops, and there is no window in which
@@ -615,6 +626,15 @@ class PlaybackConnection @Inject constructor(
             to > from -> c.removeMediaItems(from, to)
             songs.isNotEmpty() -> c.addMediaItems(from, songs.map(::toMediaItem))
         }
+    }
+
+    override suspend fun insertQueueItem(index: Int, song: Song, origin: QueueOrigin) {
+        val c = controllerOrNull() ?: return
+        songCache[mediaIdFor(song)] = song
+        val at = index.coerceIn((c.currentMediaItemIndex + 1).coerceAtLeast(0), c.mediaItemCount)
+        alignShadow(c)
+        shadow.insert(at, listOf(mediaIdFor(song)), origin)
+        c.addMediaItem(at, toMediaItem(song))
     }
 
     override suspend fun removeFromQueue(index: Int) {
@@ -631,7 +651,7 @@ class PlaybackConnection @Inject constructor(
         val current = c.currentMediaItemIndex
         // Checked against the player as it is now, not as the screen last saw it.
         if (index !in 0 until c.mediaItemCount || index == current) return false
-        if (c.getMediaItemAt(index).mediaId != expectedSongId.toString()) return false
+        if (c.getMediaItemAt(index).mediaId != mediaIdOf(expectedSongId)) return false
         // A song of the Play next run leaving it: the run is one shorter, not shifted onto the next song.
         if (c.currentMediaItem?.mediaId == playNextAnchorId && index in (current + 1)..(current + playNextRunLength)) {
             playNextRunLength -= 1
@@ -654,8 +674,11 @@ class PlaybackConnection @Inject constructor(
         }
         songCache.entries.removeAll { it.value.uri in uris }
         syncState()
-        val ids = (0 until c.mediaItemCount).mapNotNull { c.getMediaItemAt(it).mediaId.toLongOrNull() }
-        settingsRepository.saveLastPlaybackState(ids, c.currentMediaItemIndex.coerceAtLeast(0), c.currentPosition.coerceAtLeast(0))
+        // Library songs only (a computer's songs aren't kept across a restart), the index counted among them.
+        val all = (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
+        val ids = all.mapNotNull { it.toLongOrNull() }
+        val index = all.take(c.currentMediaItemIndex.coerceAtLeast(0)).count { it.toLongOrNull() != null }
+        settingsRepository.saveLastPlaybackState(ids, index.coerceAtMost((ids.size - 1).coerceAtLeast(0)), c.currentPosition.coerceAtLeast(0))
     }
 
     override suspend fun moveQueueItem(from: Int, to: Int, expectedSongId: Long?): Boolean {
@@ -664,7 +687,7 @@ class PlaybackConnection @Inject constructor(
         shadow.align(ids)
         val current = c.currentMediaItemIndex
         val move = com.harmony.domain.playback.QueueMoves
-            .resolve(ids, current, from, to, expectedSongId?.toString()) ?: return false
+            .resolve(ids, current, from, to, expectedSongId?.let(::mediaIdOf)) ?: return false
         // The Play next run is a length after the song playing: keep it on the
         // same entries, or a move across its edge would swap which songs it
         // protects (see QueueMoves.runAfterMove).
@@ -785,6 +808,14 @@ class PlaybackConnection @Inject constructor(
         return controller?.takeIf { it.isConnected }
     }
 
+    /** The player's media id of [song]: its library id, or for a computer's song its content key. */
+    private fun mediaIdFor(song: Song): String = RemoteSongs.keyOf(song.uri) ?: song.id.toString()
+
+    /** The media id of the song whose id is [songId] (a computer's song is known by its key). */
+    private fun mediaIdOf(songId: Long): String =
+        if (RemoteSongs.isRemote(songId)) songCache.entries.firstOrNull { it.value.id == songId }?.key ?: songId.toString()
+        else songId.toString()
+
     /** The shadow in step with the controller before a change at a position (one made elsewhere is matched up first). */
     private fun alignShadow(c: MediaController) {
         shadow.align((0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId })
@@ -808,7 +839,7 @@ class PlaybackConnection @Inject constructor(
     }
 
     private fun toMediaItem(song: Song): MediaItem = MediaItem.Builder()
-        .setMediaId(song.id.toString())
+        .setMediaId(mediaIdFor(song))
         .setUri(song.uri)
         .setMediaMetadata(
             androidx.media3.common.MediaMetadata.Builder()
@@ -843,5 +874,7 @@ class PlaybackConnection @Inject constructor(
         const val MIN_TRACKED_MS = 5_000L          // ignore accidental taps
         const val COMPLETED_ABSOLUTE_MS = 240_000L // 4 min, scrobble convention
         const val CONNECT_POLL_MS = 50L
+        /** How many songs after the one playing the phone keeps copies of, when they are a computer's. */
+        const val REMOTE_AHEAD = 3
     }
 }

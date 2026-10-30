@@ -71,6 +71,7 @@ import javax.inject.Singleton
 class ConnectSession @Inject constructor(
     @ApplicationContext private val context: Context,
     private val artworkCache: ArtworkCache,
+    private val remoteMedia: RemoteMedia,
 ) : ConnectController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val net = Executors.newSingleThreadExecutor { Thread(it, "harmony-connect").apply { isDaemon = true } }
@@ -483,7 +484,7 @@ class ConnectSession @Inject constructor(
     ): PlayRequest {
         val uri = item.localConfiguration?.uri ?: throw IOException("nothing to play")
         val host = localAddressToward(c.host)
-        val (url, art) = files.share(item.mediaId, uri, coverFor(item), host)
+        val (url, art) = share(item, uri, host)
         val md = item.mediaMetadata
         val track = RemoteTrack(
             id = item.mediaId,
@@ -501,7 +502,7 @@ class ConnectSession @Inject constructor(
             // one or two after it ahead of time, so a skip there doesn't wait on the Wi-Fi.
             val nextUri = it.localConfiguration?.uri
             val (nextUrl, nextArt) = when {
-                i < FETCHED_AHEAD && autoAdvance && nextUri != null -> files.share(it.mediaId, nextUri, coverFor(it), host)
+                i < FETCHED_AHEAD && autoAdvance && nextUri != null -> share(it, nextUri, host)
                 // Covers for the first few, so the computer's queue has pictures.
                 i < COVERED_UP_NEXT -> "" to files.shareCover(it.mediaId, coverFor(it), host)
                 else -> "" to null
@@ -510,6 +511,15 @@ class ConnectSession @Inject constructor(
         }
         return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat)
     }
+
+    /**
+     * The address of [item]'s audio and cover for the computer: served by the
+     * phone, or for a computer's own song (Universal Queue, stage 6) that
+     * computer's address for it (the computer it belongs to plays its own file).
+     */
+    private fun share(item: MediaItem, uri: android.net.Uri, host: String): Pair<String, String?> =
+        if (com.harmony.domain.playback.RemoteSongs.isRemoteKey(item.mediaId)) (remoteMedia.urlFor(item.mediaId) ?: "") to null
+        else files.share(item.mediaId, uri, coverFor(item), host)
 
     /**
      * The current song's length: the player's once it has read the file, else
@@ -881,7 +891,8 @@ class ConnectSession @Inject constructor(
     }
 
     /** The audio of [mediaId] on this phone, as the shared queue and the computer's cache name it. */
-    private fun contentKey(mediaId: String) = "dev:$deviceId:$mediaId"
+    private fun contentKey(mediaId: String) =
+        if (com.harmony.domain.playback.RemoteSongs.isRemoteKey(mediaId)) mediaId else "dev:$deviceId:$mediaId"
 
     /** This phone, as the shared queue names the device a song lives on: random, kept for good. */
     val deviceId: String by lazy {

@@ -782,4 +782,23 @@ class SmartQueueManagerQueueTest {
         assertEquals("$q", listOf(24L, 50L), q.take(2))
         assertEquals((20L..29L).toSet() - 24L, q.drop(2).toSet())
     }
+
+    @Test
+    fun aComputersSongInTheQueueIsKeptAndNeverReachesTheBrain() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this)
+        val pcSong = com.harmony.domain.playback.RemoteSongs.song("pc:pc-1:abc", "From the PC", "Someone", "", 200_000)
+        p.setQueue((1L..5L).map(::song), 0, true)
+        p.insertQueueItem(1, pcSong)                      // put in from the computer: the user's
+        advanceUntilIdle()
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        assertEquals("kept, the album made way: ${ids(p)}", listOf(1L, pcSong.id), ids(p).take(2))
+        p.skipAfter(0.9f); advanceUntilIdle()              // the computer's song plays
+        assertEquals(pcSong.id, p.playerState.value.currentSong?.id)
+        assertTrue("the brain never hears of it: ${brain.started}", brain.started.none { it < 0 })
+        assertTrue("nor is it asked to follow it", brain.requests.none { it.currentSongId < 0 || it.prefixIds.any { id -> id < 0 } })
+        // Playing on from it: the next batch follows the last library song instead.
+        repeat(4) { p.skipAfter(0.9f); advanceUntilIdle() }
+        assertTrue(brain.requests.size >= 2)
+        assertTrue(brain.requests.all { it.currentSongId >= 0 })
+    }
 }

@@ -196,7 +196,7 @@ Diferențe față de `RemoteCache` actual:
 | 3b-2 | Editările de pe PC ajung în playerul telefonului: Play next, sus, jos, ștergere, redare (clic pe rând) | aplicate prin aceleași apeluri verificate ca drag-ul telefonului (melodia așteptată trebuie să fie la locul ei), fără restart; ce refuză telefonul e anulat în coada comună; editările simultane telefon + PC converg prin căderi de rețea | ✅ implementat. Automat, pe socket-uri: 150 de pași cu editări pe ambele părți și o cădere de rețea → aceeași coadă pe ambele, fiecare operație aplicată o dată; o editare refuzată de telefon e anulată pe PC; butoanele PC-ului produc exact operațiile așteptate. **Neverificat pe dispozitive** |
 | 4 | Cache v2 pe PC (`core/remote/cache/MediaCache`, refolosibil pe telefon în etapa 6) | reluare după întrerupere, fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | ✅ implementat. Automat: transfer tăiat → reluat de la octetul unde s-a oprit, cu `If-Range` (descărcat ≈ o dată); fișier schimbat între încercări → vine întreg, nelipit; piesa curentă preia transferul, cealaltă se reia după; limită de viteză doar la pre-încărcare; LRU fără curenta/următoarea; fără spațiu → stream; copie coruptă → încă o descărcare, apoi doar stream; după repornire: copiile rămân, parțialele se reiau; pe PC, cu ffmpeg real: redare și căutare din copie, copie stricată → redarea continuă și copia e refăcută. **Neverificat pe dispozitive** |
 | 5 | Telefonul ține minte proveniența fiecărei intrări | Smart Shuffle lucrează pe proveniență, nu pe poziții; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un id per intrare, și pe PC | ✅ implementat. Automat: 7 teste noi de Smart Shuffle (plus cele 24 vechi, neschimbate) și 10 pentru `QueueShadow`; test de mutație: dacă Smart Shuffle ignoră proveniența, 7 teste pică; pe PC, aceeași melodie de două ori rămâne două intrări distincte când una e mutată. **Neverificat pe telefon** |
-| 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | |
+| 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | ✅ implementat. Automat: ruta `/media` cu token, intervale și „încă se convertește” (503), descărcată de cache-ul telefonului pe socket-uri reale; conversie reală cu ffmpeg WavPack → FLAC (aceeași durată), o singură dată; fișier care nu se poate converti → 404, nu reîncercări la nesfârșit; 120 de pași pe socket-uri, cu cădere de rețea, în care PC-ul adaugă 33 de piese: fiecare ajunge o dată în playerul telefonului, ca manuală, iar cozile ajung identice; PC-ul își redă propriul fișier când telefonul i-l trimite; Smart Shuffle nu trimite piesele PC-ului motorului de recomandări. **Neverificat pe dispozitive** |
 | 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | |
 | 8 | Crossfade pe PC | motorul PC face crossfade doar cu următoarea decodată în buffer; altfel trecere normală | |
 | 9 | Testare pe dispozitive reale | matricea din §5 | |
@@ -228,6 +228,37 @@ Diferențe față de `RemoteCache` actual:
 - **Album nou** (decizia 1, acum și în player): melodiile manuale care urmau se păstrează imediat după piesa aleasă, și în Smart, și în Random.
 - **PC:** primește id-ul fiecărei intrări și dacă e fixată, deci o mutare între două copii ale aceleiași melodii nu mai e confundată.
 - **Limită:** proveniența nu se salvează. După ce Android oprește aplicația, coada restaurată e toată „listă”.
+
+### Ce face etapa 6 concret
+
+- **Pe PC:** cu „Shared queue (beta)” pornit și un telefon care redă pe PC, fiecare melodie din Songs are la hover două butoane: „Play next on the phone” și „Add to the phone's queue”.
+  - Melodia intră în coada comună ca manuală.
+  - Play next o pune după rândul „Next up”; Add o pune după melodiile tale și înaintea recomandărilor.
+- **Pe telefon:** melodia intră în player ca o intrare a ta.
+  - Nu intră în bibliotecă: fără rând în baza de date, fără analiză 24D, fără număr de redări, fără favorite.
+  - Are un id negativ, care nu poate fi niciodată un id din bibliotecă.
+- **Redare:**
+  - **Telefonul redă pe PC:** PC-ul primește cheia melodiei, recunoaște că e a lui și o redă direct din fișierul propriu. Nu o descarcă de la telefon.
+  - **Telefonul redă singur** (după Stop sau după ce se pierde legătura): o redă din copia lui. Dacă nu are copia întreagă, o citește direct de la PC, cu căutare prin intervale.
+  - **PC-ul nu răspunde și nu există copie:** piesa e reîncercată o dată, apoi sărită, ca orice piesă care nu se încarcă. Rămâne în coadă.
+- **Cache-ul telefonului:**
+  - stă în `cacheDir/connect-media`, nu în bibliotecă și nu în MediaStore; Android îl poate goli când rămâne fără spațiu;
+  - păstrează piesa curentă și următoarele 3 care sunt de pe PC, cu același cod ca pe PC (reluare, LRU);
+  - limita e 1 GB și niciodată peste 10% din spațiul liber.
+- **Formate:**
+  - MP3, FLAC, AAC, Ogg/Opus și WAV pleacă de pe PC așa cum sunt;
+  - APE, WavPack, WMA, DSD, ALAC și AIFF sunt convertite o singură dată în FLAC, fără pierderi (DSD devine 24-bit/88,2 kHz), și păstrate în `connect-converted`, cu limită de 2 GB;
+  - cât durează conversia, telefonul primește „mai încearcă” și așteaptă până la 30 s;
+  - PC-ul își redă tot originalul.
+- **Securitate:**
+  - doar telefoanele împerecheate pot descărca, cu tokenul lor;
+  - doar cât e pornit „Shared queue”;
+  - id-ul unei melodii e un hash din cale și data modificării, nu calea însăși.
+- **Limite:**
+  - piesele PC-ului nu se păstrează după o repornire a aplicației: coada restaurată are doar piesele din bibliotecă;
+  - limita cache-ului de pe telefon nu se poate schimba încă din setări (e fixă la 1 GB);
+  - cât telefonul redă pe PC, playerul telefonului (pe pauză) poate citi și el începutul piesei curente de la PC, deci o parte se transferă de două ori;
+  - o piesă de pe alt PC decât cel conectat acum e refuzată de telefon.
 
 ### Ce face etapa 4 concret
 
@@ -275,8 +306,8 @@ Ce măsurăm (etapele 3–9): goluri audio (număr și durată), timpul de hando
    - lista lui și selecțiile lui manuale intră după selecțiile de aici și înaintea recomandărilor;
    - recomandările lui merg la final;
    - nimic din coada de aici nu se mută.
-3. **Cache:** limitele vor fi **setabile**. Valorile implicite propuse sunt 2 GB pe PC și 1 GB pe telefon; plafonul de 10% din spațiul liber rămâne activ (etapa 4).
-4. **Formate nesuportate de telefon** (APE, WavPack, WMA, DSD): PC-ul le **convertește în FLAC** cu ffmpeg (etapa 6). Copia convertită are cheia ei de cache, derivată din original, ca să nu se convertească de două ori.
+3. **Cache:** limitele sunt **setabile** pe PC (1–20 GB, implicit 2). Pe telefon limita e deocamdată fixă la 1 GB (setarea vine după testarea pe dispozitive). Plafonul de 10% din spațiul liber e activ peste tot.
+4. **Formate nesuportate de telefon** (APE, WavPack, WMA, DSD, ALAC, AIFF): PC-ul le **convertește în FLAC** cu ffmpeg (etapa 6, implementat). Conversia se face o singură dată pe versiune de fișier; un fișier re-etichetat primește alt id.
 
 ## Surse
 

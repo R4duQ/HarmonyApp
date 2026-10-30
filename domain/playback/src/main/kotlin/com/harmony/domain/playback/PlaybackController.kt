@@ -59,6 +59,13 @@ interface PlaybackController {
     /** Append many songs in one operation (see [removeQueueRange] for why bulk matters). */
     suspend fun addToQueueAll(songs: List<Song>, origin: QueueOrigin = QueueOrigin.MANUAL)
     suspend fun addNext(song: Song)
+
+    /**
+     * Puts [song] in at [index] (clamped after the song playing), as [origin]:
+     * a song another device added to the shared queue at that place. The
+     * default, for simple fakes, appends.
+     */
+    suspend fun insertQueueItem(index: Int, song: Song, origin: QueueOrigin = QueueOrigin.MANUAL) = addToQueue(song, origin)
     suspend fun removeFromQueue(index: Int)
 
     /**

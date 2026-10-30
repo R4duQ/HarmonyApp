@@ -152,4 +152,45 @@ class QueueMirrorTest {
         assertTrue("the moved one is pinned", after.entries[1].pinned && after.entries[1].origin == Origin.LIST)
         assertTrue("in step: nothing more to send", mirror.ops(after, moved, 0).isEmpty())
     }
+
+    @Test fun aSongAddedOnTheComputerIsInsertedAndKeepsItsSharedEntry() {
+        val mirror = QueueMirror("phone")
+        fun at(song: String, entry: Long, origin: Origin = Origin.LIST, priority: Boolean = false) =
+            MirrorItem(media(song), origin, priority = priority, entry = entry)
+        // b plays; m was queued by the user (Play next); x and y are Smart Shuffle's.
+        val songs = listOf(at("a", 1), at("b", 2), at("m", 3, Origin.MANUAL, priority = true), at("x", 4, Origin.AUTO), at("y", 5, Origin.AUTO))
+        var shared = QueueState().applyAll(mirror.ops(QueueState(), songs, 1))
+        val pcSong = MediaRef("pc:pc-1:t9", "pc-1", "t9", "From the PC", "Someone")
+        val add = QueueOp.Add(listOf(QueueEntry("pc-entry", pcSong, Origin.MANUAL)))
+        shared = shared.must(add)
+        // Add: after the user's songs, before Smart Shuffle's.
+        assertEquals(listOf(PlayerEdit.Insert(3, pcSong, next = false)), mirror.edits(add, songs, 1))
+        // The phone's player puts it there as its own new entry (11).
+        val after = songs.toMutableList().apply { add(3, MirrorItem(pcSong, Origin.MANUAL, entry = 11)) }
+        assertEquals("the same entry as on the computer: nothing to send", emptyList<QueueOp>(), mirror.ops(shared, after, 1))
+        // Play next from the computer: after the Play next run.
+        val next = QueueOp.PlayNext(listOf(QueueEntry("pc-next", pcSong.copy(contentKey = "pc:pc-1:t8", localId = "t8"), Origin.MANUAL, priority = true)))
+        val edits = mirror.edits(next, after, 1)
+        assertEquals(1, edits.size)
+        assertEquals(3, (edits[0] as PlayerEdit.Insert).at)
+        assertTrue((edits[0] as PlayerEdit.Insert).next)
+        // Already there (an echo): nothing.
+        assertEquals(emptyList<PlayerEdit>(), mirror.edits(add, after, 1))
+    }
+
+    @Test fun anInsertThePlayerNeverShowsIsUndoneNotKeptForever() {
+        val mirror = QueueMirror("phone")
+        val songs = listOf(MirrorItem(media("a"), Origin.LIST, entry = 1), MirrorItem(media("b"), Origin.LIST, entry = 2))
+        var shared = QueueState().applyAll(mirror.ops(QueueState(), songs, 0))
+        val add = QueueOp.Add(listOf(QueueEntry("pc-entry", MediaRef("pc:pc-1:t9", "pc-1", "t9", "T", "A"), Origin.MANUAL)))
+        shared = shared.must(add)
+        mirror.edits(add, songs, 0)
+        // The player refused it: the shared queue goes back to the player's.
+        shared = shared.applyAll(mirror.ops(shared, songs, 0))
+        assertEquals(listOf("a", "b"), shared.songs())
+        // The same song added by the phone itself later is a new entry, not the old one.
+        val later = songs + MirrorItem(MediaRef("pc:pc-1:t9", "pc-1", "t9", "T", "A"), Origin.MANUAL, entry = 7)
+        shared = shared.applyAll(mirror.ops(shared, later, 0))
+        assertTrue(shared.entries.none { it.id == "pc-entry" })
+    }
 }

@@ -14,6 +14,8 @@ import com.harmony.core.remote.queue.QueueMirror
 import com.harmony.core.remote.queue.QueuePlayer
 import com.harmony.core.remote.queue.QueueReplica
 import com.harmony.domain.playback.PlaybackController
+import com.harmony.domain.playback.RemoteSongs
+import com.harmony.playback.service.connect.RemoteMedia
 import com.harmony.domain.shuffle.SmartQueueManager
 import com.harmony.playback.service.connect.ConnectSession
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +54,7 @@ class ConnectQueueBridge @Inject constructor(
     private val connect: ConnectSession,
     private val playback: PlaybackController,
     private val queueManager: SmartQueueManager,
+    private val remoteMedia: RemoteMedia,
 ) {
     private data class Player(val queue: List<Song>, val index: Int, val playNext: Int, val entries: List<QueueEntryInfo>)
 
@@ -74,6 +77,7 @@ class ConnectQueueBridge @Inject constructor(
             log = { Log.i(TAG, it) },
         ).start()
         val follower = QueueFollower(link, QueueMirror(device))
+        val player = phonePlayer(client)
         val players = playback.playerState
             .map { Player(it.queue, it.queueIndex, it.playNextCount, it.entries) }
             .distinctUntilChanged()
@@ -87,7 +91,7 @@ class ConnectQueueBridge @Inject constructor(
                     var now = p
                     // The computer's edits first; once the player shows them, the mirror (at most one more round).
                     repeat(2) {
-                        if (!follower.step(items(now, device), now.index, phonePlayer)) return@collect
+                        if (!follower.step(items(now, device), now.index, player)) return@collect
                         now = withTimeoutOrNull(EDIT_WAIT_MS) { players.first { it != now } } ?: return@collect
                     }
                 }
@@ -97,7 +101,7 @@ class ConnectQueueBridge @Inject constructor(
     }
 
     /** The phone's player taking the computer's edits, each checked against the song expected there. */
-    private val phonePlayer = object : QueuePlayer {
+    private fun phonePlayer(client: ConnectClient) = object : QueuePlayer {
         override suspend fun move(from: Int, to: Int, mediaKey: String) =
             playback.moveQueueItem(from, to, songOf(mediaKey))
 
@@ -109,10 +113,26 @@ class ConnectQueueBridge @Inject constructor(
             queueManager.playQueueItem(index)
             return true
         }
+
+        /**
+         * A song of the computer's library put in from there (stage 6): into the
+         * player as the user's, never into the phone's library. Only the computer
+         * the phone plays on now can give it (its address and this phone's token).
+         */
+        override suspend fun insert(at: Int, media: MediaRef, next: Boolean): Boolean {
+            val pc = connect.state.value.active?.id ?: return false
+            if (media.home != pc || RemoteSongs.homeOf(media.contentKey) != pc) return false
+            val token = client.token ?: return false
+            remoteMedia.register(media.contentKey, com.harmony.core.remote.Connect.mediaUrl(client.host, client.port, media.localId, token))
+            val song = RemoteSongs.song(media.contentKey, media.title, media.artist, media.album, media.durationMs)
+            if (next) playback.addNext(song) else playback.insertQueueItem(at, song)
+            return true
+        }
     }
 
-    /** The song id in a content key made by [items] ("dev:<device>:<song id>"). */
-    private fun songOf(mediaKey: String): Long = mediaKey.substringAfterLast(':').toLongOrNull() ?: -1
+    /** The song id in a content key made by [items] ("dev:<device>:<song id>"), or of a computer's song. */
+    private fun songOf(mediaKey: String): Long =
+        if (RemoteSongs.isRemoteKey(mediaKey)) RemoteSongs.idFor(mediaKey) else mediaKey.substringAfterLast(':').toLongOrNull() ?: Long.MIN_VALUE
 
     /**
      * The phone's queue as the mirror sees it: each entry with the player's own
@@ -136,11 +156,13 @@ class ConnectQueueBridge @Inject constructor(
                 queueManager.isPick(song.id) -> Origin.AUTO
                 else -> Origin.LIST
             }
+            val remote = RemoteSongs.keyOf(song.uri)
             MirrorItem(
+                // A computer's song as that computer named it; the phone's own by device and id.
                 MediaRef(
-                    contentKey = "dev:$device:${song.id}",
-                    home = device,
-                    localId = song.id.toString(),
+                    contentKey = remote ?: "dev:$device:${song.id}",
+                    home = remote?.let(RemoteSongs::homeOf) ?: device,
+                    localId = remote?.let(RemoteSongs::localIdOf) ?: song.id.toString(),
                     title = song.title,
                     artist = song.artist,
                     album = song.album,

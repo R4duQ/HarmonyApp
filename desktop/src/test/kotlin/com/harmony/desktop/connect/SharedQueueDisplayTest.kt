@@ -104,4 +104,36 @@ class SharedQueueDisplayTest {
         player.sharedRemove("e13")
         assertEquals(emptyList<com.harmony.core.remote.queue.QueueOp>(), sent)
     }
+
+    @Test fun aSongFromThisComputerGoesIntoThePhonesQueueAsTheUsers() {
+        val pc = PlayerController(engine, pcId = "pc-1")
+        val sent = mutableListOf<com.harmony.core.remote.queue.QueueOp>()
+        pc.onSharedEdit = { sent += it }
+        val song = com.harmony.desktop.library.LocalTrack("C:/Music/a.flac", "Here", "Me", "Mine", durationMs = 200_000, modified = 5)
+        pc.play(PlayRequest(track("10").copy(key = "dev:phone:10"), 0, playing = false, phoneName = "Phone"))
+        assertEquals("not before the shared queue is in step", false, pc.canShareToPhone())
+        pc.sharedAdd(song, next = true)
+        pc.sharedQueue(shared(current = "10"))
+        assertEquals(true, pc.canShareToPhone())
+        pc.sharedAdd(song, next = true)
+        pc.sharedAdd(song, next = false)
+        assertEquals(2, sent.size)
+        val next = sent[0] as com.harmony.core.remote.queue.QueueOp.PlayNext
+        val add = sent[1] as com.harmony.core.remote.queue.QueueOp.Add
+        val id = PcMedia.idFor(song)
+        assertEquals("pc:pc-1:$id", next.entries.single().media.contentKey)
+        assertEquals("pc-1", next.entries.single().media.home)
+        assertEquals(Origin.MANUAL, next.entries.single().origin)
+        assertEquals(true, next.entries.single().priority)
+        assertEquals(false, add.entries.single().priority)
+        assertEquals("Here", add.entries.single().media.title)
+        assertEquals("two entries, though the same song", 2, (next.entries + add.entries).map { it.id }.toSet().size)
+
+        // One of this computer's songs plays now (the phone names it by its key): still in step.
+        val ours = QueueEntry("e-ours", MediaRef("pc:pc-1:$id", "pc-1", id, "Here", "Me"), Origin.MANUAL)
+        pc.play(PlayRequest(RemoteTrack("pc:pc-1:$id", "Here", "Me", "Mine", 200_000, "http://192.0.2.1/media/$id", key = "pc:pc-1:$id"), 0, playing = false, phoneName = "Phone"))
+        pc.sharedQueue(QueueState(listOf(ours, entry("11", Origin.LIST)), currentId = "e-ours", owner = "phone"))
+        assertEquals(true, pc.canShareToPhone())
+        assertEquals(listOf("Song 11"), pc.nowPlaying.value!!.upNext.map { it.title })
+    }
 }

@@ -608,4 +608,29 @@ class EngineAndConnectTest {
             cache.close()
         }
     }
+
+    @Test fun `the computer's own song in the phone's queue plays from its own file`() {
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val cache = com.harmony.core.remote.cache.MediaCache(
+            createTempDir("harmony-cache"),
+            { com.harmony.core.remote.cache.CacheLimits(maxBytes = 1L shl 30) },
+        )
+        val player = PlayerController(engine, cache, pcId = "pc-1", localFile = { id -> if (id == "abc") flac else null })
+        try {
+            // Added to the shared queue from here: the phone names it by this computer's key,
+            // and the address it gives leads nowhere (the computer never needs it).
+            val ours = RemoteTrack("pc:pc-1:abc", "Tone Song", "Test Artist", "Test Album", 3_000, "http://127.0.0.1:1/media/abc", key = "pc:pc-1:abc")
+            val theirs = RemoteTrack("pc:pc-2:abc", "Elsewhere", "", "", 3_000, "http://127.0.0.1:1/media/abc", key = "pc:pc-2:abc")
+            player.play(PlayRequest(ours, 0, playing = true, phoneName = "Pixel 8", upNext = listOf(theirs), autoAdvance = true))
+            waitFor(what = "playing") { player.status().state == RemoteState.PLAYING }
+            assertEquals(flac.absolutePath, engine.state.value.source)
+            Thread.sleep(300)
+            assertEquals("nothing fetched for our own song", null, cache.localFor("pc:pc-1:abc"))
+            // Another computer's song with the same id is not ours.
+            assertEquals(0L, cache.usage())
+        } finally {
+            engine.stop()
+            cache.close()
+        }
+    }
 }

@@ -36,7 +36,7 @@ data class MediaRef(
     val contentKey: String,
     /** The device holding the original file. */
     val home: String,
-    /** The song's id on [home]: a library id on the phone, a path on the computer. */
+    /** The song's id on [home]: a library id on the phone; on a computer, an id made from the path and when it changed. */
     val localId: String,
     val title: String,
     val artist: String,

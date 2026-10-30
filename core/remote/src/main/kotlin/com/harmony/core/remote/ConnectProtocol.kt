@@ -55,6 +55,38 @@ object Connect {
      */
     const val PATH_QUEUE_COMMANDS = "/queue/commands"
     const val PATH_QUEUE_SINCE = "/queue/since"
+
+    /**
+     * A song of the computer's own library, for a phone to play or keep:
+     * `/media/<id>?t=<token>`, with ranges and a validator ([HttpResponse.ranged]).
+     * The token rides in the address because a media player sends no headers
+     * of ours. 503 with Retry-After while the computer is still converting it
+     * to FLAC (a format the phone can't play); 404 when it isn't there.
+     */
+    const val PATH_MEDIA = "/media/"
+    const val MEDIA_TOKEN = "t"
+
+    /** The address of the computer's song [id] at [host]:[port], for the phone of [token]. */
+    fun mediaUrl(host: String, port: Int, id: String, token: String): String =
+        "http://$host:$port$PATH_MEDIA${java.net.URLEncoder.encode(id, "UTF-8")}?$MEDIA_TOKEN=${java.net.URLEncoder.encode(token, "UTF-8")}"
+
+    /**
+     * The shared queue's content key of the computer [pcId]'s song [id]
+     * ("pc:<computer>:<song>"), and back. The phone plays such a song from its
+     * own cache; the computer, told to play it, plays its own file.
+     */
+    fun pcKey(pcId: String, id: String) = "pc:$pcId:$id"
+    fun pcSongOf(key: String, pcId: String): String? = key.takeIf { it.startsWith("pc:$pcId:") }?.removePrefix("pc:$pcId:")
+}
+
+/** What the computer has for a [Connect.PATH_MEDIA] request. */
+sealed interface ServedMedia {
+    /** Here it is. */
+    class Ready(val source: RangeSource, val contentType: String) : ServedMedia
+    /** Being made ready (converted): ask again in [retryAfterS] seconds. */
+    class Preparing(val retryAfterS: Int) : ServedMedia
+    /** No such song (gone from the library, or never there). */
+    data object Missing : ServedMedia
 }
 
 /** A Harmony computer, as it answers discovery and [Connect.PATH_INFO]. */

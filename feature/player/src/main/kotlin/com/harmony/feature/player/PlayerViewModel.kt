@@ -47,7 +47,8 @@ class PlayerViewModel @Inject constructor(
 
     val isCurrentFavorite: StateFlow<Boolean> = playback.playerState
         .map { it.currentSong?.id }
-        .flatMapLatest { id -> if (id == null) flowOf(false) else favorites.observeIsFavorite(id) }
+        // A computer's song in the queue (below zero) isn't in the library, so it can't be a favourite.
+        .flatMapLatest { id -> if (id == null || id < 0) flowOf(false) else favorites.observeIsFavorite(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Device kinds the listener picked, keyed by device name; see [OutputForms]. */
@@ -159,7 +160,7 @@ class PlayerViewModel @Inject constructor(
     fun onSeek(positionMs: Long) = playback.seekTo(positionMs)
 
     fun onToggleFavorite() {
-        val id = playerState.value.currentSong?.id ?: return
+        val id = playerState.value.currentSong?.id?.takeIf { it >= 0 } ?: return
         viewModelScope.launch { favorites.toggle(id) }
     }
 

@@ -69,6 +69,8 @@ import kotlinx.coroutines.launch
 class HarmonyPlayer(
     private val context: Context,
     private val artworkCache: ArtworkCache,
+    /** A computer's songs in the queue (Universal Queue, stage 6): read from the phone's copy or the computer. */
+    private val remoteMedia: com.harmony.playback.service.connect.RemoteMedia? = null,
 ) {
 
     /** One ExoPlayer and the equalizer engine in its sink. */
@@ -162,7 +164,7 @@ class HarmonyPlayer(
             setEqEnabled(false)
         }
         val exo = ExoPlayer.Builder(context, renderersFactory(equalizer))
-            .setMediaSourceFactory(DefaultMediaSourceFactory(context, resilientExtractors()))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources(), resilientExtractors()))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -409,6 +411,14 @@ class HarmonyPlayer(
      * the extractor then can't sync from. The MP3 and FLAC extractors already
      * resync past corrupt frames on their own.
      */
+    /** Files and content:// as before; a computer's songs through [RemoteMediaDataSource]. */
+    private fun dataSources(): androidx.media3.datasource.DataSource.Factory {
+        val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+        val base: androidx.media3.datasource.DataSource.Factory =
+            remoteMedia?.let { RemoteMediaDataSource.Factory(it, http) } ?: http
+        return androidx.media3.datasource.DefaultDataSource.Factory(context, base)
+    }
+
     private fun resilientExtractors(): DefaultExtractorsFactory = DefaultExtractorsFactory()
         .setConstantBitrateSeekingEnabled(true)
         .setConstantBitrateSeekingAlwaysEnabled(true)

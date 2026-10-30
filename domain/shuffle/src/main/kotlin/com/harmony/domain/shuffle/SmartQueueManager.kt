@@ -128,6 +128,13 @@ class SmartQueueManager @Inject constructor(
      */
     private var mutationDepth = 0
 
+    /**
+     * A song of the phone's library. A computer's song in the queue (Universal
+     * Queue, stage 6, a negative id) has no analysis here: the brain neither
+     * hears of it nor anchors on it.
+     */
+    private fun inLibrary(songId: Long): Boolean = songId >= 0
+
     /** Whether [songId] was put in the current queue by this manager (a Smart Shuffle pick). Main thread. */
     fun isPick(songId: Long): Boolean = songId in generated
 
@@ -325,7 +332,7 @@ class SmartQueueManager @Inject constructor(
             return
         }
         playback.skipToQueueItem(index)
-        if (state.shuffleMode == ShuffleMode.SMART && target.id !in generated) {
+        if (state.shuffleMode == ShuffleMode.SMART && target.id !in generated && inLibrary(target.id)) {
             val scope = managerScope ?: return
             scope.launch {
                 val event = mutex.withLock { runCatching { brain.onManualSelect(target.id) }.getOrDefault(SessionEvent.NONE) }
@@ -415,7 +422,7 @@ class SmartQueueManager @Inject constructor(
         lastPlayNextCount = signal.playNextCount
         if (!grew || signal.mode != ShuffleMode.SMART) return
         val state = playback.playerState.value
-        val newest = state.queue.getOrNull(state.queueIndex + signal.playNextCount) ?: return
+        val newest = state.queue.getOrNull(state.queueIndex + signal.playNextCount)?.takeIf { inLibrary(it.id) } ?: return
         val event = mutex.withLock { runCatching { brain.onManualSelect(newest.id) }.getOrDefault(SessionEvent.NONE) }
         publish(lastEvent = event)
     }
@@ -424,6 +431,7 @@ class SmartQueueManager @Inject constructor(
     private suspend fun noteTrackStarted(currentSongId: Long?) {
         if (currentSongId == null || currentSongId == lastStartedSongId) return
         lastStartedSongId = currentSongId
+        if (!inLibrary(currentSongId)) return
         val event = mutex.withLock { runCatching { brain.onTrackStarted(currentSongId) }.getOrDefault(SessionEvent.NONE) }
         if (event != SessionEvent.NONE) publish(lastEvent = event)
     }
@@ -455,7 +463,7 @@ class SmartQueueManager @Inject constructor(
             ShuffleMode.SMART, ShuffleMode.JOURNEY -> {
                 if (state.shuffleMode == ShuffleMode.JOURNEY) finishJourney()
                 preShuffleQueue = state.queue
-                val id = state.currentSong?.id ?: return
+                val id = state.currentSong?.id?.takeIf(::inLibrary) ?: return
                 // The manual pick boost: S_t = normalize(0.85 v + 0.15 S_t-1).
                 val event = mutex.withLock { runCatching { brain.onManualSelect(id) }.getOrDefault(SessionEvent.NONE) }
                 publish(lastEvent = event)
@@ -706,7 +714,7 @@ class SmartQueueManager @Inject constructor(
                 mutex.withLock {
                     runCatching {
                         brain.resetSession()
-                        if (current != null) brain.onTrackStarted(current)
+                        if (current != null && inLibrary(current)) brain.onTrackStarted(current)
                     }
                     if (runs.isNotEmpty()) mutateQueue { removeRuns(runs) }
                 }
@@ -845,13 +853,16 @@ class SmartQueueManager @Inject constructor(
         replacedTail: List<Long>,
     ): Pair<List<Song>, QueuePlan> {
         if (need <= 0) return emptyList<Song>() to QueuePlan.EMPTY
-        val plan = if (brain.available) {
+        // A computer's song playing has no vector: the batch follows the last library song
+        // queued before it instead, or the random picks below fill in when there is none.
+        val anchor = current.id.takeIf(::inLibrary) ?: prefixIds.lastOrNull(::inLibrary)
+        val plan = if (brain.available && anchor != null) {
             runCatching {
                 brain.prepare()
                 brain.generate(
                     QueueRequest(
-                        currentSongId = current.id,
-                        prefixIds = prefixIds,
+                        currentSongId = anchor!!,
+                        prefixIds = prefixIds.filter(::inLibrary),
                         excludeIds = exclude,
                         replacedTail = replacedTail,
                         count = need,

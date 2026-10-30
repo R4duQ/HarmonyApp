@@ -29,6 +29,9 @@ object AppDirs {
         val local = System.getenv("LOCALAPPDATA")
         (if (!local.isNullOrBlank()) File(local, "Harmony") else root).resolve("connect-cache").apply { mkdirs() }
     }
+
+    /** This computer's songs converted to FLAC for phones that can't play their format (APE, WavPack, DSD...). */
+    val connectConverted: File by lazy { connectCache.resolveSibling("connect-converted").apply { mkdirs() } }
 }
 
 /** Everything the desktop app remembers between runs. */
