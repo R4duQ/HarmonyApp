@@ -581,6 +581,20 @@ class PlaybackConnection @Inject constructor(
         if (index in 0 until c.mediaItemCount) c.removeMediaItem(index)
     }
 
+    override suspend fun removeQueueItem(index: Int, expectedSongId: Long): Boolean {
+        val c = controllerOrNull() ?: return false
+        val current = c.currentMediaItemIndex
+        // Checked against the player as it is now, not as the screen last saw it.
+        if (index !in 0 until c.mediaItemCount || index == current) return false
+        if (c.getMediaItemAt(index).mediaId != expectedSongId.toString()) return false
+        // A song of the Play next run leaving it: the run is one shorter, not shifted onto the next song.
+        if (c.currentMediaItem?.mediaId == playNextAnchorId && index in (current + 1)..(current + playNextRunLength)) {
+            playNextRunLength -= 1
+        }
+        c.removeMediaItem(index)
+        return true
+    }
+
     override suspend fun removeSongsByUri(uris: Set<String>) {
         val c = controllerOrNull() ?: return
         for (index in c.mediaItemCount - 1 downTo 0) {

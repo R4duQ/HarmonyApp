@@ -175,6 +175,14 @@ class DesktopApp(
                 savePhones = { phones -> settings.update { it.copy(phones = phones) } },
                 queue = { sharedQueue.takeIf { settings.current.sharedQueue } },
             )
+            // Edits made in the queue panel: the computer is the coordinator, so they go straight in.
+            player.onSharedEdit = { op ->
+                if (settings.current.sharedQueue) {
+                    sharedQueue.submit(
+                        com.harmony.core.remote.queue.QueueCommand(java.util.UUID.randomUUID().toString(), settings.current.pcId, op, sharedQueue.state.epoch),
+                    )
+                }
+            }
             val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers))
             connect.start()
             app.rescan()

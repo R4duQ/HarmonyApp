@@ -168,4 +168,24 @@ class QueueSyncTest {
         assertTrue(phone.onDelta(c.since(phone.revision)))
         assertEquals(c.state, phone.view)
     }
+
+    @Test fun changesFromOtherDevicesAreToldApartFromItsOwn() {
+        val (c, r) = connected("phone", "pc")
+        val (phone, pc) = r
+        phone.issue(QueueOp.Move("l4", null)); phone.sync(c)
+        pc.issue(QueueOp.Remove(listOf("l2"))); pc.sync(c)
+        phone.issue(QueueOp.Add(listOf(entry("m1")))); phone.sync(c)
+        val (ops, snapshot) = phone.takeForeign()
+        assertEquals(listOf<QueueOp>(QueueOp.Remove(listOf("l2"))), ops)
+        assertFalse(snapshot)
+        assertEquals("taken once", emptyList<QueueOp>(), phone.takeForeign().first)
+    }
+
+    @Test fun aSnapshotSaysTheOpsAreNotTheWholeStory() {
+        val c = QueueCoordinator(album(), logLimit = 2)
+        val phone = QueueReplica("phone", ids("phone")).apply { onDelta(c.since(-1)) }
+        repeat(5) { c.submit(QueueCommand("pc$it", "pc", QueueOp.AppendAuto(listOf(entry("a$it"))), 0)) }
+        phone.onDelta(c.since(phone.revision))
+        assertTrue(phone.takeForeign().second)
+    }
 }

@@ -98,4 +98,38 @@ class QueueMirrorTest {
         val stray = c.submit(QueueCommand("x", "pc", QueueOp.Place(listOf(entry("z")), null), c.state.epoch))
         assertEquals(Refusal.STALE_EPOCH, (stray as CommandOutcome.Refused).why)
     }
+
+    @Test fun editsFromTheComputerBecomePlayerEdits() {
+        val mirror = QueueMirror("phone")
+        val songs = listOf("a", "b", "c", "d", "e").map { item(it) }
+        val shared = QueueState().applyAll(mirror.ops(QueueState(), songs, 1)) // b plays
+        val id = shared.entries.associate { it.media.localId to it.id }
+        // "e" to play next: after b.
+        assertEquals(listOf(PlayerEdit.Move(4, 2, "dev:phone:e")), mirror.edits(QueueOp.Move(id.getValue("e"), null), songs, 1))
+        // "c" after "d".
+        assertEquals(listOf(PlayerEdit.Move(2, 3, "dev:phone:c")), mirror.edits(QueueOp.Move(id.getValue("c"), id.getValue("d")), songs, 1))
+        // Never the song playing, nor into the history.
+        assertEquals(emptyList<PlayerEdit>(), mirror.edits(QueueOp.Move(id.getValue("b"), id.getValue("d")), songs, 1))
+        assertEquals(emptyList<PlayerEdit>(), mirror.edits(QueueOp.Move(id.getValue("d"), id.getValue("a")), songs, 1))
+        // Removals from the end first; the song playing stays.
+        assertEquals(
+            listOf(PlayerEdit.Remove(4, "dev:phone:e"), PlayerEdit.Remove(2, "dev:phone:c")),
+            mirror.edits(QueueOp.Remove(listOf(id.getValue("c"), id.getValue("b"), id.getValue("e"))), songs, 1),
+        )
+        assertEquals(listOf(PlayerEdit.Play(3, "dev:phone:d")), mirror.edits(QueueOp.SetCurrent(id.getValue("d")), songs, 1))
+        assertEquals("unknown entries ask nothing", emptyList<PlayerEdit>(), mirror.edits(QueueOp.Move("nope", null), songs, 1))
+    }
+
+    @Test fun aMoveMadeOnTheComputerStaysProtected() {
+        val mirror = QueueMirror("phone")
+        val songs = listOf("a", "b", "c", "r").map { item(it) } + item("x", Origin.AUTO)
+        var shared = QueueState().applyAll(mirror.ops(QueueState(), songs, 0))
+        val x = shared.entries.last().id
+        shared = shared.must(QueueOp.Move(x, null)) // on the computer: pinned
+        // The phone applies it; its own list knows nothing of pins.
+        val moved = listOf(songs[0], songs[4], songs[1], songs[2], songs[3])
+        val ops = mirror.ops(shared, moved, 0)
+        assertEquals(emptyList<QueueOp>(), ops)
+        assertTrue(shared[x]!!.pinned)
+    }
 }

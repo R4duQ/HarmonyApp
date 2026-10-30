@@ -66,4 +66,42 @@ class SharedQueueDisplayTest {
         player.sharedQueue(null)
         assertEquals("switched off: back to the phone's up next", listOf("Song 11"), upNext().map { it.title })
     }
+
+    @Test fun editsInThePanelBecomeSharedQueueOps() {
+        val sent = mutableListOf<com.harmony.core.remote.queue.QueueOp>()
+        player.onSharedEdit = { sent += it }
+        player.play(PlayRequest(track("10"), 0, playing = false, phoneName = "Phone"))
+        player.sharedQueue(shared(current = "10"))
+        assertEquals(listOf("e11", "e12", "e14", "e13", "e15"), upNext().map { it.entryId })
+        player.sharedPlayNext("e13")
+        player.sharedMoveUp("e14") // third: after the first
+        player.sharedMoveUp("e12") // second: right after the song playing
+        player.sharedMoveUp("e11") // first already
+        player.sharedMoveDown("e12")
+        player.sharedMoveDown("e15") // last already
+        player.sharedRemove("e14")
+        player.sharedPlay("e13")
+        assertEquals(
+            listOf(
+                com.harmony.core.remote.queue.QueueOp.Move("e13", null),
+                com.harmony.core.remote.queue.QueueOp.Move("e14", "e11"),
+                com.harmony.core.remote.queue.QueueOp.Move("e12", null),
+                com.harmony.core.remote.queue.QueueOp.Move("e12", "e14"),
+                com.harmony.core.remote.queue.QueueOp.Remove(listOf("e14")),
+                com.harmony.core.remote.queue.QueueOp.SetCurrent("e13"),
+            ),
+            sent,
+        )
+    }
+
+    @Test fun noEditsWhileTheSharedQueueIsOutOfStep() {
+        val sent = mutableListOf<com.harmony.core.remote.queue.QueueOp>()
+        player.onSharedEdit = { sent += it }
+        player.play(PlayRequest(track("10"), 0, playing = false, phoneName = "Phone"))
+        player.sharedQueue(shared(current = "12"))
+        player.sharedPlayNext("e13")
+        player.sharedQueue(null)
+        player.sharedRemove("e13")
+        assertEquals(emptyList<com.harmony.core.remote.queue.QueueOp>(), sent)
+    }
 }

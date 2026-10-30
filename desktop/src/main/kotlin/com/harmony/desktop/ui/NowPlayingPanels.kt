@@ -35,6 +35,9 @@ import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headset
 import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
@@ -323,8 +326,22 @@ fun QueuePanel(app: DesktopApp, loader: ImageLoader, song: NowPlaying, onClose: 
         }
         LazyColumn(Modifier.weight(1f).testTag("queue_list"), contentPadding = PaddingValues(bottom = 8.dp)) {
             itemsIndexed(song.upNext) { i, item ->
+                val entry = item.entryId
                 PanelRow(
-                    onClick = item.queueIndex?.let { qi -> { app.player.playQueueItem(qi) } },
+                    onClick = when {
+                        entry != null -> { { app.player.sharedPlay(entry) } }
+                        else -> item.queueIndex?.let { qi -> { app.player.playQueueItem(qi) } }
+                    },
+                    trailing = {
+                        if (entry != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                QueueAction(Icons.Rounded.PlaylistPlay, "Play next") { app.player.sharedPlayNext(entry) }
+                                QueueAction(Icons.Rounded.KeyboardArrowUp, "Move up") { app.player.sharedMoveUp(entry) }
+                                QueueAction(Icons.Rounded.KeyboardArrowDown, "Move down") { app.player.sharedMoveDown(entry) }
+                                QueueAction(Icons.Rounded.Close, "Remove") { app.player.sharedRemove(entry) }
+                            }
+                        }
+                    },
                     leading = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("${i + 1}", fontSize = 12.sp, color = c.muted, modifier = Modifier.width(24.dp))
@@ -337,11 +354,30 @@ fun QueuePanel(app: DesktopApp, loader: ImageLoader, song: NowPlaying, onClose: 
             }
         }
         if (song.fromPhone != null) {
+            val shared = song.upNext.any { it.entryId != null }
             Text(
-                "This is your phone's queue: change it on the phone, or use next, shuffle and repeat here.",
+                if (shared) "Shared with your phone: changes made here go to the phone, which stays in charge."
+                else "This is your phone's queue: change it on the phone, or use next, shuffle and repeat here.",
                 fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 8.dp),
             )
         }
+    }
+}
+
+/** A small action on a row of the shared queue. */
+@Composable
+private fun QueueAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val c = LocalHarmonyColors.current
+    Box(
+        Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
+            .testTag("queue_action_" + label.lowercase().replace(' ', '_')),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = c.muted, modifier = Modifier.size(18.dp))
     }
 }
 

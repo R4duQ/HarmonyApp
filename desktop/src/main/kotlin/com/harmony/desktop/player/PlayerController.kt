@@ -39,8 +39,19 @@ sealed interface Art {
     data class Url(val url: String) : Art
 }
 
-/** [label]: where it comes from, in the shared queue ("Next up", "Recommended"); null when not told. */
-data class UpNext(val title: String, val artist: String, val art: Art?, val queueIndex: Int?, val label: String? = null)
+/**
+ * [label]: where it comes from, in the shared queue ("Next up", "Recommended");
+ * null when not told. [entryId]: its entry in the shared queue, which can be
+ * edited from here; null otherwise.
+ */
+data class UpNext(
+    val title: String,
+    val artist: String,
+    val art: Art?,
+    val queueIndex: Int?,
+    val label: String? = null,
+    val entryId: String? = null,
+)
 
 enum class Repeat { OFF, ALL, ONE }
 
@@ -478,8 +489,43 @@ class PlayerController(
                 e.origin == com.harmony.core.remote.queue.Origin.AUTO && !e.pinned -> "Recommended"
                 else -> null
             }
-            UpNext(e.media.title, e.media.artist, covers[e.media.localId]?.let { Art.Url(it) }, null, label)
+            UpNext(e.media.title, e.media.artist, covers[e.media.localId]?.let { Art.Url(it) }, null, label, e.id)
         }
+    }
+
+    /** Sends an edit of the shared queue (set by the app while the shared queue is on). */
+    @Volatile var onSharedEdit: ((com.harmony.core.remote.queue.QueueOp) -> Unit)? = null
+
+    /** The phone plays this entry next. */
+    fun sharedPlayNext(entryId: String) = sharedEdit { com.harmony.core.remote.queue.QueueOp.Move(entryId, null) }
+
+    /** One place up (towards the song playing). */
+    fun sharedMoveUp(entryId: String) = sharedEdit { q ->
+        val up = q.upcoming
+        val i = up.indexOfFirst { it.id == entryId }
+        if (i <= 0) null else com.harmony.core.remote.queue.QueueOp.Move(entryId, up.getOrNull(i - 2)?.id)
+    }
+
+    /** One place down. */
+    fun sharedMoveDown(entryId: String) = sharedEdit { q ->
+        val up = q.upcoming
+        val i = up.indexOfFirst { it.id == entryId }
+        if (i < 0 || i >= up.lastIndex) null else com.harmony.core.remote.queue.QueueOp.Move(entryId, up[i + 1].id)
+    }
+
+    fun sharedRemove(entryId: String) = sharedEdit { com.harmony.core.remote.queue.QueueOp.Remove(listOf(entryId)) }
+
+    /** The phone plays this entry now. */
+    fun sharedPlay(entryId: String) = sharedEdit { com.harmony.core.remote.queue.QueueOp.SetCurrent(entryId) }
+
+    @Synchronized
+    private fun sharedEdit(make: (com.harmony.core.remote.queue.QueueState) -> com.harmony.core.remote.queue.QueueOp?) {
+        val q = shared ?: return
+        // Only while the phone plays here and the shared queue is in step with it.
+        val t = remoteTrack ?: return
+        if (_phone.value == null || q.current?.media?.localId != t.id) return
+        val op = make(q) ?: return
+        onSharedEdit?.invoke(op)
     }
 
     /** The shared queue changed (null: switched off). */

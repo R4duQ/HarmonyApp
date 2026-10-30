@@ -134,6 +134,21 @@ class QueueReplica(
 
     private val pending = ArrayList<QueueCommand>()
 
+    /** Ids of the commands this device issued (bounded), to tell its own ops in the log from others'. */
+    private val mine = object : LinkedHashSet<String>() {
+        override fun add(element: String): Boolean {
+            val added = super.add(element)
+            if (size > MINE_LIMIT) remove(first())
+            return added
+        }
+    }
+
+    /** Changes made on other devices, applied here since [takeForeign] was last called. */
+    private val foreign = ArrayList<QueueOp>()
+
+    /** True when a snapshot replaced the queue: what other devices changed can't be told op by op. */
+    private var resynced = false
+
     /** The queue as this device shows it: [confirmed] with its own unanswered edits on top. */
     val view: QueueState
         @Synchronized get() = pending.fold(confirmed) { s, c -> (s.apply(c.op) as? ApplyResult.Applied)?.state ?: s }
@@ -147,7 +162,22 @@ class QueueReplica(
         // The epoch this device believes in (its own handoff, still unanswered, included).
         val command = QueueCommand(newId(), device, op, view.epoch)
         pending += command
+        mine += command.id
         return command
+    }
+
+    /**
+     * What other devices changed since the last call, in order (oldest
+     * first, at most [FOREIGN_LIMIT]), and whether a snapshot came in
+     * between (then the ops alone are not the whole story).
+     */
+    @Synchronized
+    fun takeForeign(): Pair<List<QueueOp>, Boolean> {
+        val ops = foreign.toList()
+        val snapshot = resynced
+        foreign.clear()
+        resynced = false
+        return ops to snapshot
     }
 
     @Synchronized
@@ -164,6 +194,7 @@ class QueueReplica(
         when (delta) {
             is QueueDelta.Snapshot -> {
                 if (delta.revision < revision) return true // older than what we have: nothing to learn
+                if (revision >= 0 && delta.revision > revision) resynced = true
                 confirmed = delta.state
                 revision = delta.revision
             }
@@ -174,9 +205,21 @@ class QueueReplica(
                     confirmed = (confirmed.apply(logged.op) as? ApplyResult.Applied)?.state ?: confirmed
                     revision = logged.revision
                     pending.removeAll { it.id == logged.commandId }
+                    if (logged.commandId !in mine) {
+                        foreign += logged.op
+                        if (foreign.size > FOREIGN_LIMIT) {
+                            foreign.removeAt(0)
+                            resynced = true
+                        }
+                    }
                 }
             }
         }
         return true
+    }
+
+    private companion object {
+        const val MINE_LIMIT = 4_096
+        const val FOREIGN_LIMIT = 512
     }
 }

@@ -49,6 +49,18 @@ interface PlaybackController {
     suspend fun addNext(song: Song)
     suspend fun removeFromQueue(index: Int)
 
+    /**
+     * Removes the upcoming entry at [index] only if it still holds
+     * [expectedSongId] (an edit made on another device, which may be a moment
+     * old). Never the song playing. Returns whether it was removed.
+     */
+    suspend fun removeQueueItem(index: Int, expectedSongId: Long): Boolean {
+        val state = playerState.value
+        if (index == state.queueIndex || state.queue.getOrNull(index)?.id != expectedSongId) return false
+        removeFromQueue(index)
+        return true
+    }
+
     /** Removes every occurrence of confirmed-deleted files in one controller operation. */
     suspend fun removeSongsByUri(uris: Set<String>) {
         playerState.value.queue.mapIndexedNotNull { index, song -> index.takeIf { song.uri in uris } }
