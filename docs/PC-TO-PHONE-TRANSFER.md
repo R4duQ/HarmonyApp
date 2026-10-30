@@ -121,3 +121,64 @@ RFC 9110 (Range, If-Range, ETag): https://www.rfc-editor.org/rfc/rfc9110
 4. Loturi, duplicate, spațiu, limită de viteză.
 5. Conviețuirea cu redarea: rute în afara lacătului de sesiune, limită de viteză cât telefonul redă pe PC.
 6. Interfața PC (Send to phone, alegerea telefonului, panoul de transferuri) și cea de pe telefon (acceptare, prima explicație, notificări), plus documentarea limitelor.
+
+## 6. Ce e implementat
+
+| Parte | Fișiere |
+|---|---|
+| Protocol, PC (ofertă, hash, servire, rapoarte, anulare, reîncercare, păstrare pe disc) | `core/remote/transfer/TransferModels.kt`, `TransferOutbox.kt`; rutele `/transfer/*` în `ConnectReceiver` |
+| Protocol, telefon (client, `.part` + reluare, SHA-256, verificare, registru, spațiu, anulare, curățenie) | `core/remote/transfer/TransferClient.kt`, `TransferRunner.kt`, `TransferLedger.kt` |
+| Rețeta hash-ului de bibliotecă, comună | `core/model/PartialHash.kt` (folosită de `FileHasher` și de PC) |
+| PC: Send to phone | `desktop/ui/SendToPhone.kt` (dialog: telefonul, numărul, mărimea, formatele incompatibile; panoul „Sent to phones” pe ecranul Connect: progres, Cancel, Retry, Clear), butoane în Songs (pe rând sau selecție) și pe pagina de album; `DesktopApp.sendToPhone` |
+| Telefon: oferte | `feature/downloads/transfer/TransferInbox.kt` (întreabă PC-urile asociate la 8 s cât aplicația e deschisă, la 20 s cât redă pe PC), `TransferPrompt.kt` (Save / Decline / „Always accept from this computer”; prima dată explică locul) |
+| Telefon: transfer | `TransferWorker.kt` (WorkManager, notificare `dataSync` cu progres și Cancel, rezumat final, reîncercare cu re-descoperirea adresei, maximum 10 rulări), `PhoneTransferLibrary.kt` |
+| Telefon: salvare | `MusicDownloadRepository.publishFromComputer` (MediaStore `Music/Harmony/From PC`, `IS_PENDING`, sau folderul ales pentru descărcări; o copie identică deja salvată e refolosită), `SongDao.uriWithContent` |
+| Asociere | `domain/playback/PairedComputers.kt`, implementat de `ConnectSession` (token, adresă, re-descoperire) |
+
+## 7. Verificări
+
+**Automate (JVM, socket-uri reale, `TransferTest`, 15 teste):**
+- fișier întreg, verificat, salvat o singură dată (și la a doua rulare);
+- reluare de la `.part` după o „repornire”, cu `Range` + `If-Range`;
+- fișier schimbat pe PC în timpul transferului → versiunea nouă, întreagă;
+- octeți corupți: o dată → luat din nou; mereu → eșec, nimic salvat;
+- lot cu un fișier dispărut → celelalte salvate, eșecul raportat, Retry trimite doar eșuatul;
+- anulare pe PC (410) și pe telefon → nimic parțial rămas, rapoartele întârziate refuzate;
+- alt telefon asociat sau unul neasociat → nimic (404 / 403); fișierele sunt servite doar după id;
+- același fișier de două ori → „deja pe telefon”; hash-ul bibliotecii → „deja în bibliotecă”; altă masterizare cu același nume → salvată alături;
+- lipsă de spațiu; lipsă de permisiune;
+- raport pentru o încercare veche ignorat; ofertele supraviețuiesc repornirii PC-ului;
+- `/status` răspunde sub 300 ms în timpul unui transfer de 40 MB, iar sesiunea rămâne a telefonului.
+
+**Mutații:** fără verificarea hash-ului, testul cu octeți corupți pică; fără reluare, testul de reluare pică.
+
+**Altele:** `PartialHashTest` arată că valorile `fileHash` rămân identice cu cele vechi. Desktop: compilare și 40 de teste. Android: doar compilare și testele unitare din CI.
+
+**Netestat pe dispozitive** (compilarea nu demonstrează transferul între dispozitive):
+- MediaStore real, folderul SAF, notificările, WorkManager în fundal, Doze;
+- schimbarea IP-ului, Wi-Fi oprit, telefon blocat;
+- redarea simultană cu crossfade.
+
+## 8. Testare manuală
+
+1. **Pregătire:** PC și telefon în aceeași rețea Wi-Fi, asociate (pe telefon: Play on → PC, codul de pe PC). Pe telefon, Harmony e deschis.
+2. **O melodie:** pe PC, Songs → hover pe o melodie → iconița telefon → alegi telefonul → Send.
+   - Pe telefon apare „Songs from <PC>” cu explicația locului → Save.
+   - Notificarea arată progresul, apoi „1 song saved”.
+   - Melodia apare în bibliotecă (Music/Harmony/From PC). Pe PC: Connect → „Sent to phones” → „All 1 saved”.
+3. **Album:** pagina albumului → Send to phone. Un FLAC 24-bit, un MP3 cu copertă și titluri cu diacritice: verifică pe telefon tagurile, coperta și numele.
+4. **Duplicat:** trimite din nou aceeași melodie → „already on the phone”, fără a doua copie.
+5. **Anulare:**
+   - în timpul unui album mare, Cancel pe PC → pe telefon notificarea „cancelled”, nimic parțial;
+   - apoi Retry pe PC → acceptă din nou;
+   - același lucru cu Cancel din notificarea telefonului.
+6. **Întrerupere:** în timpul unui fișier mare, oprește Wi-Fi-ul telefonului 30 s → transferul se reia de unde a rămas (log `HarmonyTransfer`: „cut at … KB”).
+   - Repetă cu aplicația închisă din Recents: la redeschidere și acceptare, se reia.
+7. **IP schimbat:** repornește routerul sau schimbă IP-ul PC-ului în timpul unui lot → worker-ul re-descoperă PC-ul și continuă.
+8. **Spațiu:** pe un telefon aproape plin → eșec „not enough space”, raportat pe PC.
+9. **Redare:**
+   - în timp ce telefonul redă local (cu crossfade) sau pe PC prin Connect, trimite un album;
+   - muzica nu trebuie să se oprească, iar Play/Pause/Next răspund imediat;
+   - transferul merge mai încet (4 MB/s local, 2 MB/s pe PC).
+10. **Neautorizat:** un alt telefon asociat nu vede trimiterea (pe PC se alege un singur telefon).
+11. **Hash:** pe PC `certutil -hashfile <fișier> SHA256`, pe telefon hash-ul fișierului din Music/Harmony/From PC: trebuie să fie identice.

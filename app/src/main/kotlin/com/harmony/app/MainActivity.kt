@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var spotiFlacDownloadEngine: SpotiFlacDownloadEngine
     @Inject lateinit var spotifyPlaylistClient: SpotifyPlaylistClient
     @Inject lateinit var playbackConnection: com.harmony.playback.service.controller.PlaybackConnection
+    @Inject lateinit var transferInbox: com.harmony.feature.downloads.transfer.TransferInbox
 
     private val verificationReturnSignal = MutableStateFlow(0)
     private val albumVerificationReturnSignal = MutableStateFlow(0)
@@ -98,6 +99,7 @@ class MainActivity : ComponentActivity() {
                     playlistVerificationReturnSignal = playlistReturnSignal,
                     spotifyAuthorizationReturnSignal = spotifyReturnSignal,
                 )
+                com.harmony.feature.downloads.transfer.TransferPromptHost(transferInbox)
             }
         }
     }
@@ -111,6 +113,13 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         playbackConnection.ensureConnected()
+        // "Send to phone": paired computers are asked for songs they're sending while Harmony is open.
+        transferInbox.setVisible(true)
+    }
+
+    override fun onStop() {
+        transferInbox.setVisible(false)
+        super.onStop()
     }
 
     private fun handleIncomingIntent(sourceIntent: Intent?) {

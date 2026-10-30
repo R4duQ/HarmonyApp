@@ -1002,6 +1002,115 @@ class MusicDownloadRepository @Inject constructor(
         }
     }
 
+    // -- "Send to phone": songs from a paired computer --------------------------------
+
+    /** Where songs sent from a computer are saved, for the phone's first-time explanation. */
+    fun transferFolderLabel(): String =
+        if (selectedDownloadFolderUri() == null) "Music/Harmony/From PC" else downloadFolderLabel()
+
+    /**
+     * Saves a verified file sent from a computer, under [requestedName], in the
+     * download folder the user chose or else Music/Harmony/From PC (MediaStore,
+     * written while pending so nothing sees half a file). Idempotent: if a file
+     * with that name, size and content ([partialHash], the library's hash) is
+     * already there (a save cut short before it was recorded), that one is
+     * returned instead of a second copy. Errors come as TransferFailure with a
+     * reason the computer shows.
+     */
+    fun publishFromComputer(source: File, requestedName: String, mimeType: String, partialHash: String): Uri {
+        val name = sanitizeFileName(requestedName)
+        val resolver = context.contentResolver
+        val tree = selectedDownloadFolderUri()
+        try {
+            if (tree != null) {
+                if (resolver.persistedUriPermissions.none { it.uri == tree && it.isWritePermission }) {
+                    throw com.harmony.core.remote.transfer.TransferFailure(
+                        com.harmony.core.remote.transfer.FailReason.PERMISSION,
+                        "The download folder chosen on the phone is no longer available. Choose it again in Downloads.",
+                    )
+                }
+                val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                existingInTree(tree, name, source.length(), partialHash)?.let { return it }
+                val destination = DocumentsContract.createDocument(resolver, parent, mimeType, name)
+                    ?: throw com.harmony.core.remote.transfer.TransferFailure(com.harmony.core.remote.transfer.FailReason.PERMISSION, "Android couldn't create the file in the chosen folder.")
+                try {
+                    resolver.openOutputStream(destination, "w")?.use { out -> source.inputStream().buffered().use { it.copyTo(out) } }
+                        ?: throw IllegalStateException("the chosen folder can't be written")
+                    return destination
+                } catch (t: Throwable) {
+                    runCatching { DocumentsContract.deleteDocument(resolver, destination) }
+                    throw t
+                }
+            }
+            existingInMediaStore(name, source.length(), partialHash)?.let { return it }
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, name)
+                put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+                put(MediaStore.Audio.Media.RELATIVE_PATH, FROM_PC_PATH)
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw com.harmony.core.remote.transfer.TransferFailure(com.harmony.core.remote.transfer.FailReason.PERMISSION, "Android didn't let Harmony create the file in Music.")
+            try {
+                resolver.openOutputStream(uri, "w")?.use { out -> source.inputStream().buffered().use { it.copyTo(out) } }
+                    ?: throw IllegalStateException("the file in Music can't be written")
+                values.clear()
+                values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                check(resolver.update(uri, values, null, null) > 0) { "Android could not finish saving this file." }
+                return uri
+            } catch (t: Throwable) {
+                runCatching { resolver.delete(uri, null, null) }
+                throw t
+            }
+        } catch (f: com.harmony.core.remote.transfer.TransferFailure) {
+            throw f
+        } catch (e: SecurityException) {
+            throw com.harmony.core.remote.transfer.TransferFailure(com.harmony.core.remote.transfer.FailReason.PERMISSION, "Harmony isn't allowed to write to the music folder.", e)
+        } catch (e: Exception) {
+            if (com.harmony.core.remote.transfer.TransferRunner.isNoSpace(e)) {
+                throw com.harmony.core.remote.transfer.TransferFailure(com.harmony.core.remote.transfer.FailReason.NO_SPACE, "The phone's storage is full.", e)
+            }
+            throw com.harmony.core.remote.transfer.TransferFailure(com.harmony.core.remote.transfer.FailReason.OTHER, "Couldn't save the file: ${e.message}", e)
+        }
+    }
+
+    /** Whether [uri], saved earlier, can still be opened. */
+    fun stillReadable(uri: String): Boolean = runCatching {
+        context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")?.use { it.statSize >= 0 } ?: false
+    }.getOrDefault(false)
+
+    private fun sameContent(uri: Uri, partialHash: String, size: Long): Boolean = runCatching {
+        context.contentResolver.openInputStream(uri).use { com.harmony.core.model.PartialHash.of(it, size) } == partialHash
+    }.getOrDefault(false)
+
+    private fun existingInMediaStore(name: String, size: Long, partialHash: String): Uri? = runCatching {
+        context.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Audio.Media._ID),
+            "${MediaStore.Audio.Media.RELATIVE_PATH} = ? AND ${MediaStore.Audio.Media.DISPLAY_NAME} = ? AND ${MediaStore.Audio.Media.SIZE} = ?",
+            arrayOf(FROM_PC_PATH, name, size.toString()),
+            null,
+        )?.use { c ->
+            generateSequence { if (c.moveToNext()) c.getLong(0) else null }
+                .map { android.content.ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, it) }
+                .firstOrNull { sameContent(it, partialHash, size) }
+        }
+    }.getOrNull()
+
+    private fun existingInTree(tree: Uri, name: String, size: Long, partialHash: String): Uri? = runCatching {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        context.contentResolver.query(
+            children,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_SIZE),
+            null, null, null,
+        )?.use { c ->
+            generateSequence { if (c.moveToNext()) Triple(c.getString(0), c.getString(1), c.getLong(2)) else null }
+                .filter { (_, n, s) -> n == name && s == size }
+                .map { (id, _, _) -> DocumentsContract.buildDocumentUriUsingTree(tree, id) }
+                .firstOrNull { sameContent(it, partialHash, size) }
+        }
+    }.getOrNull()
+
     private fun verifyMp3Container(file: File): String? {
         if (!file.isFile || file.length() < 128L) return "file is too small for MP3"
         return runCatching {
@@ -1402,6 +1511,8 @@ class MusicDownloadRepository @Inject constructor(
         .ifBlank { "Harmony download" }
 
     private companion object {
+        /** Where songs sent from a computer go when no download folder was chosen. */
+        val FROM_PC_PATH = "${Environment.DIRECTORY_MUSIC}/Harmony/From PC/"
         const val SPOTIFLAC_MIN_QUERY_CHARS = 3
         const val SPOTIFLAC_MAX_QUERY_LENGTH = 160
         /** Longest the Deezer details for a selected result may hold up the selection. */

@@ -371,6 +371,7 @@ fun ConnectPage(app: DesktopApp) {
             }
         }
         app.cache?.let { cache -> CacheCard(cache, settings.cacheLimitGb, app::setCacheLimit) }
+        SentToPhonesCard(app, Modifier.padding(start = 32.dp, end = 32.dp, top = 32.dp).fillMaxWidth())
         Card(Modifier.padding(32.dp).fillMaxWidth()) {
             Column {
                 Text("Phones allowed to play here", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)

@@ -39,6 +39,10 @@ abstract class PlaybackBindsModule {
     @Binds
     @Singleton
     abstract fun bindConnectController(impl: ConnectSession): ConnectController
+
+    @Binds
+    @Singleton
+    abstract fun bindPairedComputers(impl: ConnectSession): com.harmony.domain.playback.PairedComputers
 }
 
 @OptIn(UnstableApi::class)
