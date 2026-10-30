@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **150**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 149), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **151**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 150), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -203,6 +203,13 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   from the computer's own library takes over, the phone shows its song paused and play
   brings it back. The computer is told each song's length, so its progress bar follows
   along. Choose **This phone** to bring the music back, paused where it was.
+- **The music moves between the phone and the PC without a gap.** Choosing your PC in
+  **Play on** while a song plays now has the PC get the song ready first, a moment ahead,
+  and take over at that point: no silence while it loads and no moment where both play.
+  **This phone** while the PC plays now carries on playing on the phone from the same
+  place (paused, it comes back paused, as before). If the other side can't take over,
+  the music simply carries on where it was; if it stops answering midway, Harmony stays
+  silent rather than risk both playing at once.
 - **Send to phone: songs from your PC, kept for good.** In Harmony for Windows, choose
   **Send to phone** on a song, on songs you pick, or on an album, then the paired phone.
   With Harmony open on the phone, it asks once (or never again, if you choose to always
