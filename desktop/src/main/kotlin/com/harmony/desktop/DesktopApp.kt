@@ -68,6 +68,7 @@ class DesktopApp(
     init {
         transfers?.onChange = { _sends.value = transfers.entries() }
         engine.volume = settings.current.volume
+        player.crossfadeSeconds = settings.current.crossfadeSeconds
         engine.eq = settings.current.eq
         countPlays()
     }
@@ -141,6 +142,13 @@ class DesktopApp(
     }
 
     fun setDarkTheme(dark: Boolean) = update { it.copy(darkTheme = dark) }
+
+    /** How long songs fade into each other here (0: none); a phone playing here uses its own. */
+    fun setCrossfade(seconds: Int) {
+        val s = seconds.coerceIn(0, 12)
+        player.crossfadeSeconds = s
+        update { it.copy(crossfadeSeconds = s) }
+    }
 
     /** How much disk the phone's songs kept here may take (GB). Applies to the next download. */
     fun setCacheLimit(gb: Int) = update { it.copy(cacheLimitGb = gb.coerceIn(1, 100)) }

@@ -107,6 +107,18 @@ class TwinPlayer private constructor(
     /** Called when the turn changes, with the player that now plays. */
     var onActiveChanged: ((ExoPlayer) -> Unit)? = null
 
+    /**
+     * A crossfade is loaded, under way, or due within [aheadMs]: moving the
+     * music to another device (Harmony Connect) waits for it to be over.
+     */
+    fun crossfadeNear(aheadMs: Long): Boolean {
+        if (phase != Phase.IDLE) return true
+        val window = crossfadeSeconds * 1000L
+        if (window <= 0) return false
+        val duration = active.duration
+        return duration > 0 && duration - active.currentPosition <= window + PRELOAD_MS + aheadMs
+    }
+
     var crossfadeSeconds: Int = 0
         set(value) {
             field = value.coerceIn(0, MAX_CROSSFADE_SECONDS)

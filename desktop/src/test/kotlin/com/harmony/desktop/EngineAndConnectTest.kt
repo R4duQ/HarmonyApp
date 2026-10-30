@@ -633,4 +633,179 @@ class EngineAndConnectTest {
             cache.close()
         }
     }
+
+    /**
+     * Stage 7, phone to computer, against the real engine over HTTP: the computer
+     * gets the song ready paused ahead of the phone; at that point the phone stops
+     * and the computer starts. The silence is only the start request and the sound
+     * card starting (the song is already decoded), and it carries on from the point.
+     */
+    @Test fun `a handoff to the computer starts it at once from where the phone stopped`() {
+        val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
+            if (req.path == "/track/q") HttpResponse.ranged(FileRangeSource(quiet), req.header("Range"), "audio/wav") else HttpResponse.text(404, "no")
+        }.start()
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val player = PlayerController(engine)
+        val udp = DatagramSocket().use { it.localPort }
+        val host = ConnectHost("pc-1", { "Test PC" }, player, emptyMap(), { }, httpPort = 0, discoveryPort = udp)
+        host.start()
+        try {
+            val port = host.state.value.port
+            val client = ConnectClient("127.0.0.1", port, session = "s1")
+            client.pair(host.state.value.code, "Pixel 8")
+            val track = RemoteTrack("q", "Quiet", "Test Artist", "Test Album", 12_000, "http://127.0.0.1:${phoneFiles.boundPort}/track/q")
+
+            // The phone, playing from 2 s.
+            val t0 = System.currentTimeMillis()
+            var phonePlaying = true
+            var phoneStoppedAt = -1L
+            var phoneStopPos = -1L
+            fun phonePos() = 2_000 + (if (phonePlaying) System.currentTimeMillis() else phoneStoppedAt) - t0
+            val phone = object : com.harmony.core.remote.handoff.HandoffPlayer {
+                override fun songId() = "q"
+                override fun positionMs() = phonePos()
+                override fun isPlaying() = phonePlaying
+                override fun busy() = false
+                override fun prepare(positionMs: Long) = Unit
+                override fun readiness() = com.harmony.core.remote.handoff.Readiness.READY
+                override fun start() { phonePlaying = true }
+                override fun stop() { phoneStopPos = phonePos(); phoneStoppedAt = System.currentTimeMillis(); phonePlaying = false }
+                override fun stopped() = !phonePlaying
+            }
+            var asked = -1L
+            var startedAt = -1L
+            val pc = object : com.harmony.core.remote.handoff.HandoffPlayer {
+                override fun songId() = "q"
+                override fun positionMs() = 0L
+                override fun isPlaying() = false
+                override fun busy() = false
+                override fun prepare(positionMs: Long) {
+                    asked = positionMs
+                    client.play(PlayRequest(track, positionMs, playing = false, phoneName = "Pixel 8"))
+                }
+                override fun readiness(): com.harmony.core.remote.handoff.Readiness {
+                    val s = client.status()
+                    return when {
+                        s.state == RemoteState.PLAYING -> com.harmony.core.remote.handoff.Readiness.PLAYING.also { if (startedAt < 0) startedAt = System.currentTimeMillis() }
+                        s.state == RemoteState.PAUSED && kotlin.math.abs(s.positionMs - asked) < 400 -> com.harmony.core.remote.handoff.Readiness.READY
+                        s.state == RemoteState.ERROR -> com.harmony.core.remote.handoff.Readiness.FAILED
+                        else -> com.harmony.core.remote.handoff.Readiness.NOT_YET
+                    }
+                }
+                override fun start() { client.control(ControlRequest(ControlAction.PLAY)) }
+                override fun stop() { client.control(ControlRequest(ControlAction.PAUSE)) }
+                override fun stopped() = true
+            }
+            val handoff = com.harmony.core.remote.handoff.Handoff(phone, pc, System.currentTimeMillis())
+            var result: com.harmony.core.remote.handoff.HandoffResult? = null
+            val end = System.currentTimeMillis() + 15_000
+            while (result == null && System.currentTimeMillis() < end) {
+                result = handoff.tick(System.currentTimeMillis())
+                Thread.sleep(20)
+            }
+            assertTrue("moved: $result", result is com.harmony.core.remote.handoff.HandoffResult.Moved && result.playing)
+            val gap = startedAt - phoneStoppedAt
+            println("handoff: point ${(result as com.harmony.core.remote.handoff.HandoffResult.Moved).atMs} ms, phone stopped at $phoneStopPos ms, computer playing $gap ms later")
+            assertTrue("the computer plays within 250 ms of the phone stopping (seen through /status): $gap ms", gap in 0..250)
+            assertTrue("from the point: phone stopped at $phoneStopPos, the computer was ready at ${result.atMs}", kotlin.math.abs(phoneStopPos - result.atMs) <= 60)
+            Thread.sleep(300)
+            val s = client.status()
+            assertEquals(RemoteState.PLAYING, s.state)
+            assertTrue("carrying on from the point: ${s.positionMs}", s.positionMs in result.atMs..result.atMs + 700)
+        } finally {
+            host.close()
+            phoneFiles.close()
+            engine.stop()
+        }
+    }
+
+    /** Songs of a constant level ("a" = +8000, "b" = -8000), [ms] long; "slow:" ones take [slowMs] before their first byte. */
+    private class LevelDecoder(private val ms: Long, private val slowMs: Long = 0) : com.harmony.desktop.engine.Decoder {
+        override fun open(source: String, startMs: Long, sampleRate: Int, channels: Int): com.harmony.desktop.engine.DecodeStream {
+            val level: Short = if (source.endsWith("a")) 8000 else -8000
+            val frames = ((ms - startMs).coerceAtLeast(0) * sampleRate / 1000).toInt()
+            val bytes = ByteArray(frames * channels * 2)
+            for (i in bytes.indices step 2) { bytes[i] = (level.toInt() and 0xFF).toByte(); bytes[i + 1] = (level.toInt() shr 8).toByte() }
+            val slow = source.startsWith("slow:")
+            val data = java.io.ByteArrayInputStream(bytes)
+            return object : com.harmony.desktop.engine.DecodeStream {
+                var first = true
+                override val input = object : java.io.InputStream() {
+                    override fun read(): Int = throw UnsupportedOperationException()
+                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        if (slow && first) { first = false; Thread.sleep(slowMs) }
+                        return data.read(b, off, len)
+                    }
+                }
+                override fun finish(): String? = null
+                override fun close() {}
+            }
+        }
+    }
+
+    private fun levels(sink: CountingSink): ShortArray {
+        val b = synchronized(sink.written) { sink.written.toByteArray() }
+        // Left channel only.
+        return ShortArray(b.size / 4) { i -> ((b[4 * i + 1].toInt() shl 8) or (b[4 * i].toInt() and 0xFF)).toShort() }
+    }
+
+    @Test fun `songs fade into each other over the last seconds when the next one is decoded`() {
+        val sink = CountingSink()
+        val engine = AudioEngine({ sink }, LevelDecoder(3_000))
+        engine.volume = 1f
+        engine.crossfadeMs = 1_000
+        var next: com.harmony.desktop.engine.Upcoming? = com.harmony.desktop.engine.Upcoming("song-b", 3_000, "B")
+        val advanced = Collections.synchronizedList(mutableListOf<Any?>())
+        engine.upcoming = { next }
+        engine.onAdvanced = { up -> advanced += up.tag; next = null }
+        engine.load("song-a", 0, play = true, durationMs = 3_000)
+        waitFor(what = "the end") { engine.state.value.status == EngineStatus.ENDED }
+        assertEquals(listOf<Any?>("B"), advanced)
+        val l = levels(sink)
+        // A whole song less the overlap: 3 + 3 - 1 s.
+        assertEquals(5.0 * 48_000, l.size.toDouble(), 48_000 * 0.03)
+        val fadeStart = 2 * 48_000
+        assertEquals("A alone before the fade", 8000.0, l[fadeStart - 4_800].toDouble(), 400.0)
+        assertEquals("half way: equal power, A and B cancel", 0.0, l[fadeStart + 24_000].toDouble(), 400.0)
+        assertEquals("B alone after it", -8000.0, l[fadeStart + 48_000 + 4_800].toDouble(), 400.0)
+        // No step anywhere: the fade glides.
+        var worst = 0
+        for (i in 1 until l.size) worst = maxOf(worst, kotlin.math.abs(l[i] - l[i - 1]))
+        assertTrue("no jump: $worst", worst < 200)
+        engine.stop()
+    }
+
+    @Test fun `without the next song decoded the songs follow on without a gap instead`() {
+        val sink = CountingSink()
+        val engine = AudioEngine({ sink }, LevelDecoder(3_000, slowMs = 1_500))
+        engine.volume = 1f
+        engine.crossfadeMs = 1_000
+        var next: com.harmony.desktop.engine.Upcoming? = com.harmony.desktop.engine.Upcoming("slow:song-b", 3_000, "B")
+        engine.upcoming = { next }
+        engine.onAdvanced = { next = null }
+        engine.load("song-a", 0, play = true, durationMs = 3_000)
+        waitFor(what = "the end") { engine.state.value.status == EngineStatus.ENDED }
+        val l = levels(sink)
+        assertEquals("both songs whole, back to back", 6.0 * 48_000, l.size.toDouble(), 48_000 * 0.03)
+        assertEquals(8000.0, l[3 * 48_000 - 100].toDouble(), 400.0)
+        assertEquals(-8000.0, l[3 * 48_000 + 100].toDouble(), 400.0)
+        engine.stop()
+    }
+
+    @Test fun `a seek in the middle of a fade carries on from the new song`() {
+        val sink = CountingSink(realTime = true)
+        val engine = AudioEngine({ sink }, LevelDecoder(3_000))
+        engine.crossfadeMs = 1_500
+        var next: com.harmony.desktop.engine.Upcoming? = com.harmony.desktop.engine.Upcoming("song-b", 3_000, "B")
+        engine.upcoming = { next }
+        engine.onAdvanced = { next = null }
+        engine.load("song-a", 1_000, play = true, durationMs = 3_000)
+        waitFor(what = "the fade") { engine.state.value.source == "song-b" }
+        Thread.sleep(300)
+        engine.seek(2_000)
+        waitFor(what = "playing again") { engine.state.value.status == EngineStatus.PLAYING }
+        assertEquals("song-b", engine.state.value.source)
+        waitFor(what = "the end") { engine.state.value.status == EngineStatus.ENDED }
+        engine.stop()
+    }
 }

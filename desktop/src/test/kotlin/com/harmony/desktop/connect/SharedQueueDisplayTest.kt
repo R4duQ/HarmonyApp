@@ -136,4 +136,21 @@ class SharedQueueDisplayTest {
         assertEquals(true, pc.canShareToPhone())
         assertEquals(listOf("Song 11"), pc.nowPlaying.value!!.upNext.map { it.title })
     }
+
+    @Test fun aPhoneSongFadesAsThePhoneWouldAndTheComputersOwnAsTheComputerIsSet() {
+        player.crossfadeSeconds = 6
+        assertEquals(6_000L, engine.crossfadeMs)
+        player.play(PlayRequest(track("10"), 0, playing = false, phoneName = "Phone", crossfadeSeconds = 2))
+        assertEquals("the phone's own setting", 2_000L, engine.crossfadeMs)
+        player.play(PlayRequest(track("11"), 0, playing = false, phoneName = "Phone", crossfadeSeconds = 0))
+        assertEquals("the phone has none", 0L, engine.crossfadeMs)
+        player.play(PlayRequest(track("12"), 0, playing = false, phoneName = "Phone"))
+        assertEquals("an older phone that doesn't say: the computer's", 6_000L, engine.crossfadeMs)
+        player.playLocal(listOf(com.harmony.desktop.library.LocalTrack("/x.flac", "X", "A", "B")), 0)
+        assertEquals("the computer's own music: its own", 6_000L, engine.crossfadeMs)
+        // The message itself, both ways, and from an older phone.
+        val r = PlayRequest(track("10"), 0, playing = true, phoneName = "Phone", crossfadeSeconds = 8)
+        assertEquals(r, PlayRequest.fromJson(r.toJson()))
+        assertEquals(null, PlayRequest.fromJson(r.copy(crossfadeSeconds = null).toJson())?.crossfadeSeconds)
+    }
 }

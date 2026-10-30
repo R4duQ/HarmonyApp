@@ -197,8 +197,8 @@ Diferențe față de `RemoteCache` actual:
 | 4 | Cache v2 pe PC (`core/remote/cache/MediaCache`, refolosibil pe telefon în etapa 6) | reluare după întrerupere, fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | ✅ implementat. Automat: transfer tăiat → reluat de la octetul unde s-a oprit, cu `If-Range` (descărcat ≈ o dată); fișier schimbat între încercări → vine întreg, nelipit; piesa curentă preia transferul, cealaltă se reia după; limită de viteză doar la pre-încărcare; LRU fără curenta/următoarea; fără spațiu → stream; copie coruptă → încă o descărcare, apoi doar stream; după repornire: copiile rămân, parțialele se reiau; pe PC, cu ffmpeg real: redare și căutare din copie, copie stricată → redarea continuă și copia e refăcută. **Neverificat pe dispozitive** |
 | 5 | Telefonul ține minte proveniența fiecărei intrări | Smart Shuffle lucrează pe proveniență, nu pe poziții; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un id per intrare, și pe PC | ✅ implementat. Automat: 7 teste noi de Smart Shuffle (plus cele 24 vechi, neschimbate) și 10 pentru `QueueShadow`; test de mutație: dacă Smart Shuffle ignoră proveniența, 7 teste pică; pe PC, aceeași melodie de două ori rămâne două intrări distincte când una e mutată. **Neverificat pe telefon** |
 | 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | ✅ implementat. Automat: ruta `/media` cu token, intervale și „încă se convertește” (503), descărcată de cache-ul telefonului pe socket-uri reale; conversie reală cu ffmpeg WavPack → FLAC (aceeași durată), o singură dată; fișier care nu se poate converti → 404, nu reîncercări la nesfârșit; 120 de pași pe socket-uri, cu cădere de rețea, în care PC-ul adaugă 33 de piese: fiecare ajunge o dată în playerul telefonului, ca manuală, iar cozile ajung identice; PC-ul își redă propriul fișier când telefonul i-l trimite; Smart Shuffle nu trimite piesele PC-ului motorului de recomandări. **Neverificat pe dispozitive** |
-| 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | |
-| 8 | Crossfade pe PC | motorul PC face crossfade doar cu următoarea decodată în buffer; altfel trecere normală | |
+| 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | ✅ implementat. Automat: 3000 de handoff-uri simulate în ambele sensuri, cu întârzieri și un eșec injectat la fiecare pas, fără nicio suprapunere; dacă ținta pornește fără confirmarea opririi sursei, testul pică (mutație). Pe motorul real al PC-ului, prin HTTP local: telefonul se oprește la 10 ms de punct, iar PC-ul cântă după 25 ms, din același loc. **Neverificat pe dispozitive** |
+| 8 | Crossfade pe PC | motorul PC face crossfade doar cu următoarea decodată în buffer; altfel trecere normală | ✅ implementat. Automat: fade cu putere egală măsurat pe ieșire (A singur, apoi A și B se anulează la jumătate, apoi B singur, fără niciun salt); durata totală e A + B minus fade-ul; dacă următoarea nu e decodată la timp, piesele se succed fără gol și fără fade; seek în mijlocul fade-ului; setarea telefonului ajunge pe PC și e folosită pentru piesele lui. **Neverificat pe dispozitive** |
 | 9 | Testare pe dispozitive reale | matricea din §5 | |
 
 ---
@@ -228,6 +228,39 @@ Diferențe față de `RemoteCache` actual:
 - **Album nou** (decizia 1, acum și în player): melodiile manuale care urmau se păstrează imediat după piesa aleasă, și în Smart, și în Random.
 - **PC:** primește id-ul fiecărei intrări și dacă e fixată, deci o mutare între două copii ale aceleiași melodii nu mai e confundată.
 - **Limită:** proveniența nu se salvează. După ce Android oprește aplicația, coada restaurată e toată „listă”.
+
+### Ce face etapa 8 concret
+
+- **Motorul PC** (`AudioEngine.crossfadeMs`):
+  - cu 20 s înainte de final, deschide piesa următoare și îi decodează în memorie primele „fade + 1 s” (~200 KB pe secundă);
+  - în ultimele secunde ale piesei, cele două se amestecă pe curbe de putere egală, iar EQ-ul, tonul și volumul se aplică amestecului;
+  - fade-ul pornește **doar** dacă începutul piesei următoare e deja decodat. Altfel (rețea lentă, coadă schimbată târziu) piesele se succed fără gol, ca înainte, deci nu există blocaje în mijlocul fade-ului.
+- **Poziția:** piesa nouă e „cea care cântă” de la începutul fade-ului (ca pe telefon), iar poziția ei curge de acolo.
+- **Seek, pauză, stop** în timpul fade-ului: fade-ul se oprește curat, iar piesa nouă rămâne.
+- **Setări:**
+  - pentru muzica PC-ului: Equalizer → Crossfade (Off, 2, 4, 6, 8, 12 s), implicit Off;
+  - pentru piesele telefonului redate pe PC, telefonul trimite setarea lui (`PlayRequest.crossfadeSeconds`);
+  - telefoanele vechi nu o trimit, așa că PC-ul folosește setarea lui.
+- **Limită:** un handoff PC → telefon pornit chiar în timpul unui fade pe PC vede piesa schimbându-se, renunță și readuce muzica pe telefon pe pauză.
+
+### Ce face etapa 7 concret
+
+- **Mecanismul** (`core/remote/handoff/Handoff.kt`, Kotlin pur, condus prin tick-uri):
+  1. așteaptă terminarea unui crossfade;
+  2. ținta încarcă piesa pe pauză cu 1,5 s înaintea sursei;
+  3. ținta confirmă că are primul sunet gata;
+  4. când sursa ajunge la punct, se oprește și trebuie să confirme;
+  5. ținta pornește și trebuie să confirme că redă.
+- **Singura tăcere** e timpul dintre oprire și pornire (o cerere în rețeaua de acasă), nu încărcarea.
+- **Eșecuri:**
+  - ținta nu se pregătește sau răspunde că nu poate → nu se schimbă nimic (sau sursa reia de la același loc);
+  - sursa nu confirmă oprirea → ținta nu pornește;
+  - ținta nu mai răspunde după comanda de pornire → sursa rămâne tăcută, niciodată două dispozitive deodată. Pentru telefon → PC, sesiunea continuă normal și renunță după 30 s de tăcere.
+- **Telefon → PC:** alegerea PC-ului în „Play on” cât muzica merge pe telefon. Dacă e pe pauză, se mută pe pauză, ca înainte.
+- **PC → telefon:** „This phone” cât muzica merge pe PC. **Schimbare:** muzica continuă pe telefon din același loc. Înainte revenea pe pauză. Pe pauză sau la Stop pe PC, revine tot pe pauză.
+- **Ce nu face încă:**
+  - o piesă a PC-ului (etapa 6) care trece pe telefon fără copie locală e citită direct de la PC, deci pregătirea poate dura mai mult;
+  - nu există un dialog „Continuă aici”: în cazul nesigur telefonul rămâne pe pauză, iar Play continuă pe telefon.
 
 ### Ce face etapa 6 concret
 

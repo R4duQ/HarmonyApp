@@ -98,6 +98,22 @@ class PlayerController(
     private var localShuffle = false
     private var localRepeat = Repeat.OFF
 
+    /** How long this computer's own songs fade into each other, seconds (0: none). */
+    @Volatile var crossfadeSeconds: Int = 0
+        set(value) {
+            field = value.coerceIn(0, 12)
+            applyCrossfade()
+        }
+
+    /** The phone's crossfade while it plays here (null: a phone that doesn't say, so this computer's). */
+    @Volatile private var remoteCrossfade: Int? = null
+
+    /** The fade the engine uses: the phone's while it plays here, else this computer's own. */
+    private fun applyCrossfade() {
+        val seconds = if (_phone.value != null) remoteCrossfade ?: crossfadeSeconds else crossfadeSeconds
+        engine.crossfadeMs = seconds * 1000L
+    }
+
     /** The phone's modes as it last said (null: a phone that doesn't say). */
     private var remoteShuffle: Boolean? = null
     private var remoteRepeat: RemoteRepeat? = null
@@ -377,6 +393,8 @@ class PlayerController(
         autoAdvance = request.autoAdvance
         remoteShuffle = request.shuffle
         remoteRepeat = request.repeat
+        remoteCrossfade = request.crossfadeSeconds
+        applyCrossfade()
         publishModes()
         if (request.followUp && same) {
             // The phone catching up with what plays here, or a new "up next": carry on as is,
@@ -711,6 +729,8 @@ class PlayerController(
         _phone.value = null
         remoteShuffle = null
         remoteRepeat = null
+        remoteCrossfade = null
+        applyCrossfade()
         publishModes()
         pending.clear()
         // The songs fetched stay for next time (the cache keeps itself within bounds); downloads stop.
