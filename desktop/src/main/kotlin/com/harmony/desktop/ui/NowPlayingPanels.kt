@@ -332,7 +332,7 @@ fun QueuePanel(app: DesktopApp, loader: ImageLoader, song: NowPlaying, onClose: 
                         }
                     },
                     title = item.title,
-                    subtitle = item.artist,
+                    subtitle = listOfNotNull(item.artist.takeIf(String::isNotBlank), item.label).joinToString(" · "),
                 )
             }
         }

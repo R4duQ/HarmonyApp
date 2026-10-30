@@ -357,6 +357,18 @@ fun ConnectPage(app: DesktopApp) {
                 }
             }
         }
+        Card(Modifier.padding(start = 32.dp, end = 32.dp, top = 32.dp).fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Shared queue (beta)", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
+                    Text(
+                        "While a phone plays here, its whole queue shows on this computer, with what you queued and what was recommended marked. The phone stays in charge of the queue.",
+                        fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                HarmonySwitch(settings.sharedQueue, { app.setSharedQueue(it) }, Modifier.padding(start = 16.dp).testTag("shared_queue"))
+            }
+        }
         Card(Modifier.padding(32.dp).fillMaxWidth()) {
             Column {
                 Text("Phones allowed to play here", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)

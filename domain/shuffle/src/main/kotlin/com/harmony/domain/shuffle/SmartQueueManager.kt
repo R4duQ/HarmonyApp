@@ -119,6 +119,9 @@ class SmartQueueManager @Inject constructor(
      */
     private var mutationDepth = 0
 
+    /** Whether [songId] was put in the current queue by this manager (a Smart Shuffle pick). Main thread. */
+    fun isPick(songId: Long): Boolean = songId in generated
+
     /** True while this manager is writing the queue; its own changes are not reacted to. */
     val isMutatingQueue: Boolean get() = mutationDepth > 0
 

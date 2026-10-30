@@ -159,6 +159,7 @@ android {
 
 dependencies {
     implementation(projects.playback.service)
+    implementation(projects.core.remote)
     implementation(projects.core.ui)
     implementation(projects.core.datastore)
     implementation(projects.feature.library)

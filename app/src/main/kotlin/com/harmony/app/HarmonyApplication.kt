@@ -45,6 +45,7 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
     @Inject lateinit var smartQueueManager: SmartQueueManager
     @Inject lateinit var settingsApplier: SettingsApplier
     @Inject lateinit var connectShuffleBridge: ConnectShuffleBridge
+    @Inject lateinit var connectQueueBridge: ConnectQueueBridge
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -65,5 +66,6 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
         smartQueueManager.start(appScope)
         settingsApplier.start(appScope)
         connectShuffleBridge.start(appScope)
+        connectQueueBridge.start(appScope)
     }
 }

@@ -73,8 +73,10 @@ class QueueCoordinator(
     }
 
     private fun decide(command: QueueCommand): CommandOutcome {
-        val playback = command.op is QueueOp.SetCurrent || command.op is QueueOp.SetOwner
+        val playback = command.op is QueueOp.SetCurrent || command.op is QueueOp.SetOwner || command.op.isOwnerOnly
         if (playback && command.epoch != state.epoch) return CommandOutcome.Refused(Refusal.STALE_EPOCH, revision)
+        // Exact positions come only from the device playing the queue.
+        if (command.op.isOwnerOnly && command.device != state.owner) return CommandOutcome.Refused(Refusal.STALE_EPOCH, revision)
         val op = resolve(command.op)
         return when (val result = state.apply(op)) {
             is ApplyResult.Refused -> CommandOutcome.Refused(result.why, revision)

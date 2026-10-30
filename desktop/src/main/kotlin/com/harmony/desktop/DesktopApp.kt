@@ -130,6 +130,12 @@ class DesktopApp(
 
     fun setDarkTheme(dark: Boolean) = update { it.copy(darkTheme = dark) }
 
+    /** Universal Queue (beta). Off, the phone's link ends at its next request and the phone keeps its own queue. */
+    fun setSharedQueue(on: Boolean) {
+        update { it.copy(sharedQueue = on) }
+        if (!on) player.sharedQueue(null)
+    }
+
     /** The sound outputs there are now (asks Windows: call it off the UI thread). */
     fun outputDevices(): List<String> = outputs()
 
@@ -159,12 +165,15 @@ class DesktopApp(
             val settings = SettingsStore()
             val engine = AudioEngine({ com.harmony.desktop.engine.JavaSoundSink { settings.current.outputDevice } })
             val player = PlayerController(engine, com.harmony.desktop.connect.RemoteCache())
+            // The shared queue lives as long as the app; it is offered to phones only while switched on.
+            val sharedQueue = com.harmony.core.remote.queue.QueueService(onChange = { state, _ -> player.sharedQueue(state) })
             val connect = ConnectHost(
                 pcId = settings.current.pcId,
                 pcName = { settings.current.pcName },
                 renderer = player,
                 initialPhones = settings.current.phones,
                 savePhones = { phones -> settings.update { it.copy(phones = phones) } },
+                queue = { sharedQueue.takeIf { settings.current.sharedQueue } },
             )
             val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers))
             connect.start()

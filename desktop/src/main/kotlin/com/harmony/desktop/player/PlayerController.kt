@@ -39,7 +39,8 @@ sealed interface Art {
     data class Url(val url: String) : Art
 }
 
-data class UpNext(val title: String, val artist: String, val art: Art?, val queueIndex: Int?)
+/** [label]: where it comes from, in the shared queue ("Next up", "Recommended"); null when not told. */
+data class UpNext(val title: String, val artist: String, val art: Art?, val queueIndex: Int?, val label: String? = null)
 
 enum class Repeat { OFF, ALL, ONE }
 
@@ -118,6 +119,13 @@ class PlayerController(
      * probe) started for one does nothing once another, or none, has come.
      */
     private var remoteGeneration = 0L
+    /**
+     * The shared queue (Universal Queue) as the phone mirrors it: when it
+     * matches the phone's song playing here, "up next" shows all of it, with
+     * what the user queued and what was recommended marked.
+     */
+    private var shared: com.harmony.core.remote.queue.QueueState? = null
+
     /** The order songs play in when shuffling: positions in the queue. */
     private var order: List<Int> = emptyList()
 
@@ -454,8 +462,31 @@ class PlayerController(
         _nowPlaying.value = NowPlaying(
             key = "phone:" + t.id, title = t.title, artist = t.artist, album = t.album, durationMs = t.durationMs,
             art = t.artUrl?.let { Art.Url(it) }, quality = t.quality, fromPhone = phone,
-            upNext = remoteUpNext.take(UP_NEXT).map { UpNext(it.title, it.artist, it.artUrl?.let { u -> Art.Url(u) }, null) },
+            upNext = sharedUpNext(t) ?: remoteUpNext.take(UP_NEXT).map { UpNext(it.title, it.artist, it.artUrl?.let { u -> Art.Url(u) }, null) },
         )
+    }
+
+    /** "Up next" from the shared queue, when it is in step with the song the phone plays here; else null. */
+    private fun sharedUpNext(t: RemoteTrack): List<UpNext>? {
+        val q = shared ?: return null
+        if (q.current?.media?.localId != t.id) return null
+        val covers = remoteUpNext.associate { it.id to it.artUrl }
+        return q.upcoming.take(SHARED_UP_NEXT).map { e ->
+            val label = when {
+                e.priority -> "Next up"
+                e.origin == com.harmony.core.remote.queue.Origin.MANUAL -> "Queued"
+                e.origin == com.harmony.core.remote.queue.Origin.AUTO && !e.pinned -> "Recommended"
+                else -> null
+            }
+            UpNext(e.media.title, e.media.artist, covers[e.media.localId]?.let { Art.Url(it) }, null, label)
+        }
+    }
+
+    /** The shared queue changed (null: switched off). */
+    @Synchronized
+    fun sharedQueue(state: com.harmony.core.remote.queue.QueueState?) {
+        shared = state
+        if (_phone.value != null) remoteTrack?.let(::showRemote)
     }
 
     /** The fetched copy when it's complete, else straight from the phone. */
@@ -568,6 +599,8 @@ class PlayerController(
     private companion object {
         /** What the queue shows after the song playing. */
         const val UP_NEXT = 30
+        /** The shared queue can be long; the panel shows this much of it. */
+        const val SHARED_UP_NEXT = 500
         const val RESTART_AFTER_MS = 3_000L
         const val MAX_RECOVERIES = 3
         const val RECOVERY_DELAY_MS = 1_500L

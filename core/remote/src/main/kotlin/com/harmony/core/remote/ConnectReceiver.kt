@@ -86,8 +86,11 @@ class ConnectReceiver(
     lostAfterMs: Long = PhoneSessions.LOST_AFTER_MS,
     /** Milliseconds, monotonic. */
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
-    /** The Universal Queue this computer coordinates; null: not offered (404, as on older computers). */
-    private val queue: com.harmony.core.remote.queue.QueueService? = null,
+    /**
+     * The Universal Queue this computer coordinates, looked up per request (it
+     * can be switched on and off); null: not offered (404, as on older computers).
+     */
+    private val queue: () -> com.harmony.core.remote.queue.QueueService? = { null },
 ) {
     private val lock = Any()
     private val sessions = PhoneSessions(suspectAfterMs, lostAfterMs, log) { link ->
@@ -175,7 +178,7 @@ class ConnectReceiver(
      * play, pause or the status.
      */
     private fun queue(request: HttpRequest, token: String, phoneSession: String?): HttpResponse {
-        val q = queue ?: return HttpResponse.text(404, "no such thing")
+        val q = queue() ?: return HttpResponse.text(404, "no such thing")
         val verdict = synchronized(lock) { sessions.check(token, phoneSession, clock()) }
         if (verdict is PhoneSessions.Verdict.Ended) return ended(verdict.reason)
         return when (request.path) {

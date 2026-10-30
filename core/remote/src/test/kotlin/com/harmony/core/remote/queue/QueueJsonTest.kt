@@ -21,6 +21,11 @@ class QueueJsonTest {
         QueueOp.SetShuffle(false),
         QueueOp.SetRepeat(QueueRepeat.ONE),
         QueueOp.SetOwner("pc"),
+        QueueOp.Place(listOf(entry("n1", Origin.AUTO).copy(priority = true)), "l2"),
+        QueueOp.Place(listOf(entry("n2")), null),
+        QueueOp.Reposition("l1", null),
+        QueueOp.Reposition("l1", "l4"),
+        QueueOp.SetFlags("l1", Origin.MANUAL, pinned = true, priority = false),
     )
 
     /** Through text, as on the wire. */

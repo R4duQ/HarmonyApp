@@ -64,6 +64,10 @@ object QueueJson {
         is QueueOp.SetShuffle -> JSONObject().put("op", "setShuffle").put("on", op.on).putOpt("order", op.order?.let(::ids))
         is QueueOp.SetRepeat -> JSONObject().put("op", "setRepeat").put("mode", op.mode.name.lowercase())
         is QueueOp.SetOwner -> JSONObject().put("op", "setOwner").put("device", op.device)
+        is QueueOp.Place -> JSONObject().put("op", "place").put("entries", entries(op.entries)).putOpt("after", op.afterId)
+        is QueueOp.Reposition -> JSONObject().put("op", "reposition").put("entry", op.entryId).putOpt("after", op.afterId)
+        is QueueOp.SetFlags -> JSONObject().put("op", "setFlags").put("entry", op.entryId)
+            .put("origin", op.origin.name.lowercase()).put("pinned", op.pinned).put("priority", op.priority)
     }
 
     /** Null for an op this version doesn't know. */
@@ -80,6 +84,12 @@ object QueueJson {
             "setShuffle" -> QueueOp.SetShuffle(o.getBoolean("on"), o.optJSONArray("order")?.let(::ids))
             "setRepeat" -> QueueOp.SetRepeat(QueueRepeat.valueOf(o.getString("mode").uppercase()))
             "setOwner" -> QueueOp.SetOwner(o.getString("device"))
+            "place" -> QueueOp.Place(entries(o.getJSONArray("entries")), o.optString("after").takeIf { it.isNotEmpty() })
+            "reposition" -> QueueOp.Reposition(o.getString("entry"), o.optString("after").takeIf { it.isNotEmpty() })
+            "setFlags" -> QueueOp.SetFlags(
+                o.getString("entry"), Origin.valueOf(o.getString("origin").uppercase()),
+                o.optBoolean("pinned"), o.optBoolean("priority"),
+            )
             else -> null
         }
     }.getOrNull()

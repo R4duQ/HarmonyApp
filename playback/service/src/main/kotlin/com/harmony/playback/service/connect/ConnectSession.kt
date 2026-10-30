@@ -87,6 +87,15 @@ class ConnectSession @Inject constructor(
     private var client: ConnectClient? = null
     private var computer: ConnectComputer? = null
 
+    private val _queueClient = MutableStateFlow<ConnectClient?>(null)
+
+    /**
+     * The client of the session playing on a computer now (null: none), for
+     * the shared queue (Universal Queue), which talks to the same computer in
+     * the same session: when the computer ends the session, the queue link ends too.
+     */
+    val queueClient: StateFlow<ConnectClient?> = _queueClient
+
     /** The song the computer was last told to play. */
     private var sentId: String? = null
     private var endHandledFor: String? = null
@@ -348,6 +357,7 @@ class ConnectSession @Inject constructor(
             }
             val wasActive = isActive
             client = fresh
+            _queueClient.value = fresh
             computer = target
             sentId = item?.mediaId
             advanceId = upNext.firstOrNull()?.mediaId?.takeIf { canAdvance }
@@ -377,6 +387,7 @@ class ConnectSession @Inject constructor(
         pollJob?.cancel()
         pollJob = null
         client = null
+        _queueClient.value = null
         computer = null
         sentId = null
         advanceId = null
@@ -867,6 +878,13 @@ class ConnectSession @Inject constructor(
         prefs.edit().putString(KEY_COMPUTERS, array.toString()).apply()
     }
 
+    /** This phone, as the shared queue names the device a song lives on: random, kept for good. */
+    val deviceId: String by lazy {
+        prefs.getString(KEY_DEVICE_ID, null) ?: java.util.UUID.randomUUID().toString().also {
+            prefs.edit().putString(KEY_DEVICE_ID, it).apply()
+        }
+    }
+
     private fun phoneName(): String {
         val model = Build.MODEL.orEmpty()
         val maker = Build.MANUFACTURER.orEmpty().replaceFirstChar { it.uppercase() }
@@ -886,6 +904,7 @@ class ConnectSession @Inject constructor(
     private companion object {
         const val PREFS = "harmony_connect"
         const val KEY_COMPUTERS = "computers"
+        const val KEY_DEVICE_ID = "device_id"
         const val SEARCH_MS = 1_800
         const val POLL_MS = 500L
         /** The longest pause between reads while the computer doesn't answer (plus up to a quarter of jitter). */

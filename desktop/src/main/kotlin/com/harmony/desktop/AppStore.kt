@@ -35,6 +35,8 @@ data class DesktopSettings(
     val favorites: List<String> = emptyList(),
     /** The sound output chosen by name; null for Windows' default. */
     val outputDevice: String? = null,
+    /** Universal Queue (beta): this computer keeps a queue the phone shares while it plays here. */
+    val sharedQueue: Boolean = false,
 ) {
     fun toJson(): String = JSONObject()
         .put("folders", JSONArray(folders))
@@ -59,6 +61,7 @@ data class DesktopSettings(
         .put("dark", darkTheme)
         .put("favorites", JSONArray(favorites))
         .putOpt("outputDevice", outputDevice)
+        .put("sharedQueue", sharedQueue)
         .toString(2)
 
     companion object {
@@ -100,6 +103,7 @@ data class DesktopSettings(
                 darkTheme = o.optBoolean("dark", true),
                 favorites = o.optJSONArray("favorites")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList(),
                 outputDevice = o.optString("outputDevice").takeIf { it.isNotEmpty() },
+                sharedQueue = o.optBoolean("sharedQueue", false),
             )
         }.getOrDefault(DesktopSettings())
     }

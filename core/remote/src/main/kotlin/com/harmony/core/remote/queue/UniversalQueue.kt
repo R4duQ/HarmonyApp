@@ -147,7 +147,22 @@ sealed interface QueueOp {
 
     /** Playback moves to [device]; the epoch goes up. */
     data class SetOwner(val device: String) : QueueOp
+
+    // The owner mirroring its own player's queue (see [mirrorOps]): exact
+    // positions and flags, as the player has them. Only the owner may send them.
+
+    /** [entries] as they are, right after [afterId] (null: at the very start). */
+    data class Place(val entries: List<QueueEntry>, val afterId: String?) : QueueOp
+
+    /** [entryId] right after [afterId] (null: at the very start), anywhere in the queue, flags untouched. */
+    data class Reposition(val entryId: String, val afterId: String?) : QueueOp
+
+    data class SetFlags(val entryId: String, val origin: Origin, val pinned: Boolean, val priority: Boolean) : QueueOp
 }
+
+/** The ops only the device playing the queue may send. */
+val QueueOp.isOwnerOnly: Boolean
+    get() = this is QueueOp.Place || this is QueueOp.Reposition || this is QueueOp.SetFlags
 
 /** Why an op was not applied. */
 enum class Refusal { UNKNOWN_ENTRY, NOT_UPCOMING, DUPLICATE_ID, CURRENT, STALE_EPOCH, BAD_REQUEST }
@@ -158,6 +173,7 @@ sealed interface ApplyResult {
 }
 
 /** [op] applied to this queue, or why it can't be. Pure: the same state and op give the same result on every device. */
+@Suppress("CyclomaticComplexMethod")
 fun QueueState.apply(op: QueueOp): ApplyResult {
     val ok = { s: QueueState -> ApplyResult.Applied(s) }
     val no = { why: Refusal -> ApplyResult.Refused(why) }
@@ -238,7 +254,117 @@ fun QueueState.apply(op: QueueOp): ApplyResult {
         is QueueOp.SetShuffle -> ok(if (op.on) shuffled(op.order) else unshuffledState())
         is QueueOp.SetRepeat -> ok(copy(repeat = op.mode))
         is QueueOp.SetOwner -> ok(copy(owner = op.device, epoch = epoch + 1))
+        is QueueOp.Place -> {
+            fresh(op.entries)?.let(no) ?: run {
+                val at = if (op.afterId == null) 0 else entries.indexOfFirst { it.id == op.afterId } + 1
+                if (at == 0 && op.afterId != null) return no(Refusal.UNKNOWN_ENTRY)
+                ok(copy(entries = entries.inserted(at, op.entries)))
+            }
+        }
+        is QueueOp.Reposition -> {
+            val from = entries.indexOfFirst { it.id == op.entryId }
+            if (from < 0) return no(Refusal.UNKNOWN_ENTRY)
+            if (op.afterId == op.entryId) return no(Refusal.BAD_REQUEST)
+            val rest = entries.toMutableList()
+            val moving = rest.removeAt(from)
+            val at = if (op.afterId == null) 0 else rest.indexOfFirst { it.id == op.afterId } + 1
+            if (at == 0 && op.afterId != null) return no(Refusal.UNKNOWN_ENTRY)
+            rest.add(at, moving)
+            ok(copy(entries = rest))
+        }
+        is QueueOp.SetFlags -> {
+            if (entries.none { it.id == op.entryId }) return no(Refusal.UNKNOWN_ENTRY)
+            ok(copy(entries = entries.map {
+                if (it.id == op.entryId) it.copy(origin = op.origin, pinned = op.pinned, priority = op.priority) else it
+            }))
+        }
     }
+}
+
+/**
+ * The ops that make this queue exactly [target] (entries, order and flags)
+ * with [currentId] playing, sent by [device], which plays the queue: it
+ * mirrors its own player into the shared queue. Entries are matched by id;
+ * the fewest moves are made (the longest run already in order stays put).
+ * The song playing is never removed, so with [currentId] null it stays.
+ */
+fun QueueState.mirrorOps(target: List<QueueEntry>, currentId: String?, device: String): List<QueueOp> {
+    val ops = ArrayList<QueueOp>()
+    var s = this
+    fun step(op: QueueOp) {
+        val r = s.apply(op)
+        check(r is ApplyResult.Applied) { "mirror op refused: $op (${(r as ApplyResult.Refused).why})" }
+        s = r.state
+        ops += op
+    }
+    if (s.owner != device) step(QueueOp.SetOwner(device))
+    val wanted = target.associateBy { it.id }
+    // 1. New entries, each after the nearest entry before it (in the target) that is already here.
+    var lastPresent: String? = null
+    val pending = ArrayList<QueueEntry>()
+    fun flush() {
+        if (pending.isEmpty()) return
+        step(QueueOp.Place(pending.toList(), lastPresent))
+        lastPresent = pending.last().id
+        pending.clear()
+    }
+    val present = s.entries.mapTo(HashSet()) { it.id }
+    for (t in target) {
+        if (t.id in present) {
+            flush()
+            lastPresent = t.id
+        } else {
+            pending += t
+        }
+    }
+    flush()
+    // 2. The song playing, before anything goes (it may be one that goes).
+    if (currentId != null && s.currentId != currentId && s[currentId] != null) step(QueueOp.SetCurrent(currentId))
+    // 3. What isn't in the target any more.
+    val gone = s.entries.map { it.id }.filter { it !in wanted && it != s.currentId }
+    if (gone.isNotEmpty()) step(QueueOp.Remove(gone))
+    // 4. Order: the longest increasing run of current positions stays; the rest go after their target predecessor.
+    val position = s.entries.withIndex().associate { (i, e) -> e.id to i }
+    val order = target.map { position.getValue(it.id) }
+    val keep = longestIncreasing(order).mapTo(HashSet()) { target[it].id }
+    for ((i, t) in target.withIndex()) {
+        if (t.id in keep) continue
+        step(QueueOp.Reposition(t.id, target.getOrNull(i - 1)?.id))
+    }
+    // 5. Flags.
+    for (t in target) {
+        val e = s[t.id] ?: continue
+        if (e.origin != t.origin || e.pinned != t.pinned || e.priority != t.priority) {
+            step(QueueOp.SetFlags(t.id, t.origin, t.pinned, t.priority))
+        }
+    }
+    return ops
+}
+
+/** Indices (into [values]) of a longest strictly increasing subsequence. */
+private fun longestIncreasing(values: List<Int>): List<Int> {
+    if (values.isEmpty()) return emptyList()
+    val tails = IntArray(values.size)
+    val prev = IntArray(values.size) { -1 }
+    var length = 0
+    for (i in values.indices) {
+        var lo = 0
+        var hi = length
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (values[tails[mid]] < values[i]) lo = mid + 1 else hi = mid
+        }
+        if (lo > 0) prev[i] = tails[lo - 1]
+        tails[lo] = i
+        if (lo == length) length++
+    }
+    val out = ArrayList<Int>(length)
+    var k = tails[length - 1]
+    while (k >= 0) {
+        out += k
+        k = prev[k]
+    }
+    return out.asReversed()
 }
 
 /**
