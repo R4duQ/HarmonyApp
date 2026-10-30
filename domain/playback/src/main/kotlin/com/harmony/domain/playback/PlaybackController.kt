@@ -2,6 +2,7 @@ package com.harmony.domain.playback
 
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.PlayerState
+import com.harmony.core.model.QueueOrigin
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.ShuffleMode
@@ -40,12 +41,23 @@ interface PlaybackController {
     val externalShuffleRequests: Flow<Unit> get() = emptyFlow()
 
     // -- Queue --------------------------------------------------------------
-    /** Replace the queue with [songs] and start playing from [startIndex]. */
+    // Every entry carries where it came from (PlayerState.entries): the songs
+    // of a list started, the user's (Play next, Add to queue), Smart Shuffle's.
+    // Shuffle only ever reorders or replaces what is neither the user's nor
+    // moved by the user (QueueEntryInfo.isProtected).
+
+    /**
+     * Replace the queue with [songs] and start playing from [startIndex]. Songs
+     * the user queued that were still to come are kept, right after the song
+     * started (a new list never throws away what the user chose to hear).
+     */
     suspend fun setQueue(songs: List<Song>, startIndex: Int = 0, playWhenReady: Boolean = true)
-    suspend fun addToQueue(song: Song)
+
+    /** Append [song] at the end, as [origin] (the user's, unless Smart Shuffle is adding its pick). */
+    suspend fun addToQueue(song: Song, origin: QueueOrigin = QueueOrigin.MANUAL)
 
     /** Append many songs in one operation (see [removeQueueRange] for why bulk matters). */
-    suspend fun addToQueueAll(songs: List<Song>)
+    suspend fun addToQueueAll(songs: List<Song>, origin: QueueOrigin = QueueOrigin.MANUAL)
     suspend fun addNext(song: Song)
     suspend fun removeFromQueue(index: Int)
 
@@ -78,12 +90,15 @@ interface PlaybackController {
     /**
      * Replaces queue entries [fromIndex, toIndexExclusive) with [songs] in one
      * operation (Media3's replaceMediaItems), leaving everything before
-     * [fromIndex] (the history and the song playing) untouched. The default
-     * is for simple fakes and only right for a range reaching the end.
+     * [fromIndex] (the history and the song playing) untouched. An entry of
+     * the replaced range whose song is among [songs] keeps what it was (the
+     * user's stays the user's, a moved one stays pinned); the others are new
+     * entries of [origin]. The default is for simple fakes and only right for
+     * a range reaching the end.
      */
-    suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>) {
+    suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>, origin: QueueOrigin = QueueOrigin.LIST) {
         removeQueueRange(fromIndex, toIndexExclusive)
-        if (songs.isNotEmpty()) addToQueueAll(songs)
+        if (songs.isNotEmpty()) addToQueueAll(songs, origin)
     }
 
     /**

@@ -132,4 +132,24 @@ class QueueMirrorTest {
         assertEquals(emptyList<QueueOp>(), ops)
         assertTrue(shared[x]!!.pinned)
     }
+
+    @Test fun thePlayersOwnEntryIdsTellTheSameSongTwiceApart() {
+        val mirror = QueueMirror("phone")
+        fun at(song: String, entry: Long, origin: Origin = Origin.LIST, pinned: Boolean = false) =
+            MirrorItem(media(song), origin, pinned = pinned, entry = entry)
+        // "x" twice: the user's (entry 2) and the list's (entry 4).
+        val songs = listOf(at("a", 1), at("x", 2, Origin.MANUAL), at("b", 3), at("x", 4))
+        val shared = QueueState().applyAll(mirror.ops(QueueState(), songs, 0))
+        val users = shared.entries[1]
+        assertEquals(Origin.MANUAL, users.origin)
+        // The list's "x" dragged up above the user's: by song alone this reads as
+        // the user's moving down; by entry it is the list's moving up, now pinned.
+        val moved = listOf(at("a", 1), at("x", 4, pinned = true), at("x", 2, Origin.MANUAL), at("b", 3))
+        val after = shared.applyAll(mirror.ops(shared, moved, 0))
+        assertEquals(listOf("a", "x", "x", "b"), after.songs())
+        assertEquals("the user's entry is the same shared entry", users.id, after.entries[2].id)
+        assertEquals(Origin.MANUAL, after.entries[2].origin)
+        assertTrue("the moved one is pinned", after.entries[1].pinned && after.entries[1].origin == Origin.LIST)
+        assertTrue("in step: nothing more to send", mirror.ops(after, moved, 0).isEmpty())
+    }
 }

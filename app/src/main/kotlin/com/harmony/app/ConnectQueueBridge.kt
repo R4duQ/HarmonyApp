@@ -1,6 +1,8 @@
 package com.harmony.app
 
 import android.util.Log
+import com.harmony.core.model.QueueEntryInfo
+import com.harmony.core.model.QueueOrigin
 import com.harmony.core.model.Song
 import com.harmony.core.remote.ConnectClient
 import com.harmony.core.remote.queue.MediaRef
@@ -33,8 +35,9 @@ import javax.inject.Singleton
  * Universal Queue, stage 3b: while the phone plays on a computer, its queue and
  * the queue the computer shares stay in step ([QueueLink], [QueueFollower]):
  *
- *  - the phone's queue is mirrored to the computer, which shows all of it, what
- *    the user queued and what Smart Shuffle picked marked as such;
+ *  - the phone's queue is mirrored to the computer, which shows all of it, each
+ *    entry as what it is on the phone (stage 5): its own id, the user's or Smart
+ *    Shuffle's or the list's, moved by the user or not;
  *  - edits made on the computer (play next, up, down, remove, play) go into the
  *    phone's player first, through the same checked calls as the phone's own
  *    queue sheet (the song expected must still be where it was).
@@ -50,7 +53,7 @@ class ConnectQueueBridge @Inject constructor(
     private val playback: PlaybackController,
     private val queueManager: SmartQueueManager,
 ) {
-    private data class Player(val queue: List<Song>, val index: Int, val playNext: Int)
+    private data class Player(val queue: List<Song>, val index: Int, val playNext: Int, val entries: List<QueueEntryInfo>)
 
     fun start(scope: CoroutineScope) {
         scope.launch {
@@ -72,7 +75,7 @@ class ConnectQueueBridge @Inject constructor(
         ).start()
         val follower = QueueFollower(link, QueueMirror(device))
         val players = playback.playerState
-            .map { Player(it.queue, it.queueIndex, it.playNextCount) }
+            .map { Player(it.queue, it.queueIndex, it.playNextCount, it.entries) }
             .distinctUntilChanged()
         try {
             combine(players, sharedChanged) { p, _ -> p }
@@ -111,12 +114,24 @@ class ConnectQueueBridge @Inject constructor(
     /** The song id in a content key made by [items] ("dev:<device>:<song id>"). */
     private fun songOf(mediaKey: String): Long = mediaKey.substringAfterLast(':').toLongOrNull() ?: -1
 
-    /** The phone's queue as the mirror sees it: the Play next run as the user's, Smart Shuffle's picks as automatic. */
+    /**
+     * The phone's queue as the mirror sees it: each entry with the player's own
+     * id and provenance, the Play next run first in line. Without provenance
+     * (not expected) it is guessed as before: the run as the user's, Smart
+     * Shuffle's picks as automatic.
+     */
     private fun items(p: Player, device: String): List<MirrorItem> {
         val runEnd = p.index + p.playNext
+        val known = p.entries.size == p.queue.size
         return p.queue.mapIndexed { i, song ->
             val queued = i in (p.index + 1)..runEnd
+            val info = p.entries.getOrNull(i)?.takeIf { known }
             val origin = when {
+                info != null -> when (info.origin) {
+                    QueueOrigin.LIST -> Origin.LIST
+                    QueueOrigin.MANUAL -> Origin.MANUAL
+                    QueueOrigin.AUTO -> Origin.AUTO
+                }
                 queued -> Origin.MANUAL
                 queueManager.isPick(song.id) -> Origin.AUTO
                 else -> Origin.LIST
@@ -133,6 +148,8 @@ class ConnectQueueBridge @Inject constructor(
                 ),
                 origin,
                 priority = queued,
+                pinned = info?.pinned == true,
+                entry = info?.entryId,
             )
         }
     }

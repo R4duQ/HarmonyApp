@@ -195,7 +195,7 @@ Diferențe față de `RemoteCache` actual:
 | 3b-1 | Telefonul își oglindește coada pe PC; PC-ul o afișează. Opțiunea „Shared queue (beta)” e pe PC, oprită implicit | coada de pe PC devine exact cea a telefonului (ordine, piesa curentă, proveniență) prin căderi de rețea; fără ecou (nimic de retrimis la final); fiecare operație aplicată o dată; legătura nu atinge redarea; PC fără opțiune → telefonul lucrează ca înainte | ✅ implementat. Automat: 2000 de ținte aleatoare atinse exact; pe socket-uri cu cădere de rețea, 120 de schimbări → 141 de operații, toate aplicate exact; afișarea pe PC testată. **Neverificat pe dispozitive** |
 | 3b-2 | Editările de pe PC ajung în playerul telefonului: Play next, sus, jos, ștergere, redare (clic pe rând) | aplicate prin aceleași apeluri verificate ca drag-ul telefonului (melodia așteptată trebuie să fie la locul ei), fără restart; ce refuză telefonul e anulat în coada comună; editările simultane telefon + PC converg prin căderi de rețea | ✅ implementat. Automat, pe socket-uri: 150 de pași cu editări pe ambele părți și o cădere de rețea → aceeași coadă pe ambele, fiecare operație aplicată o dată; o editare refuzată de telefon e anulată pe PC; butoanele PC-ului produc exact operațiile așteptate. **Neverificat pe dispozitive** |
 | 4 | Cache v2 pe PC (`core/remote/cache/MediaCache`, refolosibil pe telefon în etapa 6) | reluare după întrerupere, fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | ✅ implementat. Automat: transfer tăiat → reluat de la octetul unde s-a oprit, cu `If-Range` (descărcat ≈ o dată); fișier schimbat între încercări → vine întreg, nelipit; piesa curentă preia transferul, cealaltă se reia după; limită de viteză doar la pre-încărcare; LRU fără curenta/următoarea; fără spațiu → stream; copie coruptă → încă o descărcare, apoi doar stream; după repornire: copiile rămân, parțialele se reiau; pe PC, cu ffmpeg real: redare și căutare din copie, copie stricată → redarea continuă și copia e refăcută. **Neverificat pe dispozitive** |
-| 5 | Telefonul folosește coada comună | Smart Shuffle lucrează pe proveniență; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un `mediaId` per intrare | necesită testare pe telefon |
+| 5 | Telefonul ține minte proveniența fiecărei intrări | Smart Shuffle lucrează pe proveniență, nu pe poziții; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un id per intrare, și pe PC | ✅ implementat. Automat: 7 teste noi de Smart Shuffle (plus cele 24 vechi, neschimbate) și 10 pentru `QueueShadow`; test de mutație: dacă Smart Shuffle ignoră proveniența, 7 teste pică; pe PC, aceeași melodie de două ori rămâne două intrări distincte când una e mutată. **Neverificat pe telefon** |
 | 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | |
 | 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | |
 | 8 | Crossfade pe PC | motorul PC face crossfade doar cu următoarea decodată în buffer; altfel trecere normală | |
@@ -211,8 +211,23 @@ Diferențe față de `RemoteCache` actual:
   - se aplică doar dacă melodia e încă acolo unde o vedea PC-ul;
   - altfel coada comună revine la a telefonului.
 - **Ce nu face încă:**
-  - melodiile adăugate cu „Add to queue” la final apar pe telefon ca listă, nu ca manuale, fiindcă playerul telefonului nu ține minte proveniența lor (etapa 5);
-  - piesele de pe PC nu intră încă în coada comună.
+  - piesele de pe PC nu intră încă în coada comună (etapa 6).
+
+### Ce face etapa 5 concret
+
+- **Proveniența** (`QueueShadow`, în `domain/playback`): o listă paralelă cu playerul Media3, în aceeași ordine. Fiecare intrare are:
+  - un id propriu (aceeași melodie de două ori = două intrări);
+  - originea: listă, manuală (Play next, Add to queue) sau Smart Shuffle;
+  - dacă a fost mutată de utilizator (fixată).
+- `PlaybackConnection` o actualizează la fiecare operație pe player. Schimbările făcute din afară (Android Auto, sesiune restaurată) sunt potrivite melodie cu melodie; ce e nou contează ca listă.
+- **Smart Shuffle** decide după proveniență, nu după poziție. Protejate (nu sunt șterse, mutate sau înlocuite de shuffle): melodiile manuale, oriunde ar fi, și orice melodie mutată de mână, inclusiv o recomandare.
+  - **Pornire Smart:** pleacă doar melodiile listei rămase nemișcate. Înainte, un „Add to queue” de la final sau o melodie scoasă din „Next up” erau șterse.
+  - **Regenerare:** sunt înlocuite doar recomandările nemișcate.
+  - **Random:** amestecă doar melodiile libere, fiecare protejată rămâne exact pe locul ei.
+  - **Oprire shuffle:** ordinea originală revine, iar melodiile protejate rămân cam unde erau (după atâtea melodii câte erau libere înaintea lor). Random → Off dă înapoi exact coada de dinainte, iar un „Add to queue” rămâne la final, nu mai sare în față.
+- **Album nou** (decizia 1, acum și în player): melodiile manuale care urmau se păstrează imediat după piesa aleasă, și în Smart, și în Random.
+- **PC:** primește id-ul fiecărei intrări și dacă e fixată, deci o mutare între două copii ale aceleiași melodii nu mai e confundată.
+- **Limită:** proveniența nu se salvează. După ce Android oprește aplicația, coada restaurată e toată „listă”.
 
 ### Ce face etapa 4 concret
 
@@ -250,7 +265,7 @@ Ce măsurăm (etapele 3–9): goluri audio (număr și durată), timpul de hando
     - după o cădere cu editări pe ambele părți, coada e din nou sincronizată la ~0,2 s de la revenire, fiecare editare o singură dată;
     - o conexiune refuzată e reîncercată cu backoff, nu în buclă;
     - o coadă inactivă costă 3 cereri la 12 s, față de 24 cu polling-ul la 0,5 s.
-- **Pe dispozitive reale:** nimic încă. Etapele 1–2 nu ating playerul și nici rețeaua reală.
+- **Pe dispozitive reale:** nimic încă. Etapele 1–2 nu ating playerul și nici rețeaua reală; etapa 5 schimbă playerul telefonului și e verificată doar prin teste cu un player simulat și prin compilare în CI.
 - **Neconfirmat:** golul la handoff, efectul transferurilor asupra latenței comenzilor pe Wi-Fi real, comportamentul în Doze.
 
 ## 7. Decizii (răspunsurile tale)

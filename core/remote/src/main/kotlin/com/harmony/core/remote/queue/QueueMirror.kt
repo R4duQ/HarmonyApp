@@ -2,8 +2,19 @@ package com.harmony.core.remote.queue
 
 import java.util.UUID
 
-/** One place in a player's own queue, as the mirror sees it. */
-data class MirrorItem(val media: MediaRef, val origin: Origin, val priority: Boolean = false)
+/**
+ * One place in a player's own queue, as the mirror sees it: the song, where it
+ * came from, whether it is in the Play next run ([priority]), whether the user
+ * moved it ([pinned]), and the player's own id for this entry ([entry]; null
+ * when the player has none, and the mirror then tells entries apart by song).
+ */
+data class MirrorItem(
+    val media: MediaRef,
+    val origin: Origin,
+    val priority: Boolean = false,
+    val pinned: Boolean = false,
+    val entry: Long? = null,
+)
 
 /**
  * Mirrors a player's own queue (the phone's Media3 playlist) into the shared
@@ -24,16 +35,19 @@ data class MirrorItem(val media: MediaRef, val origin: Origin, val priority: Boo
  */
 class QueueMirror(
     private val device: String,
-    newId: () -> String = { UUID.randomUUID().toString() },
+    private val newId: () -> String = { UUID.randomUUID().toString() },
     private val historyLimit: Int = 50,
     private val upcomingLimit: Int = 500,
 ) {
     private val ids = EntryIds(newId)
 
+    /** Shared ids of the player's own entries, when it has them: one entry, one id, for as long as it stays. */
+    private var byEntry: Map<Long, String> = emptyMap()
+
     /** The ops that make [shared] match the player: [items], [currentIndex] playing. */
     @Synchronized
     fun ops(shared: QueueState, items: List<MirrorItem>, currentIndex: Int): List<QueueOp> {
-        // The player knows nothing of pins: an entry the user moved stays pinned (protected) as the shared queue has it.
+        // An entry moved on another device stays pinned (protected) as the shared queue has it.
         val entries = entries(items).map { e -> shared[e.id]?.takeIf { it.pinned }?.let { e.copy(pinned = true) } ?: e }
         val current = currentIndex.coerceIn(-1, entries.lastIndex)
         val from = if (current < 0) 0 else (current - historyLimit).coerceAtLeast(0)
@@ -76,9 +90,16 @@ class QueueMirror(
     }
 
     private fun entries(items: List<MirrorItem>): List<QueueEntry> {
-        val keyed = ids.idsFor(items.map { it.media.contentKey })
+        val keyed = if (items.isNotEmpty() && items.all { it.entry != null }) {
+            val known = byEntry
+            val now = LinkedHashMap<Long, String>()
+            items.map { item -> now.getOrPut(item.entry!!) { known[item.entry] ?: newId() } }
+                .also { byEntry = now }
+        } else {
+            ids.idsFor(items.map { it.media.contentKey })
+        }
         return items.mapIndexed { i, item ->
-            QueueEntry(keyed[i], item.media, item.origin, pinned = false, priority = item.priority)
+            QueueEntry(keyed[i], item.media, item.origin, pinned = item.pinned, priority = item.priority)
         }
     }
 }
