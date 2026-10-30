@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -357,6 +358,19 @@ fun ConnectPage(app: DesktopApp) {
                 }
             }
         }
+        Card(Modifier.padding(start = 32.dp, end = 32.dp, top = 32.dp).fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Shared queue (beta)", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
+                    Text(
+                        "While a phone plays here, its whole queue shows on this computer, with what you queued and what was recommended marked. The phone stays in charge of the queue.",
+                        fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                HarmonySwitch(settings.sharedQueue, { app.setSharedQueue(it) }, Modifier.padding(start = 16.dp).testTag("shared_queue"))
+            }
+        }
+        app.cache?.let { cache -> CacheCard(cache, settings.cacheLimitGb, app::setCacheLimit) }
         Card(Modifier.padding(32.dp).fillMaxWidth()) {
             Column {
                 Text("Phones allowed to play here", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
@@ -387,5 +401,58 @@ private fun Step(n: Int, text: String, icon: androidx.compose.ui.graphics.vector
         }
         Icon(icon, contentDescription = null, tint = c.muted, modifier = Modifier.padding(start = 12.dp).size(18.dp))
         Text(text, fontSize = 14.sp, color = c.ink, modifier = Modifier.padding(start = 10.dp))
+    }
+}
+
+/**
+ * The phone's songs kept on this computer (Universal Queue cache): how much
+ * they take, the most they may take, and a way to empty it.
+ */
+@Composable
+private fun CacheCard(cache: com.harmony.core.remote.cache.MediaCache, limitGb: Int, setLimit: (Int) -> Unit) {
+    val c = LocalHarmonyColors.current
+    var used by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(cache.usage()) }
+    LaunchedEffect(cache) {
+        while (true) {
+            used = cache.usage()
+            kotlinx.coroutines.delay(2_000)
+        }
+    }
+    Card(Modifier.padding(start = 32.dp, end = 32.dp, top = 32.dp).fillMaxWidth()) {
+        Column {
+            Text("Songs kept from the phone", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
+            Text(
+                "The song playing and the next few are fetched whole, in their original quality, so they play without waiting on the Wi-Fi and carry on if it drops. Kept apart from your library; the oldest go when the limit is reached (never more than a tenth of the free space).",
+                fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 6.dp),
+            )
+            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "%.1f GB used of".format(used / 1_073_741_824.0),
+                    fontSize = 13.sp, color = c.ink, modifier = Modifier.padding(end = 10.dp).testTag("cache_used"),
+                )
+                for (gb in listOf(1, 2, 5, 10, 20)) {
+                    val on = gb == limitGb
+                    Text(
+                        "$gb GB",
+                        fontSize = 13.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                        color = if (on) Accent.PurpleLight else c.muted,
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (on) Accent.Purple.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent)
+                            .clickable { setLimit(gb) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .testTag("cache_limit_$gb"),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Empty",
+                    fontSize = 13.sp, color = Accent.Pink,
+                    modifier = Modifier.clickable { cache.clear(); used = cache.usage() }.padding(8.dp).testTag("cache_clear"),
+                )
+            }
+        }
     }
 }

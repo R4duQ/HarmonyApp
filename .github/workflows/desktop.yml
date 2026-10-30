@@ -55,7 +55,7 @@ jobs:
 
       - name: Test
         # The engine and Connect tests, and the phone session's (the screenshot renders are for development).
-        run: ./gradlew -p desktop test --tests 'com.harmony.desktop.EngineAndConnectTest' --tests 'com.harmony.desktop.connect.ConnectLinkTest' "-PffmpegDir=$(cygpath -w "$(pwd)/desktop/resources/windows")" --no-daemon --stacktrace
+        run: ./gradlew -p desktop test --tests 'com.harmony.desktop.EngineAndConnectTest' --tests 'com.harmony.desktop.connect.ConnectLinkTest' --tests 'com.harmony.desktop.connect.SharedQueueDisplayTest' --tests 'com.harmony.desktop.connect.PcMediaTest' "-PffmpegDir=$(cygpath -w "$(pwd)/desktop/resources/windows")" --no-daemon --stacktrace
 
       - name: Build installers
         run: ./gradlew -p desktop createDistributable packageMsi packageExe "-PdesktopVersion=1.0.${{ github.run_number }}" --no-daemon --stacktrace

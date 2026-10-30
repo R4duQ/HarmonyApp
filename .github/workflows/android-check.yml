@@ -120,6 +120,7 @@ jobs:
           :feature:downloads:testMornyeReleaseUnitTest
           :core:eq-engine:testReleaseUnitTest
           :core:model:test
+          :core:remote:test
           :core:dsp-native:testReleaseUnitTest
           :domain:playback:test
           :domain:shuffle:test
@@ -139,6 +140,7 @@ jobs:
             feature/downloads/build/reports/tests/
             core/eq-engine/build/reports/tests/
             core/dsp-native/build/reports/tests/
+            core/remote/build/reports/tests/
             domain/playback/build/reports/tests/
             domain/shuffle/build/reports/tests/
             feature/player/build/reports/tests/

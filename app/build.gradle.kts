@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.harmony.app"
-        versionCode = 148
+        versionCode = 149
         versionName = "1.0"
 
         // Optional single-ABI build: -PharmonyAbi=arm64-v8a
@@ -159,6 +159,7 @@ android {
 
 dependencies {
     implementation(projects.playback.service)
+    implementation(projects.core.remote)
     implementation(projects.core.ui)
     implementation(projects.core.datastore)
     implementation(projects.feature.library)

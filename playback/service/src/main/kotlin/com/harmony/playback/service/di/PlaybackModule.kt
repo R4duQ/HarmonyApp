@@ -51,7 +51,8 @@ object PlaybackProvidesModule {
     fun provideHarmonyPlayer(
         @ApplicationContext context: Context,
         artworkCache: ArtworkCache,
-    ): HarmonyPlayer = HarmonyPlayer(context, artworkCache)
+        remoteMedia: com.harmony.playback.service.connect.RemoteMedia,
+    ): HarmonyPlayer = HarmonyPlayer(context, artworkCache, remoteMedia)
 
 }
 

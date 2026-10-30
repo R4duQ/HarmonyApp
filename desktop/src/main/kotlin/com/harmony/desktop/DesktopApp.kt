@@ -37,6 +37,10 @@ class DesktopApp(
     val plays: PlayStats = PlayStats(),
     /** The sound outputs to choose from (Windows' own list; a fixed one in tests). */
     private val outputs: () -> List<String> = { com.harmony.desktop.engine.AudioOutputs.list() },
+    /** The phone's songs kept here (Universal Queue cache); null in tests. */
+    val cache: com.harmony.core.remote.cache.MediaCache? = null,
+    /** This computer's songs for phones; null in tests. */
+    val media: com.harmony.desktop.connect.PcMedia? = null,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -130,6 +134,15 @@ class DesktopApp(
 
     fun setDarkTheme(dark: Boolean) = update { it.copy(darkTheme = dark) }
 
+    /** How much disk the phone's songs kept here may take (GB). Applies to the next download. */
+    fun setCacheLimit(gb: Int) = update { it.copy(cacheLimitGb = gb.coerceIn(1, 100)) }
+
+    /** Universal Queue (beta). Off, the phone's link ends at its next request and the phone keeps its own queue. */
+    fun setSharedQueue(on: Boolean) {
+        update { it.copy(sharedQueue = on) }
+        if (!on) player.sharedQueue(null)
+    }
+
     /** The sound outputs there are now (asks Windows: call it off the UI thread). */
     fun outputDevices(): List<String> = outputs()
 
@@ -146,6 +159,8 @@ class DesktopApp(
 
     override fun close() {
         connect.close()
+        cache?.close()
+        media?.close()
         engine.shutdown()
         settings.flush()
         plays.flush()
@@ -158,15 +173,43 @@ class DesktopApp(
         fun create(): DesktopApp {
             val settings = SettingsStore()
             val engine = AudioEngine({ com.harmony.desktop.engine.JavaSoundSink { settings.current.outputDevice } })
-            val player = PlayerController(engine, com.harmony.desktop.connect.RemoteCache())
+            // The temporary folder the first Connect cache used: emptied for good.
+            runCatching { java.io.File(System.getProperty("java.io.tmpdir"), "harmony-connect").deleteRecursively() }
+            val cache = com.harmony.core.remote.cache.MediaCache(
+                AppDirs.connectCache,
+                limits = { com.harmony.core.remote.cache.CacheLimits(maxBytes = settings.current.cacheLimitGb * 1024L * 1024 * 1024) },
+                log = { java.util.logging.Logger.getLogger("com.harmony.cache").info(it) },
+            )
+            // The library, once the app holds it (the songs offered to phones come from it).
+            var library: () -> List<LocalTrack> = { emptyList() }
+            val media = com.harmony.desktop.connect.PcMedia(
+                tracks = { library() },
+                converted = AppDirs.connectConverted,
+                log = { java.util.logging.Logger.getLogger("com.harmony.connect").info(it) },
+            )
+            val player = PlayerController(engine, cache, pcId = settings.current.pcId, localFile = media::file)
+            // The shared queue lives as long as the app; it is offered to phones only while switched on.
+            val sharedQueue = com.harmony.core.remote.queue.QueueService(onChange = { state, _ -> player.sharedQueue(state) })
             val connect = ConnectHost(
                 pcId = settings.current.pcId,
                 pcName = { settings.current.pcName },
                 renderer = player,
                 initialPhones = settings.current.phones,
                 savePhones = { phones -> settings.update { it.copy(phones = phones) } },
+                queue = { sharedQueue.takeIf { settings.current.sharedQueue } },
+                // Offered with the shared queue: phones only ask for songs it has given them.
+                media = { id -> if (settings.current.sharedQueue) media(id) else com.harmony.core.remote.ServedMedia.Missing },
             )
-            val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers))
+            // Edits made in the queue panel: the computer is the coordinator, so they go straight in.
+            player.onSharedEdit = { op ->
+                if (settings.current.sharedQueue) {
+                    sharedQueue.submit(
+                        com.harmony.core.remote.queue.QueueCommand(java.util.UUID.randomUUID().toString(), settings.current.pcId, op, sharedQueue.state.epoch),
+                    )
+                }
+            }
+            val app = DesktopApp(settings, engine, player, connect, LibraryCache(AppDirs.library), LibraryScanner(), CoverCache(AppDirs.covers), cache = cache, media = media)
+            library = { app.tracks.value }
             connect.start()
             app.rescan()
             return app

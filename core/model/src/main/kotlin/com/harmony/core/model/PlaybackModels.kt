@@ -77,4 +77,29 @@ data class PlayerState(
      * session-side crossfade engine itself.
      */
     val upcomingSong: Song? = null,
+    /**
+     * Where each song of [queue] came from, in the same order (empty when
+     * not known): what the user queued and moved is protected from shuffle,
+     * whatever its position (Universal Queue, stage 5).
+     */
+    val entries: List<QueueEntryInfo> = emptyList(),
 )
+
+/** How a song got into the queue. */
+enum class QueueOrigin {
+    /** Part of the list started (an album, a playlist, search results). */
+    LIST,
+    /** Chosen by the user: Play next, Add to queue. */
+    MANUAL,
+    /** Picked by Smart Shuffle. */
+    AUTO,
+}
+
+/**
+ * One place in the queue: its own id (the same song queued twice is two
+ * entries), where it came from, and whether the user moved it.
+ */
+data class QueueEntryInfo(val entryId: Long, val origin: QueueOrigin, val pinned: Boolean = false) {
+    /** Never removed or reordered by shuffle; only the user removes it. */
+    val isProtected: Boolean get() = origin == QueueOrigin.MANUAL || pinned
+}

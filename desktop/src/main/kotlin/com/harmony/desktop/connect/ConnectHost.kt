@@ -53,6 +53,10 @@ class ConnectHost(
     private val lostAfterMs: Long = PhoneSessions.LOST_AFTER_MS,
     private val tickMs: Long = TICK_MS,
     private val log: (String) -> Unit = { LOG.info(it) },
+    /** The shared queue (Universal Queue) when it is switched on; null while it is off. */
+    private val queue: () -> com.harmony.core.remote.queue.QueueService? = { null },
+    /** This computer's songs for paired phones (Universal Queue, stage 6); null: none. */
+    private val media: ((String) -> com.harmony.core.remote.ServedMedia)? = null,
 ) : AutoCloseable {
     private val _state = MutableStateFlow(ConnectState())
     val state: StateFlow<ConnectState> = _state.asStateFlow()
@@ -83,6 +87,8 @@ class ConnectHost(
             log = log,
             suspectAfterMs = suspectAfterMs,
             lostAfterMs = lostAfterMs,
+            queue = queue,
+            media = media,
         )
         this.receiver = receiver
         // The usual port, or any free one if something else has it; discovery tells phones which.

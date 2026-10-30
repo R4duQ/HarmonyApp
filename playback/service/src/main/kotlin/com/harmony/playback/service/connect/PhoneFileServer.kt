@@ -25,6 +25,8 @@ internal class PhoneFileServer(private val context: Context) {
     private var server: MiniHttpServer? = null
     private val secret = UUID.randomUUID().toString().replace("-", "")
     private val tracks = ConcurrentHashMap<String, Uri>()
+    /** Each song's validator, worked out once (it needs a query), so a computer can resume or check a copy it kept. */
+    private val etags = ConcurrentHashMap<String, String>()
     /** The covers last shared (the song playing and what's next), the oldest let go. */
     private val covers = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, ByteArray>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > MAX_COVERS
@@ -41,6 +43,7 @@ internal class PhoneFileServer(private val context: Context) {
         server?.close()
         server = null
         tracks.clear()
+        etags.clear()
         covers.clear()
     }
 
@@ -68,17 +71,34 @@ internal class PhoneFileServer(private val context: Context) {
         return when (parts[0]) {
             "track" -> {
                 val uri = tracks[id] ?: return HttpResponse.text(404, "no")
-                val source = runCatching { sourceFor(uri) }.getOrNull() ?: return HttpResponse.text(404, "gone")
-                HttpResponse.ranged(source, req.header("Range"), contentType(uri))
+                val source = runCatching { sourceFor(id, uri) }.getOrNull() ?: return HttpResponse.text(404, "gone")
+                HttpResponse.ranged(source, req.header("Range"), contentType(uri), req.header("If-Range"), req.header("If-None-Match"))
             }
             "art" -> covers[id]?.let { HttpResponse.bytes(200, it, "image/jpeg") } ?: HttpResponse.text(404, "no")
             else -> HttpResponse.text(404, "no")
         }
     }
 
-    private fun sourceFor(uri: Uri): RangeSource = when (uri.scheme) {
+    private fun sourceFor(id: String, uri: Uri): RangeSource = when (uri.scheme) {
         ContentResolver.SCHEME_FILE, null -> com.harmony.core.remote.FileRangeSource(File(uri.path ?: error("no path")))
-        else -> ContentRangeSource(context.contentResolver, uri)
+        else -> ContentRangeSource(context.contentResolver, uri) { length -> etags.getOrPut(id) { etagFor(uri, length) } }
+    }
+
+    /**
+     * A validator for a content:// song: its size, when it last changed (when
+     * the provider says) and which document it is. A re-tagged or replaced file
+     * gets another one.
+     */
+    private fun etagFor(uri: Uri, length: Long): String {
+        val modified = listOf(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            .firstNotNullOfOrNull { column ->
+                runCatching {
+                    context.contentResolver.query(uri, arrayOf(column), null, null, null)?.use { c ->
+                        if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
+                    }
+                }.getOrNull()
+            } ?: 0L
+        return "\"" + length.toString(16) + "-" + modified.toString(16) + "-" + uri.toString().hashCode().toUInt().toString(16) + "\""
     }
 
     private fun contentType(uri: Uri): String {
@@ -95,10 +115,16 @@ internal class PhoneFileServer(private val context: Context) {
 }
 
 /** A content:// document, readable from any offset. */
-private class ContentRangeSource(private val resolver: ContentResolver, private val uri: Uri) : RangeSource {
+private class ContentRangeSource(
+    private val resolver: ContentResolver,
+    private val uri: Uri,
+    private val validator: (Long) -> String,
+) : RangeSource {
     override val length: Long = resolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
         if (afd.length >= 0) afd.length else afd.parcelFileDescriptor.statSize
     } ?: error("can't open $uri")
+
+    override val etag: String get() = validator(length)
 
     override fun open(offset: Long): InputStream {
         val afd = resolver.openAssetFileDescriptor(uri, "r") ?: error("can't open $uri")

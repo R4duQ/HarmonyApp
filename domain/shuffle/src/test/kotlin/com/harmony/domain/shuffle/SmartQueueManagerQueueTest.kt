@@ -6,6 +6,7 @@ import com.harmony.core.model.AuditStatus
 import com.harmony.core.model.BrainAuditReport
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.PlayerState
+import com.harmony.core.model.QueueOrigin
 import com.harmony.core.model.ReasonTag
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ReplayGainMode
@@ -19,6 +20,7 @@ import com.harmony.domain.library.repository.PlaybackHistoryRepository
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.QueueMoves
+import com.harmony.domain.playback.QueueShadow
 import com.harmony.domain.shuffle.brain.QueuePlan
 import com.harmony.domain.shuffle.brain.QueueRequest
 import com.harmony.domain.shuffle.brain.ShuffleBrain
@@ -46,9 +48,13 @@ import java.lang.reflect.Proxy
 private fun song(id: Long) = Song(id, "u$id", "t$id", "a${id % 7}", "al", 1, null, null, null, null, null, null,
     1000, null, null, null, null, null, null, null, null)
 
-/** Minimal ExoPlayer-like queue: index-based, play-next run anchored to the current song. */
+/**
+ * Minimal ExoPlayer-like queue: index-based, play-next run anchored to the
+ * current song, each entry's provenance kept as PlaybackConnection keeps it.
+ */
 private class FakePlayback : PlaybackController {
     val q = mutableListOf<Song>()
+    val shadow = QueueShadow()
     var idx = 0
     var mode = ShuffleMode.OFF
     var generation = 0
@@ -65,7 +71,8 @@ private class FakePlayback : PlaybackController {
         val cur = q.getOrNull(idx)
         val pn = if (cur?.id == anchor) run.coerceIn(0, (q.size - idx - 1).coerceAtLeast(0)) else 0
         _s.value = PlayerState(currentSong = cur, queue = q.toList(), queueIndex = idx, shuffleMode = mode,
-            playNextCount = pn, advancedAutomatically = automatic, queueGeneration = generation)
+            playNextCount = pn, advancedAutomatically = automatic, queueGeneration = generation,
+            entries = shadow.align(q.map { it.id.toString() }))
     }
 
     /** Skips to the next entry after [heardFraction] of the song, as the real player reports it. */
@@ -78,13 +85,23 @@ private class FakePlayback : PlaybackController {
     }
 
     override suspend fun setQueue(songs: List<Song>, startIndex: Int, playWhenReady: Boolean) {
-        writes += "set"; q.clear(); q += songs; idx = startIndex; anchor = null; run = 0; generation++; sync()
+        writes += "set"
+        val start = if (songs.isEmpty()) 0 else startIndex.coerceIn(songs.indices)
+        val kept = shadow.startList(songs.map { it.id.toString() }, start, idx).map { q[it] }
+        val cut = if (songs.isEmpty()) 0 else start + 1
+        q.clear(); q += songs.subList(0, cut) + kept + songs.subList(cut, songs.size)
+        idx = start; anchor = null; run = 0; generation++; sync()
     }
-    override suspend fun addToQueue(song: Song) { writes += "add"; q += song; sync() }
-    override suspend fun addToQueueAll(songs: List<Song>) { writes += "add"; q += songs; sync() }
-    override suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>) {
+    override suspend fun addToQueue(song: Song, origin: QueueOrigin) {
+        writes += "add"; shadow.insert(q.size, listOf(song.id.toString()), origin); q += song; sync()
+    }
+    override suspend fun addToQueueAll(songs: List<Song>, origin: QueueOrigin) {
+        writes += "add"; shadow.insert(q.size, songs.map { it.id.toString() }, origin); q += songs; sync()
+    }
+    override suspend fun replaceQueueRange(fromIndex: Int, toIndexExclusive: Int, songs: List<Song>, origin: QueueOrigin) {
         writes += "replace $fromIndex"
         val from = fromIndex.coerceIn(0, q.size); val to = toIndexExclusive.coerceIn(from, q.size)
+        shadow.replace(from, to, songs.map { it.id.toString() }, origin)
         repeat(to - from) { q.removeAt(from) }
         q.addAll(from, songs); sync()
     }
@@ -92,15 +109,22 @@ private class FakePlayback : PlaybackController {
         val cur = q[idx].id
         if (cur != anchor) { anchor = cur; run = 0 }
         run++
-        q.add((idx + run).coerceAtMost(q.size), song); sync()
+        val at = (idx + run).coerceAtMost(q.size)
+        shadow.insert(at, listOf(song.id.toString()), QueueOrigin.MANUAL)
+        q.add(at, song); sync()
     }
-    override suspend fun removeFromQueue(index: Int) { writes += "remove1"; q.removeAt(index); sync() }
+    override suspend fun removeFromQueue(index: Int) {
+        writes += "remove1"; shadow.remove(index, index + 1); q.removeAt(index); sync()
+    }
     override suspend fun removeQueueRange(fromIndex: Int, toIndexExclusive: Int) {
         writes += "remove $fromIndex"
         val from = fromIndex.coerceIn(0, q.size); val to = toIndexExclusive.coerceIn(from, q.size)
         if (to <= idx) idx -= to - from
+        shadow.remove(from, to)
         repeat(to - from) { q.removeAt(from) }; sync()
     }
+    /** What the screen shows of each song still to come: its origin, and P when the user moved it. */
+    fun origins(): List<String> = playerState.value.entries.drop(idx + 1).map { it.origin.name[0] + if (it.pinned) "P" else "" }
     /** As PlaybackConnection: checked by QueueMoves, the play-next run following its entries. */
     override suspend fun moveQueueItem(from: Int, to: Int, expectedSongId: Long?): Boolean {
         val move = QueueMoves.resolve(q.map { it.id.toString() }, idx, from, to, expectedSongId?.toString()) ?: return false
@@ -108,6 +132,7 @@ private class FakePlayback : PlaybackController {
             run = QueueMoves.runAfterMove(idx, run.coerceIn(0, (q.size - idx - 1).coerceAtLeast(0)), move.from, move.to)
         }
         writes += "move"
+        shadow.move(move.from, move.to)
         q.add(move.to, q.removeAt(move.from)); sync()
         return true
     }
@@ -634,5 +659,146 @@ class SmartQueueManagerQueueTest {
         repeat(4) { p.skipAfter(0.9f); advanceUntilIdle() }
         assertNull(c.journey.value)
         assertEquals(ShuffleMode.SMART, p.mode)
+    }
+
+    // -- Provenance: the user's songs are protected wherever they sit (Universal Queue, stage 5) --
+
+    @Test
+    fun aSongAddedToTheEndSurvivesSmartShuffleStarting() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this)
+        p.setQueue((1L..10L).map(::song), 0, true)
+        p.addToQueue(song(60))                            // "Add to queue": after the whole album
+        advanceUntilIdle()
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        val on = ids(p)
+        assertEquals("the album makes way, the user's song stays: $on", listOf(1L, 60L), on.take(2))
+        assertTrue("then picks: $on", on.drop(2).isNotEmpty() && on.drop(2).all { it in pickPool })
+        assertEquals("M", p.origins().first())
+        assertTrue("picks are automatic: ${p.origins()}", p.origins().drop(1).all { it == "A" })
+        toggle(p, c, ShuffleMode.OFF); advanceUntilIdle()
+        assertEquals("off: the album back, the user's song in front", listOf(1L, 60L) + (2L..10L), ids(p))
+    }
+
+    @Test
+    fun aQueuedSongDraggedOutOfNextUpIsStillTheUsers() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this)
+        p.setQueue((1L..10L).map(::song), 0, true)
+        p.addNext(song(50))                               // 1 [50] 2 .. 10
+        advanceUntilIdle()
+        assertTrue(p.moveQueueItem(1, 10, 50L))           // dragged to the very end: no longer in the run
+        advanceUntilIdle()
+        assertEquals(0, p.playerState.value.playNextCount)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        val on = ids(p)
+        assertEquals("kept, though not in the Play next run: $on", listOf(1L, 50L), on.take(2))
+        assertTrue(on.drop(2).all { it in pickPool })
+    }
+
+    @Test
+    fun aPickTheUserMovedIsNeverReRankedAndOutlivesShuffle() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this)
+        p.setQueue((1L..5L).map(::song), 0, true)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        val before = ids(p)
+        val moved = before.last()
+        assertTrue(p.moveQueueItem(before.lastIndex, 3, moved))
+        advanceUntilIdle()
+        val requests = brain.requests.size
+        c.regenerateSmartQueue(); settle()
+        assertTrue("a re-rank ran", brain.requests.size > requests)
+        val after = ids(p)
+        assertEquals("the head stays: $after", before.take(2), after.take(2))
+        assertEquals("the moved pick kept, first after the head: $after", moved, after[2])
+        assertEquals(1, after.count { it == moved })
+        assertTrue("the other picks were replaced: $before -> $after",
+            after.drop(3).none { it in before.drop(2) })
+        assertEquals("AP", p.origins()[1])
+        toggle(p, c, ShuffleMode.OFF); advanceUntilIdle()
+        // It sat after one other song: it comes after the album's first.
+        assertEquals("off: the moved pick kept, the untouched picks gone, the album back", listOf(1L, 2L, moved, 3L, 4L, 5L), ids(p))
+    }
+
+    @Test
+    fun randomShufflesOnlyTheFreeSongsAndLeavesTheUsersInPlace() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this)
+        p.setQueue((1L..10L).map(::song), 0, true)
+        p.addToQueue(song(60))                            // the user's, at the end
+        p.addNext(song(50))                               // the user's, next
+        assertTrue(p.moveQueueItem(5, 3, 5L))             // song 5 moved up by hand: 1 50 2 5 3 4 6 .. 10 60
+        advanceUntilIdle()
+        val before = ids(p)
+        repeat(5) {
+            toggle(p, c, ShuffleMode.RANDOM); advanceUntilIdle()
+            val now = ids(p)
+            assertEquals("same songs: $now", before.sorted(), now.sorted())
+            assertEquals(1L, now[0])
+            assertEquals("play next stays next: $now", 50L, now[1])
+            assertEquals("the moved song stays put: $now", 5L, now[3])
+            assertEquals("the song added at the end stays last: $now", 60L, now.last())
+            toggle(p, c, ShuffleMode.OFF); advanceUntilIdle()
+            assertEquals("off restores the order", before, ids(p))
+        }
+    }
+
+    @Test
+    fun startingANewListKeepsTheUsersSongs() = runTest(UnconfinedTestDispatcher()) {
+        val (p, _, _) = build(this)
+        p.setQueue((1L..5L).map(::song), 0, true)
+        p.addNext(song(50))
+        p.addToQueue(song(60))
+        advanceUntilIdle()
+        p.setQueue((20L..25L).map(::song), 2, true)       // song 22 of an album
+        advanceUntilIdle()
+        assertEquals(listOf(20L, 21L, 22L, 50L, 60L, 23L, 24L, 25L), ids(p))
+        assertEquals(22L, p.playerState.value.currentSong?.id)
+        assertEquals(listOf("M", "M", "L", "L", "L"), p.origins())
+    }
+
+    @Test
+    fun startingANewListUnderSmartShuffleKeepsTheUsersSongsBeforeThePicks() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this)
+        p.setQueue(listOf(song(1)), 0, true)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        p.addToQueue(song(60))                            // the user's, after the picks
+        advanceUntilIdle()
+        p.setQueue((40L..45L).map(::song), 2, true)
+        advanceUntilIdle()
+        val q = ids(p)
+        assertEquals("$q", listOf(40L, 41L, 42L, 60L), q.take(4))
+        assertTrue("the old picks went, new ones follow: $q", q.drop(4).isNotEmpty() && q.drop(4).all { it in pickPool })
+        assertEquals(listOf(42L), brain.manual)
+    }
+
+    @Test
+    fun startingANewListInRandomKeepsTheUsersSongsNext() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.chooseShuffleMode(ShuffleMode.RANDOM); advanceUntilIdle()
+        p.addNext(song(50))
+        advanceUntilIdle()
+        p.setQueue((20L..29L).map(::song), 4, true)
+        advanceUntilIdle()
+        val q = ids(p)
+        assertEquals("$q", listOf(24L, 50L), q.take(2))
+        assertEquals((20L..29L).toSet() - 24L, q.drop(2).toSet())
+    }
+
+    @Test
+    fun aComputersSongInTheQueueIsKeptAndNeverReachesTheBrain() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this)
+        val pcSong = com.harmony.domain.playback.RemoteSongs.song("pc:pc-1:abc", "From the PC", "Someone", "", 200_000)
+        p.setQueue((1L..5L).map(::song), 0, true)
+        p.insertQueueItem(1, pcSong)                      // put in from the computer: the user's
+        advanceUntilIdle()
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        assertEquals("kept, the album made way: ${ids(p)}", listOf(1L, pcSong.id), ids(p).take(2))
+        p.skipAfter(0.9f); advanceUntilIdle()              // the computer's song plays
+        assertEquals(pcSong.id, p.playerState.value.currentSong?.id)
+        assertTrue("the brain never hears of it: ${brain.started}", brain.started.none { it < 0 })
+        assertTrue("nor is it asked to follow it", brain.requests.none { it.currentSongId < 0 || it.prefixIds.any { id -> id < 0 } })
+        // Playing on from it: the next batch follows the last library song instead.
+        repeat(4) { p.skipAfter(0.9f); advanceUntilIdle() }
+        assertTrue(brain.requests.size >= 2)
+        assertTrue(brain.requests.all { it.currentSongId >= 0 })
     }
 }

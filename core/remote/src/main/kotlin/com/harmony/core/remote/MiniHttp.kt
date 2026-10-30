@@ -154,6 +154,7 @@ class MiniHttpServer(
             200 -> "OK"
             204 -> "No Content"
             206 -> "Partial Content"
+            304 -> "Not Modified"
             400 -> "Bad Request"
             403 -> "Forbidden"
             404 -> "Not Found"
@@ -201,12 +202,30 @@ class HttpResponse(
          * [source] served whole, or the part a `Range: bytes=a-b` header asks
          * for (206 with Content-Range), which is what lets the computer seek
          * without fetching the song from the start.
+         *
+         * With a validator ([RangeSource.etag]) it also lets a download resume
+         * safely: `If-Range` with another validator gets the whole file (200),
+         * never bytes of a different version glued onto the old ones; and
+         * `If-None-Match` with the same one is answered 304, so a copy kept
+         * from before can be checked without fetching it again.
          */
-        fun ranged(source: RangeSource, rangeHeader: String?, contentType: String): HttpResponse {
+        fun ranged(
+            source: RangeSource,
+            rangeHeader: String?,
+            contentType: String,
+            ifRange: String? = null,
+            ifNoneMatch: String? = null,
+        ): HttpResponse {
             val size = source.length
-            val accept = mapOf("Accept-Ranges" to "bytes")
-            val range = rangeHeader?.let { parseRange(it, size) }
-            if (rangeHeader != null && range == null) {
+            val etag = source.etag
+            val accept = mapOf("Accept-Ranges" to "bytes") + (if (etag != null) mapOf("ETag" to etag) else emptyMap())
+            if (etag != null && ifNoneMatch != null && ifNoneMatch.split(',').any { it.trim() == etag }) {
+                return HttpResponse(304, null, 0, accept) {}
+            }
+            // A range for another version of the file is no range: the whole (new) file.
+            val wanted = rangeHeader?.takeIf { ifRange == null || (etag != null && ifRange.trim() == etag) }
+            val range = wanted?.let { parseRange(it, size) }
+            if (wanted != null && range == null) {
                 return HttpResponse(416, null, 0, accept + ("Content-Range" to "bytes */$size")) {}
             }
             val (from, to) = range ?: (0L to size - 1)
@@ -256,11 +275,18 @@ class HttpResponse(
 interface RangeSource {
     val length: Long
     fun open(offset: Long): InputStream
+
+    /**
+     * A strong validator (quoted, RFC 9110): different whenever the bytes may
+     * differ. Null when there is none; resuming then starts over.
+     */
+    val etag: String? get() = null
 }
 
 /** A [RangeSource] over a local file. */
 class FileRangeSource(private val file: java.io.File) : RangeSource {
     override val length: Long get() = file.length()
+    override val etag: String get() = "\"" + file.length().toString(16) + "-" + file.lastModified().toString(16) + "\""
     override fun open(offset: Long): InputStream {
         val raf = java.io.RandomAccessFile(file, "r")
         raf.seek(offset)

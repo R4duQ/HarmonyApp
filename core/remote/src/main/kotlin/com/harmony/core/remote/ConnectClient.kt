@@ -54,15 +54,40 @@ class ConnectClient(
     }
 
     /**
+     * Universal Queue: sends [commands] (resends included) and returns each
+     * one's answer by command id. Throws on a computer without the queue (404).
+     */
+    fun queueCommands(commands: List<com.harmony.core.remote.queue.QueueCommand>): Map<String, com.harmony.core.remote.queue.CommandOutcome> {
+        val body = JSONObject().put("commands", org.json.JSONArray().apply {
+            commands.forEach { put(com.harmony.core.remote.queue.QueueJson.command(it)) }
+        })
+        val reply = JSONObject(call("POST", Connect.PATH_QUEUE_COMMANDS, body.toString())).getJSONArray("outcomes")
+        return (0 until reply.length()).mapNotNull { i ->
+            val o = reply.getJSONObject(i)
+            com.harmony.core.remote.queue.QueueJson.outcome(o.getJSONObject("outcome"))?.let { o.getString("id") to it }
+        }.toMap()
+    }
+
+    /**
+     * Universal Queue: what changed after revision [from], waiting up to
+     * [waitMs] on the computer when nothing has. Null when the answer holds
+     * something this version can't read (then ask from -1, for the whole queue).
+     */
+    fun queueSince(from: Long, waitMs: Long): com.harmony.core.remote.queue.QueueDelta? {
+        val text = call("GET", Connect.PATH_QUEUE_SINCE + "?from=" + from + "&wait=" + waitMs, null, readTimeoutMs = timeoutMs + waitMs.toInt())
+        return com.harmony.core.remote.queue.QueueJson.delta(JSONObject(text))
+    }
+
+    /**
      * One request over a plain socket. Not HttpURLConnection: on Android that
      * refuses unencrypted HTTP unless the whole app allows it, and this only
      * ever talks to a computer on the home network.
      */
-    private fun call(method: String, path: String, body: String?, auth: Boolean = true): String {
+    private fun call(method: String, path: String, body: String?, auth: Boolean = true, readTimeoutMs: Int = timeoutMs): String {
         val bytes = body?.toByteArray(Charsets.UTF_8)
         Socket().use { socket ->
             socket.connect(InetSocketAddress(host, port), timeoutMs)
-            socket.soTimeout = timeoutMs
+            socket.soTimeout = readTimeoutMs
             val head = StringBuilder()
                 .append(method).append(' ').append(path).append(" HTTP/1.1\r\n")
                 .append("Host: ").append(host).append(':').append(port).append("\r\n")

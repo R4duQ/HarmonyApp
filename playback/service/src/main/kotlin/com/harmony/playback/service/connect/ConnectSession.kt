@@ -71,6 +71,7 @@ import javax.inject.Singleton
 class ConnectSession @Inject constructor(
     @ApplicationContext private val context: Context,
     private val artworkCache: ArtworkCache,
+    private val remoteMedia: RemoteMedia,
 ) : ConnectController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val net = Executors.newSingleThreadExecutor { Thread(it, "harmony-connect").apply { isDaemon = true } }
@@ -86,6 +87,15 @@ class ConnectSession @Inject constructor(
 
     private var client: ConnectClient? = null
     private var computer: ConnectComputer? = null
+
+    private val _queueClient = MutableStateFlow<ConnectClient?>(null)
+
+    /**
+     * The client of the session playing on a computer now (null: none), for
+     * the shared queue (Universal Queue), which talks to the same computer in
+     * the same session: when the computer ends the session, the queue link ends too.
+     */
+    val queueClient: StateFlow<ConnectClient?> = _queueClient
 
     /** The song the computer was last told to play. */
     private var sentId: String? = null
@@ -348,6 +358,7 @@ class ConnectSession @Inject constructor(
             }
             val wasActive = isActive
             client = fresh
+            _queueClient.value = fresh
             computer = target
             sentId = item?.mediaId
             advanceId = upNext.firstOrNull()?.mediaId?.takeIf { canAdvance }
@@ -377,6 +388,7 @@ class ConnectSession @Inject constructor(
         pollJob?.cancel()
         pollJob = null
         client = null
+        _queueClient.value = null
         computer = null
         sentId = null
         advanceId = null
@@ -472,7 +484,7 @@ class ConnectSession @Inject constructor(
     ): PlayRequest {
         val uri = item.localConfiguration?.uri ?: throw IOException("nothing to play")
         val host = localAddressToward(c.host)
-        val (url, art) = files.share(item.mediaId, uri, coverFor(item), host)
+        val (url, art) = share(item, uri, host)
         val md = item.mediaMetadata
         val track = RemoteTrack(
             id = item.mediaId,
@@ -482,21 +494,32 @@ class ConnectSession @Inject constructor(
             durationMs = durationMs.takeIf { it > 0 } ?: md.durationMs ?: 0L,
             url = url,
             artUrl = art,
+            key = contentKey(item.mediaId),
         )
         val next = upNext.mapIndexed { i, it ->
             val m = it.mediaMetadata
-            // The first one can be played straight on: the computer fetches it ahead of time.
+            // The first one can be played straight on; the computer fetches it and the
+            // one or two after it ahead of time, so a skip there doesn't wait on the Wi-Fi.
             val nextUri = it.localConfiguration?.uri
             val (nextUrl, nextArt) = when {
-                i == 0 && autoAdvance && nextUri != null -> files.share(it.mediaId, nextUri, coverFor(it), host)
+                i < FETCHED_AHEAD && autoAdvance && nextUri != null -> share(it, nextUri, host)
                 // Covers for the first few, so the computer's queue has pictures.
                 i < COVERED_UP_NEXT -> "" to files.shareCover(it.mediaId, coverFor(it), host)
                 else -> "" to null
             }
-            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt)
+            RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt, key = contentKey(it.mediaId))
         }
         return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat)
     }
+
+    /**
+     * The address of [item]'s audio and cover for the computer: served by the
+     * phone, or for a computer's own song (Universal Queue, stage 6) that
+     * computer's address for it (the computer it belongs to plays its own file).
+     */
+    private fun share(item: MediaItem, uri: android.net.Uri, host: String): Pair<String, String?> =
+        if (com.harmony.domain.playback.RemoteSongs.isRemoteKey(item.mediaId)) (remoteMedia.urlFor(item.mediaId) ?: "") to null
+        else files.share(item.mediaId, uri, coverFor(item), host)
 
     /**
      * The current song's length: the player's once it has read the file, else
@@ -867,6 +890,17 @@ class ConnectSession @Inject constructor(
         prefs.edit().putString(KEY_COMPUTERS, array.toString()).apply()
     }
 
+    /** The audio of [mediaId] on this phone, as the shared queue and the computer's cache name it. */
+    private fun contentKey(mediaId: String) =
+        if (com.harmony.domain.playback.RemoteSongs.isRemoteKey(mediaId)) mediaId else "dev:$deviceId:$mediaId"
+
+    /** This phone, as the shared queue names the device a song lives on: random, kept for good. */
+    val deviceId: String by lazy {
+        prefs.getString(KEY_DEVICE_ID, null) ?: java.util.UUID.randomUUID().toString().also {
+            prefs.edit().putString(KEY_DEVICE_ID, it).apply()
+        }
+    }
+
     private fun phoneName(): String {
         val model = Build.MODEL.orEmpty()
         val maker = Build.MANUFACTURER.orEmpty().replaceFirstChar { it.uppercase() }
@@ -886,6 +920,7 @@ class ConnectSession @Inject constructor(
     private companion object {
         const val PREFS = "harmony_connect"
         const val KEY_COMPUTERS = "computers"
+        const val KEY_DEVICE_ID = "device_id"
         const val SEARCH_MS = 1_800
         const val POLL_MS = 500L
         /** The longest pause between reads while the computer doesn't answer (plus up to a quarter of jitter). */
@@ -900,6 +935,8 @@ class ConnectSession @Inject constructor(
         /** What comes next, for the computer's queue (only the first can be played straight on). */
         const val UP_NEXT = 20
         const val COVERED_UP_NEXT = 8
+        /** How many of "up next" the computer may fetch ahead of time (the next song and two more). */
+        const val FETCHED_AHEAD = 3
         const val REFRESH_DELAY_MS = 400L
         const val VOLUME_STEPS = 25
         const val MAX_COVER_BYTES = 2_000_000

@@ -10,7 +10,8 @@ import com.harmony.core.remote.RemoteRequest
 import com.harmony.core.remote.RemoteState
 import com.harmony.core.remote.RemoteStatus
 import com.harmony.core.remote.RemoteTrack
-import com.harmony.desktop.connect.RemoteCache
+import com.harmony.core.remote.cache.CacheWant
+import com.harmony.core.remote.cache.MediaCache
 import com.harmony.desktop.engine.AudioEngine
 import com.harmony.desktop.engine.EngineStatus
 import com.harmony.desktop.engine.Upcoming
@@ -39,7 +40,19 @@ sealed interface Art {
     data class Url(val url: String) : Art
 }
 
-data class UpNext(val title: String, val artist: String, val art: Art?, val queueIndex: Int?)
+/**
+ * [label]: where it comes from, in the shared queue ("Next up", "Recommended");
+ * null when not told. [entryId]: its entry in the shared queue, which can be
+ * edited from here; null otherwise.
+ */
+data class UpNext(
+    val title: String,
+    val artist: String,
+    val art: Art?,
+    val queueIndex: Int?,
+    val label: String? = null,
+    val entryId: String? = null,
+)
 
 enum class Repeat { OFF, ALL, ONE }
 
@@ -53,12 +66,16 @@ enum class Repeat { OFF, ALL, ONE }
  * here, and then follows; otherwise next and previous are passed to the
  * phone as requests and the end of a song is only reported.
  *
- * The phone's songs are fetched whole in the background ([RemoteCache]), so
+ * The phone's songs are fetched whole in the background ([MediaCache]), so
  * seeking and the next song don't wait on the Wi-Fi.
  */
 class PlayerController(
     private val engine: AudioEngine,
-    private val cache: RemoteCache? = null,
+    private val cache: MediaCache? = null,
+    /** This computer, as the shared queue names it: a phone's song that is ours ("pc:<id>:...") plays from our own file. */
+    private val pcId: String? = null,
+    /** The file of this computer's song by its id for phones (PcMedia.file); none in tests that don't need it. */
+    private val localFile: (String) -> java.io.File? = { null },
 ) : RemoteRenderer {
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
@@ -118,6 +135,13 @@ class PlayerController(
      * probe) started for one does nothing once another, or none, has come.
      */
     private var remoteGeneration = 0L
+    /**
+     * The shared queue (Universal Queue) as the phone mirrors it: when it
+     * matches the phone's song playing here, "up next" shows all of it, with
+     * what the user queued and what was recommended marked.
+     */
+    private var shared: com.harmony.core.remote.queue.QueueState? = null
+
     /** The order songs play in when shuffling: positions in the queue. */
     private var order: List<Int> = emptyList()
 
@@ -386,7 +410,7 @@ class PlayerController(
      */
     private fun resumeFromCopy(): Boolean {
         val t = remoteTrack ?: return false
-        val local = cache?.localFor(t.url) ?: return false
+        val local = cache?.localFor(keyOf(t)) ?: return false
         val s = engine.state.value
         if (s.source == local || s.status != EngineStatus.PAUSED) return false
         engine.load(local, engine.positionMs(), play = true, s.durationMs.takeIf { it > 0 } ?: t.durationMs)
@@ -397,7 +421,11 @@ class PlayerController(
     @Synchronized
     private fun onEngineError(source: String, at: Long) {
         val t = remoteTrack ?: return
-        if (_phone.value == null || (source != t.url && source != cache?.localFor(t.url))) return
+        if (_phone.value == null) return
+        val copy = cache?.localFor(keyOf(t))
+        if (source != t.url && source != copy) return
+        // The copy kept here wouldn't play: it goes (fetched once more), and the song carries on from the phone.
+        if (copy != null && source == copy) cache?.corrupt(keyOf(t))
         if (recoveries >= MAX_RECOVERIES) return
         recoveries++
         val attempt = recoveries
@@ -454,17 +482,141 @@ class PlayerController(
         _nowPlaying.value = NowPlaying(
             key = "phone:" + t.id, title = t.title, artist = t.artist, album = t.album, durationMs = t.durationMs,
             art = t.artUrl?.let { Art.Url(it) }, quality = t.quality, fromPhone = phone,
-            upNext = remoteUpNext.take(UP_NEXT).map { UpNext(it.title, it.artist, it.artUrl?.let { u -> Art.Url(u) }, null) },
+            upNext = sharedUpNext(t) ?: remoteUpNext.take(UP_NEXT).map { UpNext(it.title, it.artist, it.artUrl?.let { u -> Art.Url(u) }, null) },
         )
     }
 
-    /** The fetched copy when it's complete, else straight from the phone. */
-    private fun sourceFor(t: RemoteTrack): String = cache?.localFor(t.url) ?: t.url
+    /** "Up next" from the shared queue, when it is in step with the song the phone plays here; else null. */
+    private fun sharedUpNext(t: RemoteTrack): List<UpNext>? {
+        val q = shared ?: return null
+        if (!q.isPlaying(t)) return null
+        val covers = remoteUpNext.associate { it.id to it.artUrl }
+        return q.upcoming.take(SHARED_UP_NEXT).map { e ->
+            val label = when {
+                e.priority -> "Next up"
+                e.origin == com.harmony.core.remote.queue.Origin.MANUAL -> "Queued"
+                e.origin == com.harmony.core.remote.queue.Origin.AUTO && !e.pinned -> "Recommended"
+                else -> null
+            }
+            UpNext(e.media.title, e.media.artist, covers[e.media.localId]?.let { Art.Url(it) }, null, label, e.id)
+        }
+    }
 
-    /** Fetches the song playing, then the next, and forgets the rest. */
+    /** Sends an edit of the shared queue (set by the app while the shared queue is on). */
+    @Volatile var onSharedEdit: ((com.harmony.core.remote.queue.QueueOp) -> Unit)? = null
+
+    /** The phone plays this entry next. */
+    fun sharedPlayNext(entryId: String) = sharedEdit { com.harmony.core.remote.queue.QueueOp.Move(entryId, null) }
+
+    /** One place up (towards the song playing). */
+    fun sharedMoveUp(entryId: String) = sharedEdit { q ->
+        val up = q.upcoming
+        val i = up.indexOfFirst { it.id == entryId }
+        if (i <= 0) null else com.harmony.core.remote.queue.QueueOp.Move(entryId, up.getOrNull(i - 2)?.id)
+    }
+
+    /** One place down. */
+    fun sharedMoveDown(entryId: String) = sharedEdit { q ->
+        val up = q.upcoming
+        val i = up.indexOfFirst { it.id == entryId }
+        if (i < 0 || i >= up.lastIndex) null else com.harmony.core.remote.queue.QueueOp.Move(entryId, up[i + 1].id)
+    }
+
+    fun sharedRemove(entryId: String) = sharedEdit { com.harmony.core.remote.queue.QueueOp.Remove(listOf(entryId)) }
+
+    /** The phone plays this entry now. */
+    fun sharedPlay(entryId: String) = sharedEdit { com.harmony.core.remote.queue.QueueOp.SetCurrent(entryId) }
+
+    /**
+     * A song of this computer's library into the phone's queue (stage 6), as
+     * the user's: [next] after the Play next run, else after the user's songs
+     * and before Smart Shuffle's. The phone plays it from its own cache, or
+     * this computer plays its own file while the phone plays here.
+     */
+    fun sharedAdd(track: LocalTrack, next: Boolean) = sharedEdit { _ ->
+        val me = pcId ?: return@sharedEdit null
+        val id = com.harmony.desktop.connect.PcMedia.idFor(track)
+        val entry = com.harmony.core.remote.queue.QueueEntry(
+            java.util.UUID.randomUUID().toString(),
+            com.harmony.core.remote.queue.MediaRef(
+                contentKey = com.harmony.core.remote.Connect.pcKey(me, id),
+                home = me,
+                localId = id,
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                durationMs = track.durationMs,
+            ),
+            com.harmony.core.remote.queue.Origin.MANUAL,
+            priority = next,
+        )
+        if (next) com.harmony.core.remote.queue.QueueOp.PlayNext(listOf(entry)) else com.harmony.core.remote.queue.QueueOp.Add(listOf(entry))
+    }
+
+    /** Whether [sharedAdd] can go to a phone now: one plays here and the shared queue is in step with it. */
+    fun canShareToPhone(): Boolean = synchronized(this) {
+        val q = shared ?: return false
+        val t = remoteTrack ?: return false
+        _phone.value != null && q.isPlaying(t) && pcId != null
+    }
+
+    @Synchronized
+    private fun sharedEdit(make: (com.harmony.core.remote.queue.QueueState) -> com.harmony.core.remote.queue.QueueOp?) {
+        val q = shared ?: return
+        // Only while the phone plays here and the shared queue is in step with it.
+        val t = remoteTrack ?: return
+        if (_phone.value == null || !q.isPlaying(t)) return
+        val op = make(q) ?: return
+        onSharedEdit?.invoke(op)
+    }
+
+    /**
+     * Whether the shared queue's current entry is the phone's song [t]: by
+     * content key (the same for the phone's songs and this computer's), or by
+     * the phone's id for phones that send no key.
+     */
+    private fun com.harmony.core.remote.queue.QueueState.isPlaying(t: RemoteTrack): Boolean {
+        val media = current?.media ?: return false
+        return if (t.key != null) media.contentKey == t.key else media.localId == t.id
+    }
+
+    /** The shared queue changed (null: switched off). */
+    @Synchronized
+    fun sharedQueue(state: com.harmony.core.remote.queue.QueueState?) {
+        shared = state
+        if (_phone.value != null) remoteTrack?.let(::showRemote)
+    }
+
+    /**
+     * Our own file when the phone's song is one of this computer's (added to
+     * the shared queue from here); else the fetched copy when it's complete,
+     * else straight from the phone.
+     */
+    private fun sourceFor(t: RemoteTrack): String = ownFile(t)?.path ?: cache?.localFor(keyOf(t)) ?: t.url
+
+    /** The file of [t] when it is this computer's own song. */
+    private fun ownFile(t: RemoteTrack): java.io.File? {
+        val id = pcId?.let { me -> t.key?.let { com.harmony.core.remote.Connect.pcSongOf(it, me) } } ?: return null
+        return localFile(id)
+    }
+
+    /**
+     * Which audio [t] is, for the cache: the phone's content key, the same in
+     * every session; older phones send none, so their name and song id stand in.
+     */
+    private fun keyOf(t: RemoteTrack): String = t.key ?: ("phone:" + (_phone.value ?: setAside?.phone ?: "") + ":" + t.id)
+
+    /**
+     * Fetches the song playing, then the next, then the one or two after it
+     * (those the phone shared), most urgent first; anything else stops.
+     */
     private fun fetch() {
         val c = cache ?: return
-        c.keep(listOfNotNull(remoteTrack?.url, remoteUpNext.firstOrNull()?.url?.takeIf { autoAdvance }))
+        val t = remoteTrack ?: return c.want(emptyList())
+        val ahead = if (autoAdvance) remoteUpNext.filter { it.url.isNotBlank() }.take(FETCH_AHEAD) else emptyList()
+        // Our own songs are already here.
+        val wants = (listOf(t) + ahead).mapIndexedNotNull { i, n -> if (ownFile(n) != null) null else CacheWant(keyOf(n), n.url, i) }
+        c.want(wants)
     }
 
     @Synchronized
@@ -561,13 +713,18 @@ class PlayerController(
         remoteRepeat = null
         publishModes()
         pending.clear()
-        cache?.clear()
+        // The songs fetched stay for next time (the cache keeps itself within bounds); downloads stop.
+        cache?.want(emptyList())
         _nowPlaying.value = _queue.value.getOrNull(_index.value)?.let { t -> localNowPlaying(t, _index.value) }
     }
 
     private companion object {
         /** What the queue shows after the song playing. */
         const val UP_NEXT = 30
+        /** Songs after the one playing fetched ahead of time. */
+        const val FETCH_AHEAD = 3
+        /** The shared queue can be long; the panel shows this much of it. */
+        const val SHARED_UP_NEXT = 500
         const val RESTART_AFTER_MS = 3_000L
         const val MAX_RECOVERIES = 3
         const val RECOVERY_DELAY_MS = 1_500L

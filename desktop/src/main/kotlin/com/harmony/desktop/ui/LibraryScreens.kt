@@ -37,6 +37,8 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
@@ -166,6 +168,9 @@ fun SongsPage(
     val all by app.tracks.collectAsState()
     val np by app.player.nowPlaying.collectAsState()
     val settings by app.settingsFlow.collectAsState()
+    // A phone plays here with the shared queue: songs from here can go into its queue.
+    val phone by app.player.phone.collectAsState()
+    val toPhone = settings.sharedQueue && phone != null
     var query by remember(initialQuery) { mutableStateOf(initialQuery) }
     val covers = remember(all) { albumCovers(all) }
     val favorites = settings.favorites.toSet()
@@ -225,6 +230,7 @@ fun SongsPage(
                     onFavorite = { app.toggleFavorite(t.path) },
                     onPlay = { app.player.playLocal(shown, i) },
                     onAlbum = { onOpenAlbum(t.album, t.albumArtist ?: t.artist) },
+                    toPhone = if (toPhone) { next -> app.player.sharedAdd(t, next) } else null,
                 )
             }
         }
@@ -247,6 +253,8 @@ private fun SongRow(
     onFavorite: () -> Unit,
     onPlay: () -> Unit,
     onAlbum: () -> Unit,
+    /** Into the phone's queue (true: play next); null while no phone shares its queue here. */
+    toPhone: ((Boolean) -> Unit)? = null,
 ) {
     val c = LocalHarmonyColors.current
     val accent = if (c.dark) Accent.PurpleLight else Accent.Purple
@@ -278,9 +286,13 @@ private fun SongRow(
         }
         Row(Modifier.weight(3f), verticalAlignment = Alignment.CenterVertically) {
             ArtImage(Art.Local(cover), loader, RoundedCornerShape(8.dp), Modifier.size(42.dp))
-            Column(Modifier.padding(start = 14.dp, end = 12.dp)) {
+            Column(Modifier.weight(1f).padding(start = 14.dp, end = 12.dp)) {
                 Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (current) accent else c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, fontSize = 12.5.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 1.dp))
+            }
+            if (toPhone != null && hovered) {
+                PhoneQueueAction(Icons.Rounded.PlaylistPlay, "Play next on the phone") { toPhone(true) }
+                PhoneQueueAction(Icons.Rounded.PlaylistAdd, "Add to the phone's queue") { toPhone(false) }
             }
         }
         Text(
@@ -301,6 +313,22 @@ private fun SongRow(
             }
         }
         Text(formatTime(track.durationMs), fontSize = 13.sp, color = c.muted, modifier = Modifier.width(56.dp))
+    }
+}
+
+@Composable
+private fun PhoneQueueAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    val c = LocalHarmonyColors.current
+    Box(
+        Modifier
+            .padding(end = 4.dp)
+            .size(30.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = c.muted, modifier = Modifier.size(18.dp))
     }
 }
 

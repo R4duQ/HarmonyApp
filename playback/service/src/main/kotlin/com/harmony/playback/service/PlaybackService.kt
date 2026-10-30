@@ -143,11 +143,16 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun snapshot(): Triple<List<Long>, Int, Long>? {
         val player = harmonyPlayer.player
-        val ids = (0 until player.mediaItemCount).mapNotNull {
-            player.getMediaItemAt(it).mediaId.toLongOrNull()
-        }
+        val all = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
+        // Only library songs are saved (a computer's songs in the queue are not kept across a
+        // restart): the index counts those before the song playing, and a computer's song
+        // playing hands its place to the next library song, from its start.
+        val ids = all.mapNotNull { it.toLongOrNull() }
         if (ids.isEmpty()) return null
-        return Triple(ids, player.currentMediaItemIndex, player.currentPosition.coerceAtLeast(0))
+        val current = player.currentMediaItemIndex.coerceIn(0, all.lastIndex)
+        val index = all.take(current).count { it.toLongOrNull() != null }.coerceAtMost(ids.lastIndex)
+        val position = if (all[current].toLongOrNull() != null) player.currentPosition.coerceAtLeast(0) else 0L
+        return Triple(ids, index, position)
     }
 
     /**
