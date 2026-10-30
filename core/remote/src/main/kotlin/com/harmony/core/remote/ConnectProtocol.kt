@@ -199,6 +199,8 @@ data class PlayRequest(
     val followUp: Boolean = false,
     val shuffle: Boolean? = null,
     val repeat: RemoteRepeat? = null,
+    /** The phone's crossfade, seconds (0: none), for the songs it sends; null from older phones. */
+    val crossfadeSeconds: Int? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("track", track.toJsonObject())
@@ -210,6 +212,7 @@ data class PlayRequest(
         .put("followUp", followUp)
         .putOpt("shuffle", shuffle)
         .putOpt("repeat", repeat?.name?.lowercase())
+        .putOpt("crossfade", crossfadeSeconds)
         .toString()
 
     companion object {
@@ -227,6 +230,7 @@ data class PlayRequest(
                 shuffle = if (o.has("shuffle")) o.optBoolean("shuffle") else null,
                 repeat = o.optString("repeat").takeIf { it.isNotEmpty() }
                     ?.let { r -> runCatching { RemoteRepeat.valueOf(r.uppercase()) }.getOrNull() },
+                crossfadeSeconds = if (o.has("crossfade")) o.optInt("crossfade").coerceIn(0, 12) else null,
             )
         }.getOrNull()
     }

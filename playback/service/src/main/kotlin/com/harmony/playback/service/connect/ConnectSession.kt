@@ -805,7 +805,9 @@ class ConnectSession @Inject constructor(
             }
             RemoteTrack(it.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.albumTitle?.toString() ?: "", m.durationMs ?: 0L, nextUrl, nextArt, key = contentKey(it.mediaId))
         }
-        return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat)
+        // The phone's crossfade, for the computer to fade between the phone's songs as the phone would (stage 8).
+        val crossfade = (exo as? com.harmony.playback.service.player.TwinPlayer)?.crossfadeSeconds
+        return PlayRequest(track, positionMs, playing, phoneName(), next, autoAdvance = autoAdvance, followUp = followUp, shuffle = shuffle, repeat = repeat, crossfadeSeconds = crossfade)
     }
 
     /**

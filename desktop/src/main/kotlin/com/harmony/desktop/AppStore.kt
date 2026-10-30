@@ -55,6 +55,8 @@ data class DesktopSettings(
     val sharedQueue: Boolean = false,
     /** How much of the disk the phone's songs kept here may take, in GB (never more than a tenth of the free space). */
     val cacheLimitGb: Int = 2,
+    /** How long songs fade into each other, seconds (0: they follow on without a gap). */
+    val crossfadeSeconds: Int = 0,
 ) {
     fun toJson(): String = JSONObject()
         .put("folders", JSONArray(folders))
@@ -81,6 +83,7 @@ data class DesktopSettings(
         .putOpt("outputDevice", outputDevice)
         .put("sharedQueue", sharedQueue)
         .put("cacheLimitGb", cacheLimitGb)
+        .put("crossfade", crossfadeSeconds)
         .toString(2)
 
     companion object {
@@ -124,6 +127,7 @@ data class DesktopSettings(
                 outputDevice = o.optString("outputDevice").takeIf { it.isNotEmpty() },
                 sharedQueue = o.optBoolean("sharedQueue", false),
                 cacheLimitGb = o.optInt("cacheLimitGb", d.cacheLimitGb).coerceIn(1, 100),
+                crossfadeSeconds = o.optInt("crossfade", d.crossfadeSeconds).coerceIn(0, 12),
             )
         }.getOrDefault(DesktopSettings())
     }

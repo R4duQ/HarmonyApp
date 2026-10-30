@@ -52,6 +52,12 @@ data class Upcoming(val source: String, val durationMs: Long, val tag: Any? = nu
  * heard at once; nothing a button does waits on the decoder or the sound card.
  * Near the end of a song the next one ([upcoming]) is started in the
  * background, and it follows on without a gap.
+ *
+ * With [crossfadeMs] set, the next song's first seconds are decoded into
+ * memory ahead of time, and the two songs fade into each other (equal power)
+ * over the last [crossfadeMs] of the first. Only then: a next song whose
+ * opening isn't decoded yet (a slow network, a late change of queue) follows
+ * on without a gap instead, never with a stall in the middle of a fade.
  */
 class AudioEngine(
     private val sinkFactory: () -> PcmSink = { JavaSoundSink() },
@@ -78,6 +84,10 @@ class AudioEngine(
 
     @Volatile var volume: Float = 1f
         set(value) { field = value.coerceIn(0f, 1f) }
+
+    /** How long songs fade into each other, ms (0: none, they follow on without a gap). */
+    @Volatile var crossfadeMs: Long = 0
+        set(value) { field = value.coerceIn(0, MAX_CROSSFADE_MS) }
 
     @Volatile var eq: EqConfig = EqConfig()
         set(value) {
@@ -122,7 +132,26 @@ class AudioEngine(
     private class Preload(val upcoming: Upcoming) {
         @Volatile var stream: DecodeStream? = null
         @Volatile var failed = false
+        /** Its opening, decoded into memory for a crossfade (null: none asked). */
+        @Volatile var head: ByteArray? = null
+        @Volatile var headBytes = 0
+        /** The whole opening a crossfade needs is decoded. */
+        @Volatile var headFull = false
         val ready = CountDownLatch(1)
+    }
+
+    /** A decode with its opening already in memory: that is played first. */
+    private class HeadStream(head: ByteArray, length: Int, private val inner: DecodeStream) : DecodeStream {
+        override val input: InputStream = java.io.SequenceInputStream(java.io.ByteArrayInputStream(head, 0, length), inner.input)
+        override fun finish(): String? = inner.finish()
+        override fun close() = inner.close()
+    }
+
+    /** A crossfade under way: [next] fades in while the song before fades out. */
+    private class Fade(val next: DecodeStream, val totalFrames: Long) {
+        var doneFrames = 0L
+        /** The song fading out has run out (it is silence from there). */
+        var outDone = false
     }
 
     /** Loads [source] and starts it at [startMs], playing or paused. */
@@ -282,6 +311,7 @@ class AudioEngine(
             }
         }
         val buf = ByteArray(FRAMES_PER_CHUNK * frameBytes)
+        val bufNext = ByteArray(FRAMES_PER_CHUNK * frameBytes)
         var src = source
         var duration = durationMs
         var startOffsetMs = startMs
@@ -289,8 +319,47 @@ class AudioEngine(
         var gotAny = false
         var asked = false
         var boundaryPending = true
+        var fade: Fade? = null
+        var fadeTried = false
         try {
             while (true) {
+                val f = fade
+                if (f != null) {
+                    // Both songs at once: the next one sets the pace; the one before is silence once it runs out.
+                    val nb = readFully(f.next.input, bufNext)
+                    if (gen != generation) return
+                    val na = if (f.outDone) 0 else readFully(stream.input, buf)
+                    if (!f.outDone && na < nb) {
+                        f.outDone = true
+                        closeLater(stream)
+                    }
+                    if (nb <= 0) {
+                        // The next song is shorter than the fade: it carries on alone from here (and ends).
+                        if (!f.outDone) closeLater(stream)
+                        stream = f.next
+                        fade = null
+                        synchronized(lock) { if (gen == generation) current = stream }
+                        continue
+                    }
+                    val frames = nb / frameBytes
+                    mix(buf, na / frameBytes, bufNext, frames, f)
+                    process(bufNext, frames)
+                    if (!writeAll(gen, out, bufNext, frames * frameBytes)) return
+                    decodedFrames += frames
+                    f.doneFrames += frames
+                    if (f.doneFrames >= f.totalFrames) {
+                        if (!f.outDone) closeLater(stream)
+                        stream = f.next
+                        fade = null
+                        synchronized(lock) { if (gen == generation) current = stream }
+                    }
+                    val decodedMs = decodedFrames * 1000L / sampleRate
+                    if (!asked && duration > 0 && decodedMs >= duration - PRELOAD_AHEAD_MS) {
+                        asked = true
+                        startPreload(upcoming())
+                    }
+                    continue
+                }
                 val n = readFully(stream.input, buf)
                 if (gen != generation) return
                 if (n <= 0) {
@@ -330,6 +399,7 @@ class AudioEngine(
                         decodedFrames = 0
                         gotAny = false
                         asked = false
+                        fadeTried = false
                         onAdvanced(up)
                         continue
                     }
@@ -376,9 +446,82 @@ class AudioEngine(
                     asked = true
                     startPreload(upcoming())
                 }
+                // The last seconds: fade into the next song if its opening is decoded and waiting.
+                val fadeMs = crossfadeMs
+                if (fadeMs > 0 && !fadeTried && duration > 0 && decodedMs >= duration - fadeMs) {
+                    fadeTried = true
+                    val ready = readyForFade(gen, fadeMs)
+                    if (ready != null) {
+                        val (up, next) = ready
+                        val left = (duration - decodedMs).coerceIn(1, fadeMs)
+                        fade = Fade(next, left * sampleRate / 1000)
+                        synchronized(lock) {
+                            if (gen != generation) {
+                                closeLater(next)
+                                return
+                            }
+                            src = up.source
+                            duration = up.durationMs
+                            // The next song is heard from the first frame of the fade.
+                            basePositionMs = 0
+                            trackStartFrame = out.framesPlayed() + out.queuedFrames()
+                            _state.value = EngineState(if (paused) EngineStatus.PAUSED else EngineStatus.PLAYING, src, duration)
+                        }
+                        startOffsetMs = 0
+                        decodedFrames = 0
+                        asked = false
+                        fadeTried = false
+                        onAdvanced(up)
+                    }
+                }
             }
         } catch (e: Exception) {
             if (gen == generation) fail(gen, src, duration, e.message ?: "Playback stopped")
+        } finally {
+            // Stopped or replaced mid-fade: the song fading in goes too.
+            fade?.let { if (gen != generation) closeLater(it.next) }
+        }
+    }
+
+    /**
+     * Mixes [frames] of the song fading in ([into], replaced by the mix) with
+     * [outFrames] of the one fading out ([from]; silence after them), along
+     * equal-power curves, so the loudness holds through the fade.
+     */
+    private fun mix(from: ByteArray, outFrames: Int, into: ByteArray, frames: Int, f: Fade) {
+        var i = 0
+        for (fr in 0 until frames) {
+            val x = ((f.doneFrames + fr).toDouble() / f.totalFrames).coerceIn(0.0, 1.0)
+            val gOut = kotlin.math.cos(x * Math.PI / 2).toFloat()
+            val gIn = kotlin.math.sin(x * Math.PI / 2).toFloat()
+            for (ch in 0 until channels) {
+                val b = (((into[i + 1].toInt()) shl 8) or (into[i].toInt() and 0xFF)).toShort().toFloat()
+                val a = if (fr < outFrames) (((from[i + 1].toInt()) shl 8) or (from[i].toInt() and 0xFF)).toShort().toFloat() else 0f
+                val y = (a * gOut + b * gIn).toInt().coerceIn(-32768, 32767)
+                into[i] = (y and 0xFF).toByte()
+                into[i + 1] = (y shr 8 and 0xFF).toByte()
+                i += 2
+            }
+        }
+    }
+
+    /**
+     * The next song for a crossfade of [fadeMs], only if its opening is
+     * decoded and waiting in memory; otherwise null (it follows on without a
+     * gap at the end, as usual). Never waits.
+     */
+    private fun readyForFade(gen: Long, fadeMs: Long): Pair<Upcoming, DecodeStream>? {
+        val want = upcoming() ?: return null
+        synchronized(lock) {
+            if (gen != generation) return null
+            val p = preload ?: return null
+            if (p.upcoming.source != want.source || p.ready.count > 0 || p.failed || !p.headFull) return null
+            // A song shorter than twice the fade is better left to follow on.
+            if (want.durationMs in 1 until fadeMs * 2) return null
+            val stream = p.stream ?: return null
+            val head = p.head ?: return null
+            preload = null
+            return want to HeadStream(head, p.headBytes, stream)
         }
     }
 
@@ -419,9 +562,20 @@ class AudioEngine(
             p = Preload(up)
             preload = p
         }
+        val fadeMs = crossfadeMs
         Thread({
             try {
-                p.stream = decoder.open(up.source, 0, sampleRate, channels)
+                val stream = decoder.open(up.source, 0, sampleRate, channels)
+                if (fadeMs > 0) {
+                    // The opening a crossfade needs, decoded now: the fade never waits on the decoder or the network.
+                    val bytes = ((fadeMs + HEAD_SLACK_MS) * sampleRate / 1000).toInt() * frameBytes
+                    val head = ByteArray(bytes)
+                    val got = readFully(stream.input, head)
+                    p.head = head
+                    p.headBytes = got
+                    p.headFull = got == bytes
+                }
+                p.stream = stream
             } catch (_: IOException) {
                 p.failed = true
             } finally {
@@ -450,7 +604,11 @@ class AudioEngine(
 
     private fun awaitPreload(p: Preload): DecodeStream? {
         p.ready.await(PRELOAD_WAIT_S, TimeUnit.SECONDS)
-        return if (p.failed) null else p.stream
+        if (p.failed) return null
+        val stream = p.stream ?: return null
+        // An opening decoded for a crossfade that didn't happen is played first.
+        val head = p.head
+        return if (head != null && p.headBytes > 0) HeadStream(head, p.headBytes, stream) else stream
     }
 
     private fun dropLater(p: Preload) {
@@ -561,5 +719,8 @@ class AudioEngine(
         const val PRELOAD_WAIT_S = 6L
         /** A song stopping this much before its end has broken off. */
         const val CUT_SHORT_MS = 3_000L
+        const val MAX_CROSSFADE_MS = 12_000L
+        /** Decoded beyond the fade, so the song fading in never waits as the fade ends. */
+        const val HEAD_SLACK_MS = 1_000L
     }
 }

@@ -183,6 +183,33 @@ fun EqualizerPage(app: DesktopApp) {
                 }
             }
         }
+        Card(Modifier.padding(start = 32.dp, end = 32.dp, bottom = 18.dp).fillMaxWidth()) {
+            Column {
+                Text("Crossfade", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.ink)
+                Text(
+                    "Songs fade into each other over the last seconds, when the next one is already decoded; otherwise they follow on without a gap. A phone playing here uses its own setting.",
+                    fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    for (sec in listOf(0, 2, 4, 6, 8, 12)) {
+                        val on = sec == settings.crossfadeSeconds
+                        Text(
+                            if (sec == 0) "Off" else "$sec s",
+                            fontSize = 13.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                            color = if (on) Accent.PurpleLight else c.muted,
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (on) Accent.Purple.copy(alpha = 0.18f) else Color.Transparent)
+                                .clickable { app.setCrossfade(sec) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .testTag("crossfade_$sec"),
+                        )
+                    }
+                }
+            }
+        }
         Card(Modifier.padding(start = 32.dp, end = 32.dp, bottom = 28.dp).fillMaxWidth()) {
             Column {
                 CardHeader(Icons.Rounded.Folder, listOf(Color(0xFF5B8DEF), Color(0xFF7C4DFF)), "Music folders", "Where Harmony looks for your songs.")
