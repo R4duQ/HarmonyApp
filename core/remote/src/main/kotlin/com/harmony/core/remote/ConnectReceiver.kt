@@ -98,6 +98,12 @@ class ConnectReceiver(
      * keep a session alive either (only the phone's own requests do).
      */
     private val media: ((String) -> ServedMedia)? = null,
+    /**
+     * "Send to phone": this computer's offers to paired phones
+     * ([com.harmony.core.remote.transfer.TransferPaths]); null: none (404).
+     * Served outside the lock and apart from the playback session, like [media].
+     */
+    private val transfers: com.harmony.core.remote.transfer.TransferOutbox? = null,
 ) {
     private val lock = Any()
     private val sessions = PhoneSessions(suspectAfterMs, lostAfterMs, log) { link ->
@@ -119,6 +125,7 @@ class ConnectReceiver(
             }
             else -> {
                 if (request.path.startsWith(Connect.PATH_MEDIA)) return media(request, token ?: request.query[Connect.MEDIA_TOKEN])
+                if (request.path.startsWith(com.harmony.core.remote.transfer.TransferPaths.PREFIX)) return transfer(request, token)
                 val phone = pairing.phoneFor(token) ?: return HttpResponse.text(403, "not paired")
                 val phoneSession = request.header(Connect.SESSION_HEADER)?.trim()?.take(MAX_SESSION_ID)?.takeIf { it.isNotEmpty() }
                 if (request.path == Connect.PATH_QUEUE_COMMANDS || request.path == Connect.PATH_QUEUE_SINCE) {
@@ -212,6 +219,34 @@ class ConnectReceiver(
             is ServedMedia.Ready -> HttpResponse.ranged(m.source, request.header("Range"), m.contentType, request.header("If-Range"), request.header("If-None-Match"))
             is ServedMedia.Preparing -> HttpResponse(503, "text/plain; charset=utf-8", 0, mapOf("Retry-After" to m.retryAfterS.toString())) {}
             ServedMedia.Missing -> HttpResponse.text(404, "no such song")
+        }
+    }
+
+    /** "Send to phone": only the paired phone an offer is for sees it (the token comes in the header only). */
+    private fun transfer(request: HttpRequest, token: String?): HttpResponse {
+        pairing.phoneFor(token) ?: return HttpResponse.text(403, "not paired")
+        val box = transfers ?: return HttpResponse.text(404, "no such thing")
+        val paths = com.harmony.core.remote.transfer.TransferPaths
+        val path = request.path
+        fun ids(prefix: String) = path.removePrefix(prefix).split('/').filter { it.isNotEmpty() && it.length <= MAX_MEDIA_ID }
+        return when {
+            path == paths.OFFERS && request.method == "GET" -> HttpResponse.json(
+                org.json.JSONObject().put("offers", org.json.JSONArray().apply { box.offersFor(token!!).forEach { put(it.toJson()) } }).toString(),
+            )
+            path.startsWith(paths.OFFER) && request.method == "GET" -> {
+                val id = ids(paths.OFFER).singleOrNull() ?: return HttpResponse.text(400, "bad id")
+                box.offer(token!!, id)?.let { HttpResponse.json(it.toJson().toString()) } ?: HttpResponse.text(404, "no such transfer")
+            }
+            path.startsWith(paths.FILE) && request.method == "GET" -> {
+                val parts = ids(paths.FILE).takeIf { it.size == 2 } ?: return HttpResponse.text(400, "bad id")
+                box.serve(token!!, parts[0], parts[1], request.header("Range"), request.header("If-Range"))
+            }
+            path.startsWith(paths.REPORT) && request.method == "POST" -> {
+                val id = ids(paths.REPORT).singleOrNull() ?: return HttpResponse.text(400, "bad id")
+                val reports = com.harmony.core.remote.transfer.ItemReport.listFromJson(request.text) ?: return HttpResponse.text(400, "bad report")
+                box.report(token!!, id, reports)
+            }
+            else -> HttpResponse.text(404, "no such thing")
         }
     }
 
