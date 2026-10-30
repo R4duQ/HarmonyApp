@@ -633,4 +633,89 @@ class EngineAndConnectTest {
             cache.close()
         }
     }
+
+    /**
+     * Stage 7, phone to computer, against the real engine over HTTP: the computer
+     * gets the song ready paused ahead of the phone; at that point the phone stops
+     * and the computer starts. The silence is only the start request and the sound
+     * card starting (the song is already decoded), and it carries on from the point.
+     */
+    @Test fun `a handoff to the computer starts it at once from where the phone stopped`() {
+        val phoneFiles = MiniHttpServer(0, "phone-files") { req ->
+            if (req.path == "/track/q") HttpResponse.ranged(FileRangeSource(quiet), req.header("Range"), "audio/wav") else HttpResponse.text(404, "no")
+        }.start()
+        val engine = AudioEngine({ CountingSink(realTime = true) })
+        val player = PlayerController(engine)
+        val udp = DatagramSocket().use { it.localPort }
+        val host = ConnectHost("pc-1", { "Test PC" }, player, emptyMap(), { }, httpPort = 0, discoveryPort = udp)
+        host.start()
+        try {
+            val port = host.state.value.port
+            val client = ConnectClient("127.0.0.1", port, session = "s1")
+            client.pair(host.state.value.code, "Pixel 8")
+            val track = RemoteTrack("q", "Quiet", "Test Artist", "Test Album", 12_000, "http://127.0.0.1:${phoneFiles.boundPort}/track/q")
+
+            // The phone, playing from 2 s.
+            val t0 = System.currentTimeMillis()
+            var phonePlaying = true
+            var phoneStoppedAt = -1L
+            var phoneStopPos = -1L
+            fun phonePos() = 2_000 + (if (phonePlaying) System.currentTimeMillis() else phoneStoppedAt) - t0
+            val phone = object : com.harmony.core.remote.handoff.HandoffPlayer {
+                override fun songId() = "q"
+                override fun positionMs() = phonePos()
+                override fun isPlaying() = phonePlaying
+                override fun busy() = false
+                override fun prepare(positionMs: Long) = Unit
+                override fun readiness() = com.harmony.core.remote.handoff.Readiness.READY
+                override fun start() { phonePlaying = true }
+                override fun stop() { phoneStopPos = phonePos(); phoneStoppedAt = System.currentTimeMillis(); phonePlaying = false }
+                override fun stopped() = !phonePlaying
+            }
+            var asked = -1L
+            var startedAt = -1L
+            val pc = object : com.harmony.core.remote.handoff.HandoffPlayer {
+                override fun songId() = "q"
+                override fun positionMs() = 0L
+                override fun isPlaying() = false
+                override fun busy() = false
+                override fun prepare(positionMs: Long) {
+                    asked = positionMs
+                    client.play(PlayRequest(track, positionMs, playing = false, phoneName = "Pixel 8"))
+                }
+                override fun readiness(): com.harmony.core.remote.handoff.Readiness {
+                    val s = client.status()
+                    return when {
+                        s.state == RemoteState.PLAYING -> com.harmony.core.remote.handoff.Readiness.PLAYING.also { if (startedAt < 0) startedAt = System.currentTimeMillis() }
+                        s.state == RemoteState.PAUSED && kotlin.math.abs(s.positionMs - asked) < 400 -> com.harmony.core.remote.handoff.Readiness.READY
+                        s.state == RemoteState.ERROR -> com.harmony.core.remote.handoff.Readiness.FAILED
+                        else -> com.harmony.core.remote.handoff.Readiness.NOT_YET
+                    }
+                }
+                override fun start() { client.control(ControlRequest(ControlAction.PLAY)) }
+                override fun stop() { client.control(ControlRequest(ControlAction.PAUSE)) }
+                override fun stopped() = true
+            }
+            val handoff = com.harmony.core.remote.handoff.Handoff(phone, pc, System.currentTimeMillis())
+            var result: com.harmony.core.remote.handoff.HandoffResult? = null
+            val end = System.currentTimeMillis() + 15_000
+            while (result == null && System.currentTimeMillis() < end) {
+                result = handoff.tick(System.currentTimeMillis())
+                Thread.sleep(20)
+            }
+            assertTrue("moved: $result", result is com.harmony.core.remote.handoff.HandoffResult.Moved && result.playing)
+            val gap = startedAt - phoneStoppedAt
+            println("handoff: point ${(result as com.harmony.core.remote.handoff.HandoffResult.Moved).atMs} ms, phone stopped at $phoneStopPos ms, computer playing $gap ms later")
+            assertTrue("the computer plays within 250 ms of the phone stopping (seen through /status): $gap ms", gap in 0..250)
+            assertTrue("from the point: phone stopped at $phoneStopPos, the computer was ready at ${result.atMs}", kotlin.math.abs(phoneStopPos - result.atMs) <= 60)
+            Thread.sleep(300)
+            val s = client.status()
+            assertEquals(RemoteState.PLAYING, s.state)
+            assertTrue("carrying on from the point: ${s.positionMs}", s.positionMs in result.atMs..result.atMs + 700)
+        } finally {
+            host.close()
+            phoneFiles.close()
+            engine.stop()
+        }
+    }
 }

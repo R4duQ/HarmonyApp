@@ -5,6 +5,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -295,7 +296,16 @@ class ConnectSession @Inject constructor(
     }
 
     override fun disconnect() {
-        if (isActive) end(error = null, tellComputer = true)
+        if (!isActive || handoffJob?.isActive == true) return
+        val exo = exo
+        val c = client
+        // Playing on the computer: it carries on here, from the same place, without the two ever
+        // playing at once (stage 7). Paused, or anything unusual: back here paused, as before.
+        if (exo != null && c != null && wantPlay && remoteState == RemoteState.PLAYING && exo.currentMediaItem?.mediaId == sentId) {
+            handOffToPhone(c, exo)
+            return
+        }
+        end(error = null, tellComputer = true)
     }
 
     override fun forget(computer: ConnectComputer) {
@@ -318,6 +328,19 @@ class ConnectSession @Inject constructor(
             _state.update { it.copy(error = "Start playing something first.") }
             return
         }
+        if (handoffJob?.isActive == true) return
+        // Playing here: the computer gets the song ready first and takes over at a set point
+        // (Universal Queue, stage 7), instead of the phone going silent while it loads.
+        if (client == null && exo.playWhenReady && exo.currentMediaItem != null) {
+            handOffToComputer(target, token)
+            return
+        }
+        startDirect(target, token)
+    }
+
+    /** The music moves as it always did: the phone falls silent and the computer starts from where it was. */
+    private fun startDirect(target: ConnectComputer, token: String) {
+        val exo = exo ?: return
         val previous = client
         val item = exo.currentMediaItem
         val position = if (previous != null) remotePosition() else exo.currentPosition.coerceAtLeast(0)
@@ -381,10 +404,10 @@ class ConnectSession @Inject constructor(
     }
 
     /** Back to the phone, paused where the computer was. */
-    private fun end(error: String?, tellComputer: Boolean) {
+    private fun end(error: String?, tellComputer: Boolean, seekBack: Boolean = true) {
         val old = client ?: return
         val position = remotePosition()
-        val same = exo?.currentMediaItem?.mediaId == sentId
+        val same = seekBack && exo?.currentMediaItem?.mediaId == sentId
         pollJob?.cancel()
         pollJob = null
         client = null
@@ -408,6 +431,279 @@ class ConnectSession @Inject constructor(
         _state.update { it.copy(active = null, busyWith = null, error = error) }
         player?.notifyRemoteChanged()
         player?.notifyPlayState()
+    }
+
+    // ---- Handoff (Universal Queue, stage 7) -----------------------------------------
+
+    private var handoffJob: Job? = null
+
+    /**
+     * Phone to computer, while playing: the computer loads the song paused a
+     * moment ahead; when the phone reaches that point it stops and the
+     * computer starts. If the computer can't, the phone plays on; if it stops
+     * answering after it was told to play, the phone stays silent and the
+     * session goes on as usual (it gives up after half a minute of silence).
+     */
+    private fun handOffToComputer(target: ConnectComputer, token: String) {
+        val exo = exo ?: return
+        val item = exo.currentMediaItem ?: return
+        _state.update { it.copy(busyWith = target.id, error = null, needsCode = null) }
+        val fresh = ConnectClient(target.host, target.port, token, session = java.util.UUID.randomUUID().toString())
+        val pc = ComputerSide(fresh, item.mediaId) { position ->
+            val upNext = upNextItems(exo)
+            val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
+            val duration = knownDuration(exo)
+            val shuffle = shuffleOn(exo)
+            val repeat = repeatOf(exo)
+            withContext(net) {
+                files.start()
+                fresh.play(playRequest(fresh, item, position, false, duration, upNext, canAdvance, followUp = false, shuffle, repeat))
+            }
+        }
+        val phone = PhoneSide(exo)
+        val handoff = com.harmony.core.remote.handoff.Handoff(phone, pc, SystemClock.elapsedRealtime(), leadMs = HANDOFF_LEAD_MS)
+        handoffJob = scope.launch {
+            pc.watch(this)
+            var result: com.harmony.core.remote.handoff.HandoffResult?
+            while (true) {
+                result = handoff.tick(SystemClock.elapsedRealtime())
+                if (result != null) break
+                delay(HANDOFF_TICK_MS)
+            }
+            pc.close()
+            when (result) {
+                is com.harmony.core.remote.handoff.HandoffResult.Moved,
+                is com.harmony.core.remote.handoff.HandoffResult.Unsure -> {
+                    val at = (result as? com.harmony.core.remote.handoff.HandoffResult.Moved)?.atMs
+                        ?: (result as com.harmony.core.remote.handoff.HandoffResult.Unsure).atMs
+                    Log.i(TAG, "handoff to ${target.name}: $result")
+                    becomeActive(fresh, target, item, at, playing = true, state = RemoteState.PLAYING)
+                }
+                is com.harmony.core.remote.handoff.HandoffResult.Stayed -> {
+                    Log.i(TAG, "handoff to ${target.name} stayed: ${result.why}")
+                    val reached = pc.reached
+                    scope.launch(net) { runCatching { fresh.disconnect() } }
+                    if (!reached || result.why != com.harmony.core.remote.handoff.HandoffResult.Why.NOT_READY &&
+                        result.why != com.harmony.core.remote.handoff.HandoffResult.Why.TARGET_FAILED
+                    ) {
+                        // Not reached (or the moment passed): the usual way, with its own messages.
+                        startDirect(target, token)
+                    } else {
+                        withContext(net) { files.stop() }
+                        _state.update { it.copy(busyWith = null, error = "${target.name} couldn't play this song. It carries on on this phone.") }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Computer to phone ("This phone"), while playing: the phone loads the
+     * song a moment ahead of the computer; at that point the computer is
+     * paused (and must say so), then the phone plays on. If the computer
+     * doesn't confirm the pause, the phone doesn't start (never two at once):
+     * it is back here paused, as before.
+     */
+    private fun handOffToPhone(c: ConnectClient, exo: Player) {
+        val pc = ComputerSource(c)
+        val phone = PhoneTarget(exo) {
+            // The computer is paused: the session ends here, then the phone plays.
+            end(error = null, tellComputer = true, seekBack = false)
+            exo.playWhenReady = true
+        }
+        val handoff = com.harmony.core.remote.handoff.Handoff(pc, phone, SystemClock.elapsedRealtime(), leadMs = HANDOFF_LEAD_MS)
+        handoffJob = scope.launch {
+            var result: com.harmony.core.remote.handoff.HandoffResult?
+            while (true) {
+                result = handoff.tick(SystemClock.elapsedRealtime())
+                if (result != null) break
+                delay(HANDOFF_TICK_MS)
+            }
+            Log.i(TAG, "handoff to the phone: $result")
+            if (result !is com.harmony.core.remote.handoff.HandoffResult.Moved && this@ConnectSession.isActive) {
+                val unreachable = (result as? com.harmony.core.remote.handoff.HandoffResult.Stayed)?.why ==
+                    com.harmony.core.remote.handoff.HandoffResult.Why.SOURCE_UNREACHABLE
+                end(
+                    error = if (unreachable) "${computer?.name ?: "The computer"} didn't answer, so it may still be playing. The music is paused on this phone." else null,
+                    tellComputer = true,
+                )
+            }
+        }
+    }
+
+    /** The phone's own player, as a handoff source (phone to computer). */
+    private inner class PhoneSide(private val exo: Player) : com.harmony.core.remote.handoff.HandoffPlayer {
+        override fun songId() = exo.currentMediaItem?.mediaId
+        override fun positionMs() = exo.currentPosition.coerceAtLeast(0)
+        override fun isPlaying() = exo.playWhenReady
+        override fun busy() = (exo as? com.harmony.playback.service.player.TwinPlayer)?.crossfadeNear(HANDOFF_LEAD_MS * 3) == true
+        override fun prepare(positionMs: Long) = Unit
+        override fun readiness() = if (exo.isPlaying) com.harmony.core.remote.handoff.Readiness.PLAYING else com.harmony.core.remote.handoff.Readiness.READY
+        override fun start() { exo.playWhenReady = true }
+        override fun stop() { exo.playWhenReady = false }
+        override fun stopped(): Boolean = !exo.playWhenReady
+    }
+
+    /** The phone's own player, as a handoff target (computer to phone); [begin] ends the session and plays. */
+    private inner class PhoneTarget(private val exo: Player, private val begin: () -> Unit) : com.harmony.core.remote.handoff.HandoffPlayer {
+        private var preparedAt = -1L
+        private var askedAt = 0L
+        private var started = false
+        override fun songId() = exo.currentMediaItem?.mediaId
+        override fun positionMs() = exo.currentPosition.coerceAtLeast(0)
+        override fun isPlaying() = exo.isPlaying
+        override fun busy() = false
+        override fun prepare(positionMs: Long) {
+            preparedAt = positionMs
+            askedAt = SystemClock.elapsedRealtime()
+            exo.playWhenReady = false
+            exo.seekTo(positionMs)
+            if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
+        }
+        override fun readiness(): com.harmony.core.remote.handoff.Readiness = when {
+            exo.playerError != null -> com.harmony.core.remote.handoff.Readiness.FAILED
+            started && exo.isPlaying -> com.harmony.core.remote.handoff.Readiness.PLAYING
+            started -> com.harmony.core.remote.handoff.Readiness.NOT_YET
+            // A moment for the seek to show in the player's state before "ready" means the new place.
+            SystemClock.elapsedRealtime() - askedAt > SEEK_SETTLE_MS && exo.playbackState == Player.STATE_READY &&
+                kotlin.math.abs(exo.currentPosition - preparedAt) < 500 -> com.harmony.core.remote.handoff.Readiness.READY
+            else -> com.harmony.core.remote.handoff.Readiness.NOT_YET
+        }
+        override fun start() {
+            started = true
+            begin()
+        }
+        override fun stop() {
+            if (!started) exo.playWhenReady = false
+        }
+        override fun stopped(): Boolean = !exo.playWhenReady
+    }
+
+    /**
+     * The computer, as a handoff target (phone to computer): [send] asks it to
+     * load the song paused at a position; its state is read every 100 ms.
+     */
+    private inner class ComputerSide(
+        private val c: ConnectClient,
+        private val mediaId: String,
+        private val send: suspend (Long) -> Unit,
+    ) : com.harmony.core.remote.handoff.HandoffPlayer {
+        @Volatile private var ready = com.harmony.core.remote.handoff.Readiness.NOT_YET
+        @Volatile private var askedFor = -1L
+        @Volatile private var loaded = false
+        @Volatile private var misses = 0
+        @Volatile private var position = 0L
+        private var job: Job? = null
+
+        /** Whether the computer answered at all (else the usual start handles the error). */
+        @Volatile var reached = false
+            private set
+
+        fun watch(scope: CoroutineScope) {
+            job = scope.launch {
+                while (true) {
+                    delay(HANDOFF_POLL_MS)
+                    if (!loaded) continue
+                    val r = withContext(net) { runCatching { c.status() } }
+                    r.onSuccess { s ->
+                        misses = 0
+                        position = s.positionMs
+                        if (s.trackId != mediaId) return@onSuccess
+                        ready = when (s.state) {
+                            RemoteState.PLAYING -> com.harmony.core.remote.handoff.Readiness.PLAYING
+                            RemoteState.ERROR -> com.harmony.core.remote.handoff.Readiness.FAILED
+                            RemoteState.PAUSED -> if (kotlin.math.abs(s.positionMs - askedFor) < 400) com.harmony.core.remote.handoff.Readiness.READY else ready
+                            else -> ready
+                        }
+                    }.onFailure { e ->
+                        ready = if (e is ConnectRefused || e is ConnectSessionEnded) com.harmony.core.remote.handoff.Readiness.FAILED
+                        else if (++misses >= 3) com.harmony.core.remote.handoff.Readiness.UNREACHABLE else ready
+                    }
+                }
+            }
+        }
+
+        fun close() { job?.cancel() }
+
+        override fun songId() = mediaId
+        override fun positionMs() = position
+        override fun isPlaying() = ready == com.harmony.core.remote.handoff.Readiness.PLAYING
+        override fun busy() = false
+        override fun prepare(positionMs: Long) {
+            askedFor = positionMs
+            ready = com.harmony.core.remote.handoff.Readiness.NOT_YET
+            loaded = false
+            scope.launch {
+                runCatching { send(positionMs) }
+                    .onSuccess { reached = true; loaded = true }
+                    .onFailure { e ->
+                        ready = if (e is ConnectRefused || e is ConnectSessionEnded) com.harmony.core.remote.handoff.Readiness.FAILED
+                        else com.harmony.core.remote.handoff.Readiness.UNREACHABLE
+                    }
+            }
+        }
+        override fun readiness() = ready
+        override fun start() {
+            scope.launch(net) { runCatching { c.control(ControlRequest(ControlAction.PLAY)) } }
+        }
+        override fun stop() {
+            scope.launch(net) { runCatching { c.control(ControlRequest(ControlAction.PAUSE)) } }
+        }
+        override fun stopped(): Boolean? = ready != com.harmony.core.remote.handoff.Readiness.PLAYING
+    }
+
+    /** The computer, as a handoff source (computer to phone): its pause must be confirmed. */
+    private inner class ComputerSource(private val c: ConnectClient) : com.harmony.core.remote.handoff.HandoffPlayer {
+        @Volatile private var stopState: Boolean? = false
+        override fun songId() = sentId
+        override fun positionMs() = remotePosition()
+        override fun isPlaying() = wantPlay && remoteState == RemoteState.PLAYING
+        override fun busy() = false
+        override fun prepare(positionMs: Long) = Unit
+        override fun readiness() = if (isPlaying()) com.harmony.core.remote.handoff.Readiness.PLAYING else com.harmony.core.remote.handoff.Readiness.READY
+        override fun start() {
+            // Handing back after the phone failed: the computer plays on.
+            scope.launch(net) { runCatching { c.control(ControlRequest(ControlAction.PLAY)) } }
+        }
+        override fun stop() {
+            stopState = false
+            scope.launch {
+                val r = withContext(net) { runCatching { c.control(ControlRequest(ControlAction.PAUSE)) } }
+                stopState = r.fold(
+                    onSuccess = { s -> s == null || s.state != RemoteState.PLAYING },
+                    // A session the computer already ended isn't playing there.
+                    onFailure = { e -> if (e is ConnectSessionEnded) true else null },
+                )
+            }
+        }
+        override fun stopped(): Boolean? = stopState
+    }
+
+    /** The session is the computer's from here: what the start of a session always sets. */
+    private fun becomeActive(fresh: ConnectClient, target: ConnectComputer, item: MediaItem, positionMs: Long, playing: Boolean, state: RemoteState) {
+        val exo = exo ?: return
+        val upNext = upNextItems(exo)
+        val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
+        val wasActive = isActive
+        client = fresh
+        _queueClient.value = fresh
+        computer = target
+        sentId = item.mediaId
+        advanceId = upNext.firstOrNull()?.mediaId?.takeIf { canAdvance }
+        following = false
+        endHandledFor = null
+        remoteState = state
+        wantPlay = playing
+        failures = 0
+        failingSince = 0L
+        anchor(positionMs)
+        trustLocalUntil = SystemClock.elapsedRealtime() + TRUST_LOCAL_MS
+        exo.playWhenReady = false
+        _state.update { it.copy(active = target, busyWith = null) }
+        holdLocks()
+        if (!wasActive) player?.notifyRemoteChanged()
+        player?.notifyPlayState()
+        startPolling()
     }
 
     // ---- What the computer is told -------------------------------------------------
@@ -962,6 +1258,12 @@ class ConnectSession @Inject constructor(
         /** How many of "up next" the computer may fetch ahead of time (the next song and two more). */
         const val FETCHED_AHEAD = 3
         const val REFRESH_DELAY_MS = 400L
+        /** Stage 7: how far ahead the taking-over player gets the song ready, and how often the handoff looks. */
+        const val HANDOFF_LEAD_MS = 1_500L
+        const val HANDOFF_TICK_MS = 20L
+        const val HANDOFF_POLL_MS = 100L
+        const val SEEK_SETTLE_MS = 150L
+        const val TAG = "HarmonyConnect"
         const val VOLUME_STEPS = 25
         const val MAX_COVER_BYTES = 2_000_000
         const val LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
