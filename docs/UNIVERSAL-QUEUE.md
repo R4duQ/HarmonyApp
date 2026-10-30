@@ -1,0 +1,259 @@
+# Universal Queue: arhitectură și plan
+
+Telefonul și PC-ul folosesc aceeași coadă. Poți combina cozile și muta redarea între dispozitive, păstrând piesa curentă, poziția, ordinea, Shuffle și Repeat. Un singur dispozitiv redă la un moment dat.
+
+Prima versiune funcționează în aceeași rețea locală, iar PC-ul coordonează coada cât timp dispozitivele sunt conectate.
+
+Pentru fiecare afirmație de mai jos am notat ce fel de bază are:
+- **[Dovadă]**: confirmat de cod, de teste sau de documentație oficială;
+- **[Recomandare]**: alegerea mea, cu motivul ei;
+- **[Ipoteză]**: plauzibil, dar trebuie verificat pe dispozitive reale.
+
+---
+
+## 1. Ce există azi (Harmony Connect)
+
+| Piesă | Unde | Ce face | Pentru Universal Queue |
+|---|---|---|---|
+| Protocol | `core/remote/ConnectProtocol.kt` | HTTP + JSON: `/play`, `/control`, `/status`, `/disconnect`; PC găsit prin descoperire UDP; asociere cu cod din 4 cifre și token | **Reutilizăm**: descoperirea, asocierea, token-ul și sesiunea. Adăugăm rute noi pentru coadă |
+| Sesiuni | `core/remote/PhoneSessions.kt` | id de sesiune, 409 pentru sesiuni vechi, „Reconnecting” după 6 s, „lost” după 35 s | **Reutilizăm**: detectarea pierderii și respingerea sesiunilor vechi au trecut deja prin testele de rezistență |
+| Server HTTP | `core/remote/MiniHttp.kt` | un fir pe conexiune, fiecare răspuns închide conexiunea; `Range` pentru fișiere | **Reutilizăm**. Comenzile și audio merg deja pe conexiuni diferite (servere diferite) |
+| Telefonul | `playback/service/connect/ConnectSession.kt` | deține coada (Media3), trimite piesa curentă + 10 următoare, citește `/status` la 0,5 s | **Se schimbă**: telefonul nu mai e singurul stăpân al cozii |
+| Fișierele telefonului | `PhoneFileServer.kt` | servește melodia cu `Range`, protejată de un secret pe sesiune | **Reutilizăm**; adăugăm ETag pentru reluarea transferurilor |
+| PC-ul | `desktop/player/PlayerController.kt` | redă melodia telefonului sau biblioteca proprie; are coada lui separată | **Se schimbă**: o singură coadă |
+| Cache PC | `desktop/connect/RemoteCache.kt` | doar piesa curentă + următoarea, într-un folder temporar golit la pornire, fără reluare | **Se rescrie**: cache persistent, cu limită, chei de conținut și reluare |
+| Motor PC | `desktop/engine/AudioEngine.kt` | ffmpeg → EQ → placa de sunet; pregătește următoarea piesă (gapless) | **Reutilizăm**. Nu are crossfade, care e o etapă separată |
+| Crossfade telefon | `playback/service/player/TwinPlayer.kt` | două ExoPlayer-e; anulează fade-ul dacă „următoarea” s-a schimbat | **Reutilizăm**: are deja regula „pregătit sau deloc” |
+| Coada telefonului | `SmartQueueManager`, `QueueMoves` | Smart Shuffle reordonează fizic; secțiunea „Next up” e o lungime după piesa curentă | **Se schimbă** în etapa 5: proveniența devine o proprietate a fiecărei intrări |
+| iOS | `ios/` | n-are deloc Harmony Connect | În afara primei versiuni |
+
+---
+
+## 2. Opinia mea tehnică
+
+**Ce e bine** [Recomandare]:
+- **Un singur dispozitiv activ**, care decodează, egalizează și face crossfade local. Asta evită sincronizarea audio între dispozitive, care e cea mai grea problemă în audio distribuit. Așa funcționează și Spotify Connect: un „cluster” cu un singur dispozitiv activ și transfer explicit [Dovadă: librespot].
+- **Coordonator unic cât timp sunteți conectați.** Ordonarea operațiilor e simplă, iar conflictele se rezolvă într-un singur loc.
+- **Fișierul original, nu un stream re-encodat.** Păstrează calitatea, iar redarea nu mai depinde de rețea după ce fișierul a ajuns.
+- **„Crossfade doar dacă următoarea e pregătită”** e regula corectă; TwinPlayer o aplică deja.
+
+**Ce e fragil sau prea complicat:**
+1. **Dacă PC-ul decide și „Next” pentru telefonul care redă.** Atunci fiecare trecere la piesa următoare depinde de rețea, iar o pierdere de Wi-Fi la final de piesă devine liniște.
+   - **Schimbarea mea:** separ două autorități.
+     - Coordonatorul (PC) este autoritatea pentru **structura cozii**: inserări, mutări, ștergeri, shuffle.
+     - Dispozitivul activ este autoritatea pentru **capul de redare**: ce piesă cântă, poziția, play/pause. Are mereu o copie locală a cozii și trece singur la următoarea, apoi anunță coordonatorul.
+2. **Indicii ca adrese.** „Mută 5 la 2” nu mai înseamnă același lucru dacă celălalt dispozitiv a schimbat coada între timp. Bug-ul de reordonare reparat recent venea tot de aici.
+   - **Schimbarea mea:** fiecare operație folosește id-ul intrării („mută intrarea X după intrarea Y”). O editare făcută offline își păstrează astfel sensul.
+3. **Shuffle ca rearanjare fizică a întregii cozi**, cum face azi Smart Shuffle. Nu se împacă bine cu „manualul nu se mișcă”.
+   - **Schimbarea mea:** shuffle permută doar intrările libere (listă sau recomandări nemutate), în pozițiile pe care le ocupau deja. Intrările protejate, piesa curentă și istoricul nu se mișcă.
+4. **Polling la 0,5 s.** Înseamnă 2 conexiuni TCP noi pe secundă pe telefon, adică trezirea radioului și consum de baterie. În plus, comenzile și starea partajează aceeași buclă.
+   - **Recomandare:** long-poll pentru evenimente (răspuns imediat la schimbare, altfel heartbeat la ~5 s) și comenzi trimise direct. Schimbarea atinge detectarea deconectării, deci o fac doar cu testul de rezistență existent ca plasă de siguranță.
+5. **„Următoarea + încă 1–2” complete pe telefon.** Un album FLAC 24/192 înseamnă 100–200 MB pe piesă.
+   - Pe telefon pregătesc „următoarea” complet. „Încă 1–2” doar pe Wi-Fi, cu baterie peste prag sau la încărcat, și cu spațiu liber.
+
+**Alternative comparate:**
+
+| Variantă | Pentru | Contra | Verdict |
+|---|---|---|---|
+| **A. Coordonator (PC) + jurnal de operații cu revizii** (ales) | simplu de testat, un singur arbitru, comenzile retrimise se recunosc după id, recuperarea e simplă (jurnal sau snapshot) | când PC-ul lipsește, nimeni nu arbitrează; dispozitivul activ continuă cu copia lui, iar editările făcute între timp așteaptă (vezi §3.5) | **Prima versiune** |
+| B. CRDT de listă (Automerge/Yjs) pe ambele dispozitive | editare offline completă, fără arbitru | „move” într-o listă CRDT e o problemă încă de cercetare: mutările concurente pot produce duplicate sau cicluri; în plus, o dependență mare [Dovadă: Kleppmann 2020, Da & Kleppmann 2024] | Prea complex acum. Modelul pe id-uri lasă loc pentru trecerea la CRDT mai târziu |
+| C. Telefonul rămâne singurul stăpân, PC-ul doar redă (azi) | deja stabil | nu există coadă comună; redarea nu poate rămâne pe PC fără telefon | Ce vrei să depășim |
+| D. Coordonare prin cloud | merge și în afara casei | cont, server, latență, confidențialitate | Mai târziu, eventual |
+
+---
+
+## 3. Arhitectura recomandată
+
+### 3.1 Modelul cozii [implementat: `core/remote/queue/UniversalQueue.kt`]
+
+- **Intrare (`QueueEntry`)**:
+  - `id` propriu (UUID), unic pentru fiecare apariție;
+  - `origin`: `LIST`, `MANUAL` sau `AUTO`;
+  - `pinned`: mutată explicit de utilizator;
+  - `priority`: face parte din secțiunea „Play next”.
+- **Media (`MediaRef`)**:
+  - `contentKey` pentru cache: două intrări cu aceeași melodie folosesc o singură copie;
+  - `home` (dispozitivul cu originalul) și `localId`.
+- **Separarea cerută între intrare și fișier:** intrarea e un loc în coadă, `contentKey` e un fișier audio.
+- **Regulile (testate):**
+  - `MANUAL` și `pinned` sunt protejate: shuffle nu le mută, doar `Remove` le scoate;
+  - Play next merge după piesa curentă și după „Play next”-urile anterioare;
+  - Add merge după selecția manuală și înaintea recomandărilor; recomandările merg la final;
+  - o recomandare mutată devine protejată;
+  - shuffle nu atinge piesa curentă, istoricul sau intrările protejate; când îl oprești, intrările libere revin la ordinea dinainte;
+  - pornirea unui album nou păstrează intrările protejate, imediat după piesa nouă. Așa face și Spotify cu „Next in queue”. **Întrebare pentru tine, §7.**
+
+### 3.2 Sincronizarea [implementat: `QueueSync.kt`]
+
+- **Comandă = id unic + operație pe id-uri de intrare + epoca de redare cunoscută.**
+  - Comanda se retrimite cu același id până primește răspuns.
+  - Coordonatorul ține minte ultimele 2048 de rezultate: o retrimitere primește același răspuns și nu se execută a doua oară.
+  - E idempotența „la cel mult o dată” prin cheie de cerere.
+- **Revizii.** Fiecare operație aplicată primește următorul număr. Un dispozitiv cere „ce s-a schimbat de la revizia N” și primește:
+  - fie operațiile lipsă, dintr-un jurnal limitat (256);
+  - fie, dacă a rămas prea în urmă, toată coada (snapshot).
+  - O „gaură” în operații e detectată și nimic nu se aplică în ordine greșită.
+- **Shuffle-ul îl decide coordonatorul.** Ordinea e trimisă explicit, nu sămânța aleatoare, ca versiuni diferite ale aplicației să nu ajungă la ordini diferite.
+- **Afișare optimistă.** Dispozitivul arată imediat editarea lui peste ultima stare confirmată. Când vine răspunsul, se aliniază.
+- **Conflicte (deterministe):**
+  - mută × mută: câștigă cea care ajunge ultima la coordonator;
+  - mută × șterge: ștergerea câștigă, mutarea e refuzată, iar afișarea se corectează singură;
+  - inserările concurente se păstrează amândouă;
+  - „Clear” șterge doar intrările pe care utilizatorul le vedea, deci melodiile adăugate concurent de pe celălalt dispozitiv rămân.
+- **Epoca de redare (fencing).** Fiecare transfer de redare o crește. Comenzile de redare (`SetCurrent`, `SetOwner`) cu o epocă veche sunt refuzate. Așa „Next”-ul întârziat al dispozitivului care a pierdut redarea nu mai mută capul de redare, iar două transferuri simultane nu pot câștiga amândouă [Dovadă: principiul „fencing token”, Kleppmann 2016].
+
+### 3.3 Canalul de comenzi și canalul audio
+
+- Comenzile și audio folosesc deja servere/conexiuni diferite [Dovadă: cod]. Deci un transfer mare nu blochează la nivel de aplicație un Pause sau un Skip.
+- Rămâne concurența pe Wi-Fi. Pe o legătură aglomerată, pachetele mici întârzie din cauza bufferelor [Ipoteză, de măsurat].
+  - **Măsură:** transferurile de pre-încărcare au limită de viteză și se opresc cât timp are loc un handoff. Transferul piesei curente nu e limitat.
+- **Reconectare:** backoff exponențial cu jitter. Telefonul are deja backoff până la 2 s. Jitter-ul evită ca reconectările să se sincronizeze [Dovadă: AWS, Brooker].
+
+### 3.4 Handoff (schimbarea dispozitivului)
+
+```
+sursa (redă)                coordonator                     destinația
+     |   PREPARE(intrare, poziție, epoca e) ----------------> |  fișier/stream gata, decodor deschis,
+     |                                                        |  buffer umplut la poziție
+     |   <-------------------------------- READY(buffer ms)   |
+     |   COMMIT: SetOwner(dest) cu epoca e  ->  epoca e+1     |
+     |   pauză la poziția P  ---- P ------------------------> |  pornește de la P
+     |                                       <---- STARTED    |
+```
+
+- **Eșec înainte de COMMIT** (timeout, fișier lipsă, decodor nepregătit): nu se schimbă nimic, sursa cântă mai departe.
+- **Eșec după COMMIT, dar înainte de STARTED** (în ~5 s):
+  - coordonatorul trece redarea înapoi pe sursă (`SetOwner(sursa)`, epoca e+2);
+  - sursa are piesa încărcată, pe pauză la P, și reia de acolo.
+- **Ambiguitate:** sursa nu poate întreba coordonatorul dacă destinația a pornit (rețeaua a căzut exact atunci).
+  - **Regula:** sursa rămâne pe pauză și arată „Redarea s-a mutat pe PC? — Continuă aici”.
+  - **Nu repornește automat:** prefer liniștea în locul redării simultane pe două dispozitive [Recomandare].
+- **Discontinuitate:** gol scurt, de ~100–300 ms [Ipoteză, de măsurat], nu suprapunere. Suprapunerea ar cere ceasuri sincronizate între dispozitive.
+- **Crossfade în curs:**
+  - commit-ul așteaptă terminarea fade-ului, maximum lungimea fade-ului;
+  - PREPARE poate rula în paralel;
+  - pe destinație, crossfade-ul următor se face doar dacă și piesa de după are decodorul și bufferul gata. Altfel piesa curentă se termină normal.
+
+### 3.5 La deconectare
+
+- **Dispozitivul activ continuă** cu ce are local: piesa curentă (completă în cache sau în bibliotecă) și următoarele pregătite. Trece singur de la o piesă la alta, din copia lui a cozii.
+  - Piesele încă nedescărcate de pe celălalt dispozitiv sunt sărite (cu notificare). Asta nu le scoate din coadă.
+- **Editările făcute între timp** așteaptă în outbox. La reconectare se trimit cu id-urile lor. Fiind adresate prin id-uri de intrare, își păstrează sensul (testat).
+- **Reconectarea:**
+  - nu repornește muzica, nu suprascrie coada (revizii + jurnal) și nu pornește al doilea player;
+  - doar proprietarul cu epoca curentă poate reda.
+- **Limită reală:** dacă PC-ul dispare definitiv, iar telefonul a continuat (și invers), cele două copii pot diverge.
+  - Telefonul devine coordonator local pentru propria copie.
+  - La reconectare, dispozitivul care a redat ultimul dictează capul de redare. Editările de structură se reaplică (sunt idempotente și pe id-uri), iar intrările protejate nu se pierd.
+  - Ce nu se poate garanta: ordinea relativă a două editări concurente pe aceeași intrare, făcute pe dispozitive deconectate (rămâne „ultima ajunsă câștigă”).
+
+### 3.6 Cache
+
+Diferențe față de `RemoteCache` actual:
+- **Locație:**
+  - pe PC, în folderul aplicației (nu în temp golit la fiecare pornire);
+  - pe telefon, în `cacheDir`, în afara bibliotecii și a MediaStore. Deci fără import și fără reindexare 24D.
+- **Cheie:** `contentKey`. Intrările repetate folosesc aceeași copie.
+- **Limită:** cel mai mic dintre 2 GB pe PC / 1 GB pe telefon (propunere, §7) și 10% din spațiul liber. Ștergerea e LRU și protejează piesa curentă și următoarea pregătită.
+- **Reluarea transferurilor:** `Range: bytes=N-` cu `If-Range: <ETag>`. Dacă fișierul s-a schimbat, serverul trimite 200 cu tot fișierul, deci nu se lipesc bucăți din fișiere diferite [Dovadă: RFC 9110 prin MDN]. Scrierea se face într-un fișier `.part`, redenumit doar când e complet.
+- **Integritate:**
+  - mărimea se verifică întotdeauna;
+  - o eroare de decodare din cache duce la ștergere și o singură redescărcare; dacă se repetă, piesa se redă direct prin stream.
+- **Prioritate:** curentă > următoarea > +1 > +2.
+  - Se recalculează la fiecare revizie (Skip, Play next, reordonare).
+  - Transferurile ieșite din fereastră se anulează, cu excepția celor aproape gata.
+- **Spațiu insuficient:** fără pre-încărcare; piesa curentă se redă direct prin stream (Range), iar utilizatorul vede un mesaj.
+- **Formate pe telefon:** ExoPlayer citește FLAC, WAV, MP3, AAC, Opus, Vorbis; ALAC doar cu extensia FFmpeg [Dovadă: Media3 supported formats]. Pentru APE, WavPack, WMA, DSD din biblioteca PC-ului:
+  - PC-ul le convertește cu ffmpeg în FLAC (fără pierderi suplimentare), cu `contentKey` derivat;
+  - sau sunt redate doar pe PC.
+  - „Originalul” nu e posibil literal aici, doar calitatea lui.
+
+### 3.7 Fundal și baterie (Android)
+
+- Redarea pe telefon rulează într-un `MediaSessionService` cu `foregroundServiceType="mediaPlayback"`. Aplicația îl declară deja [Dovadă: manifest, documentație Android].
+- **Limită reală:**
+  - Android 12+ nu permite pornirea unui serviciu foreground din fundal, cu excepții [Dovadă: documentație Android].
+  - Deci un PC nu poate „împinge” redarea pe un telefon cu aplicația închisă sau în fundal fără sesiune activă.
+  - Handoff-ul spre telefon e sigur când telefonul e deja în sesiune: serviciul e în foreground ca telecomandă. Altfel se pornește de pe telefon, printr-o atingere.
+  - Android 17 restrânge și mai mult redarea audio din fundal fără serviciu foreground pornit cât aplicația era vizibilă [Dovadă: documentația Android 17].
+- **Wi-Fi în fundal:**
+  - `WIFI_MODE_FULL_LOW_LATENCY` funcționează doar cu ecranul aprins și aplicația vizibilă;
+  - Doze restrânge rețeaua aplicațiilor fără serviciu foreground [Dovadă: documentație Android].
+  - Deci pre-încărcările mari se fac cât timp serviciul e în foreground (redare/sesiune) și sunt limitate la „următoarea” când bateria e scăzută.
+- **iOS:** nu are Connect; e în afara primei versiuni.
+
+---
+
+## 4. Plan etapizat cu criterii de acceptare
+
+| # | Etapa | Criterii de acceptare | Stare |
+|---|---|---|---|
+| 0 | Reordonare corectă pe Android (PR #58) | mutări pe id, nu indici vechi; 12 teste de drag reale | ✅ publicat (v1.0, versionCode 148) |
+| 1 | **Modelul cozii comune** (Kotlin pur, partajat Android + Windows) | regulile din §3.1 verificate de teste fixe și de ~10.000 de editări aleatoare | ✅ implementat, testat local |
+| 2 | **Sincronizare** (coordonator + replici) | rețea cu 25% pierderi, 15% duplicate, întârzieri și reordonare, două căderi de rețea, 3 dispozitive care editează simultan: după vindecare toate arată exact coada coordonatorului; nicio comandă aplicată de două ori; nicio intrare manuală pierdută fără Remove; comenzi de redare cu epocă veche refuzate | ✅ implementat, testat local (50 de scenarii) |
+| 3 | Protocol v2 pe rețea (PC = coordonator, în spatele unei opțiuni) | rute `/uq/command`, `/uq/since` (long-poll); compatibil cu telefoanele vechi (v1); testul de rezistență existent (`ConnectSoakTest`) extins cu editări: zero alarme false pe rețea curată, recuperare după căderi de 3–25 s | următoarea etapă |
+| 4 | Cache v2 pe PC | reluare după întrerupere (testat cu proxy-ul de erori), fișier corupt → redescărcare, disc plin → stream, nicio copie dublă pentru intrări repetate, memorie constantă (buffer 256 KB) | |
+| 5 | Telefonul folosește coada comună | Smart Shuffle lucrează pe proveniență; regula 6 (manual protejat) testată în `SmartQueueManagerQueueTest`; un `mediaId` per intrare | necesită testare pe telefon |
+| 6 | PC → telefon: server de fișiere pe PC + cache pe telefon | piese din biblioteca PC-ului redate pe telefon din cache; fără import în bibliotecă și fără 24D | |
+| 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | |
+| 8 | Crossfade pe PC | motorul PC face crossfade doar cu următoarea decodată în buffer; altfel trecere normală | |
+| 9 | Testare pe dispozitive reale | matricea din §5 | |
+
+---
+
+## 5. Ce testăm și cum
+
+| Scenariu | Automat (unde) | Pe dispozitive |
+|---|---|---|
+| Rețea lentă / întreruperi în redare | simulare (etapa 2); `ConnectSoakTest` cu proxy de latență, pierderi, refuz (etapa 3) | Wi-Fi slab, router oprit 10 s / 60 s |
+| Reconectare + comenzi retransmise | `QueueSyncTest`, simulare (cu test de mutație: fără deduplicare pică) | retrimitere forțată |
+| Editări simultane | `QueueSyncTest` (mută × mută, mută × șterge, offline × online) | două ecrane, aceeași secundă |
+| Shuffle peste coadă manuală | `QueueRulesTest`, `QueuePropertyTest` | ✓ |
+| Schimbarea dispozitivului în timpul unui crossfade | etapa 7 (motor simulat) | ✓ |
+| Aplicația în fundal | — (nu se poate automat) | ecran stins, Doze (`adb shell dumpsys deviceidle force-idle`) |
+| Cache incomplet, corupt, disc plin | etapa 4 | ✓ |
+
+Ce măsurăm (etapele 3–9): goluri audio (număr și durată), timpul de handoff, cât de des „următoarea” e gata la timp, memoria (heap PC, RSS telefon), trezirile radioului și bateria (Battery Historian), octeții transferați față de octeții redați.
+
+---
+
+## 6. Ce e verificat acum și ce nu
+
+- **Verificat automat:**
+  - regulile cozii;
+  - sincronizarea pe o rețea simulată cu pierderi;
+  - formatul JSON (inclusiv refuzul operațiilor necunoscute, ca un dispozitiv nou să poată vorbi cu unul vechi).
+- **Pe dispozitive reale:** nimic încă. Etapele 1–2 nu ating playerul și nici rețeaua reală.
+- **Neconfirmat:** golul la handoff, efectul transferurilor asupra latenței comenzilor pe Wi-Fi real, comportamentul în Doze.
+
+## 7. Întrebări pentru tine
+
+1. **Pornirea unui album nou** păstrează melodiile puse manual (Play next / Add), cum face Spotify, sau golește tot?
+2. **La prima conectare**, cele două cozi:
+   - se **combină** (a telefonului după cea a PC-ului);
+   - sau câștigă **cea care redă**;
+   - sau te întreabă de fiecare dată?
+3. **Limitele cache-ului:** propun 2 GB pe PC și 1 GB pe telefon. Le vrei setabile?
+4. **Piese în formate pe care telefonul nu le citește** (APE, WavPack, WMA, DSD): convertire în FLAC pe PC (calitate păstrată), sau rămân doar pentru PC?
+
+## Surse
+
+- Android:
+  - [Foreground service types](https://developer.android.com/develop/background-work/services/fgs/service-types);
+  - [Android 15 behavior changes](https://developer.android.com/about/versions/15/behavior-changes-15);
+  - [Background playback with MediaSessionService](https://developer.android.com/media/media3/session/background-playback);
+  - [Background audio hardening (Android 17)](https://developer.android.com/about/versions/17/changes/bg-audio);
+  - [WifiManager](https://developer.android.com/reference/android/net/wifi/WifiManager.html);
+  - [Power management limits (Doze)](https://developer.android.com/topic/performance/power/power-details);
+  - [Media3 supported formats](https://developer.android.com/media/media3/exoplayer/supported-formats).
+- Spotify Connect (open-source, inginerie inversă):
+  - [librespot connect.proto](https://docs.rs/crate/librespot-protocol/latest/source/proto/connect.proto);
+  - [librespot issue #1459 (poziția pierdută la transfer)](https://github.com/librespot-org/librespot/issues/1459).
+- HTTP:
+  - [If-Range (MDN)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/If-Range);
+  - [HTTP range requests](https://http.dev/range-request).
+- Reîncercări: [Exponential Backoff And Jitter (AWS)](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/).
+- Liste și mutări concurente:
+  - [Moving Elements in List CRDTs (Kleppmann, 2020)](https://martin.kleppmann.com/2020/04/27/papoc-list-move.html);
+  - [Extending JSON CRDTs with Move Operations (2024)](https://martin.kleppmann.com/2024/04/22/json-crdt-move.html).
+- Fencing tokens: [How to do distributed locking (Kleppmann, 2016)](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html).
