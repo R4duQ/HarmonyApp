@@ -85,6 +85,9 @@ class AudioEngine(
     @Volatile var volume: Float = 1f
         set(value) { field = value.coerceIn(0f, 1f) }
 
+    /** Notable moments for the log (a crossfade made or skipped). */
+    @Volatile var log: (String) -> Unit = {}
+
     /** How long songs fade into each other, ms (0: none, they follow on without a gap). */
     @Volatile var crossfadeMs: Long = 0
         set(value) { field = value.coerceIn(0, MAX_CROSSFADE_MS) }
@@ -455,6 +458,7 @@ class AudioEngine(
                         val (up, next) = ready
                         val left = (duration - decodedMs).coerceIn(1, fadeMs)
                         fade = Fade(next, left * sampleRate / 1000)
+                        log("crossfade: $left ms into the next song")
                         synchronized(lock) {
                             if (gen != generation) {
                                 closeLater(next)
@@ -514,8 +518,11 @@ class AudioEngine(
         val want = upcoming() ?: return null
         synchronized(lock) {
             if (gen != generation) return null
-            val p = preload ?: return null
-            if (p.upcoming.source != want.source || p.ready.count > 0 || p.failed || !p.headFull) return null
+            val p = preload
+            if (p == null || p.upcoming.source != want.source || p.ready.count > 0 || p.failed || !p.headFull) {
+                log("crossfade: the next song isn't decoded yet, it follows on without a gap instead")
+                return null
+            }
             // A song shorter than twice the fade is better left to follow on.
             if (want.durationMs in 1 until fadeMs * 2) return null
             val stream = p.stream ?: return null

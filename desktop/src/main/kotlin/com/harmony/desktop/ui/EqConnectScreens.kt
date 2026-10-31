@@ -328,7 +328,12 @@ fun ConnectPage(app: DesktopApp) {
     // The code changes once a phone uses it; the host refreshes this state when that happens.
     LaunchedEffect(Unit) { app.connect.refresh() }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        PageHeader("Connect", "Play the music on your phone through this computer")
+        PageHeader("Connect", "Play the music on your phone through this computer") {
+            // For testing and reports: what Connect, the shared queue and transfers did, with timings.
+            ActionButton("Open log folder", Icons.Rounded.Folder, {
+                runCatching { java.awt.Desktop.getDesktop().open(com.harmony.desktop.AppDirs.logs) }
+            })
+        }
         Row(Modifier.padding(horizontal = 32.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             Card(Modifier.weight(1f)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {

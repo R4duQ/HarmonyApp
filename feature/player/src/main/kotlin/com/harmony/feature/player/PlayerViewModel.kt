@@ -66,7 +66,18 @@ class PlayerViewModel @Inject constructor(
         playHere = connect::disconnect,
         forget = connect::forget,
         dismissError = connect::dismissError,
+        saveDiagnostics = {
+            viewModelScope.launch {
+                val where = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { connect.exportDiagnostics() }
+                _diagnosticsSaved.value = where ?: "nowhere (it couldn't be saved)"
+            }
+        },
     )
+
+    private val _diagnosticsSaved = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** Where the Connect log was last saved, for the Play on sheet. */
+    val diagnosticsSaved: StateFlow<String?> = _diagnosticsSaved
 
     /** Remembers what kind of device [name] is; null returns to the automatic guess. */
     fun setOutputForm(name: String, form: com.harmony.core.model.OutputForm?) {

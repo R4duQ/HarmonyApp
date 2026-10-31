@@ -79,9 +79,18 @@ class TransferWorker @AssistedInject constructor(
             bytesPerSecond = ::pace,
             cancelled = { isStopped },
             onProgress = { showProgress(pc.name, it) },
-            log = { Log.i(TAG, it) },
+            log = { note(applicationContext, it) },
         )
+        val began = System.currentTimeMillis()
+        note(applicationContext, "transfer ${offerId.take(8)}: run $runAttemptCount started")
         val result = withContext(Dispatchers.IO) { runner.run(offerId) }
+        val counts = result.statuses.values.groupingBy { s -> s.state.name.lowercase() + (s.reason?.let { "/" + it.name.lowercase() } ?: "") }.eachCount()
+        val mb = result.statuses.values.sumOf { it.bytes } / 1_048_576.0
+        note(
+            applicationContext,
+            "transfer ${offerId.take(8)}: ${result.outcome.name.lowercase()} after ${(System.currentTimeMillis() - began) / 1000} s · " +
+                "${"%.1f".format(java.util.Locale.US, mb)} MB on the phone · $counts",
+        )
         return when (result.outcome) {
             RunOutcome.FINISHED -> {
                 finished(offerId, pc.name, result.statuses.values.toList())
@@ -195,6 +204,27 @@ class TransferWorker @AssistedInject constructor(
         private const val RESULT_ID_BASE = 80_000
         private const val MAX_RUNS = 10
         private const val STAGING_MAX_AGE_MS = 7L * 24 * 3600 * 1000
+
+        /**
+         * Logs a transfer step to logcat and to files/transfer-log.txt (kept
+         * under 256 KB), which "Save diagnostics" on the Play on sheet includes.
+         * Ids, sizes and timings only: never tokens or addresses with them.
+         */
+        fun note(context: Context, message: String) {
+            Log.i(TAG, message)
+            runCatching {
+                val dir = context.getExternalFilesDir(null) ?: context.filesDir
+                val file = File(dir, "transfer-log.txt")
+                synchronized(LOG_LOCK) {
+                    if (file.length() > LOG_MAX_BYTES) file.writeText(file.readText().takeLast((LOG_MAX_BYTES / 2).toInt()))
+                    val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+                    file.appendText("$stamp $message\n")
+                }
+            }
+        }
+
+        private val LOG_LOCK = Any()
+        private const val LOG_MAX_BYTES = 256 * 1024L
 
         fun workName(offerId: String) = "harmony-transfer-$offerId"
 

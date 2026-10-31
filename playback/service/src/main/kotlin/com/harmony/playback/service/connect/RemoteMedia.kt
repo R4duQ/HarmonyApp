@@ -1,7 +1,6 @@
 package com.harmony.playback.service.connect
 
 import android.content.Context
-import android.util.Log
 import com.harmony.core.remote.cache.CacheLimits
 import com.harmony.core.remote.cache.CacheWant
 import com.harmony.core.remote.cache.MediaCache
@@ -38,7 +37,7 @@ class RemoteMedia @Inject constructor(
         MediaCache(
             File(context.cacheDir, "connect-media").apply { mkdirs() },
             limits = { CacheLimits(maxBytes = LIMIT_BYTES) },
-            log = { Log.i(TAG, it) },
+            log = { ConnectDiagnostics.log(it) },
         )
     }
 

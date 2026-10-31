@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **151**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 150), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **152**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 151), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -210,6 +210,11 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   place (paused, it comes back paused, as before). If the other side can't take over,
   the music simply carries on where it was; if it stops answering midway, Harmony stays
   silent rather than risk both playing at once.
+- **Diagnostics for testing Connect.** On the phone, **Play on** → **Save diagnostics**
+  saves a log of Connect, the shared queue, handoffs (with how long the music was silent)
+  and transfers to Download/Harmony, to send from the Files app. In Harmony for Windows,
+  **Connect** → **Open log folder** opens the computer's log. Both hold ids and timings
+  only: no song titles, file names or pairing codes.
 - **Send to phone: songs from your PC, kept for good.** In Harmony for Windows, choose
   **Send to phone** on a song, on songs you pick, or on an album, then the paired phone.
   With Harmony open on the phone, it asks once (or never again, if you choose to always

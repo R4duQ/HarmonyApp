@@ -8,6 +8,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.harmony.desktop.ui.HarmonyDesktopApp
 
 fun main() {
+    AppDirs.startFileLog()
     val app = DesktopApp.create()
     application {
         Window(

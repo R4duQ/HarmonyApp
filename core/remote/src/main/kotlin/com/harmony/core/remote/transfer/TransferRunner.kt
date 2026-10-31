@@ -175,7 +175,7 @@ class TransferRunner(
             if (part.length() != item.sizeBytes || sha != item.sha256) {
                 part.delete(); meta.delete()
                 if (++badChecksums > 1) return set(ItemState.FAILED, reason = FailReason.CHECKSUM, message = "The file arrived damaged twice.")
-                log("transfer: ${item.name} arrived damaged, taking it again")
+                log("transfer: file ${item.id.take(8)} arrived damaged, taking it again")
                 continue
             }
             checkCancelled()
@@ -215,7 +215,7 @@ class TransferRunner(
                     runCatching { client.report(offerId(), listOf(ItemReport(item.id, statuses.getValue(item.id)))) }
                     throw Interrupted()
                 }
-                log("transfer: ${item.name} cut at ${have / 1024} KB (${e.message}); again in ${backoff(failures)} ms")
+                log("transfer: file ${item.id.take(8)} cut at ${have / 1024} KB (${e.message}); again in ${backoff(failures)} ms")
                 sleep(backoff(failures))
             }
         }

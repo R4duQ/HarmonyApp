@@ -45,8 +45,11 @@ interface ConnectController {
     /** A computer typed in by address, for networks where searching finds nothing. */
     fun addByAddress(host: String)
 
-    /** Brings the music back to the phone, paused where it was. */
+    /** Brings the music back to the phone: playing on, from the same place, if it was playing there. */
     fun disconnect()
+
+    /** Saves a log of what Connect did, for testing on devices; returns where it went (null: couldn't). Blocking. */
+    fun exportDiagnostics(): String? = null
 
     fun forget(computer: ConnectComputer)
 

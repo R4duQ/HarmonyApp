@@ -33,6 +33,24 @@ object AppDirs {
         (if (!local.isNullOrBlank()) File(local, "Harmony") else root).resolve("connect-cache").apply { mkdirs() }
     }
 
+    /** What the app did (Connect, the shared queue, transfers, the engine), for testing and reports. */
+    val logs: File by lazy { connectCache.resolveSibling("logs").apply { mkdirs() } }
+
+    /**
+     * Writes everything logged under "com.harmony" to logs/harmony-0.log
+     * (three files of 1 MB, the newest first). Ids and timings only, never
+     * tokens. Called once at start.
+     */
+    fun startFileLog() {
+        runCatching {
+            System.setProperty("java.util.logging.SimpleFormatter.format", "%1${'$'}tF %1${'$'}tT.%1${'$'}tL %4${'$'}s %3${'$'}s: %5${'$'}s%6${'$'}s%n")
+            val handler = java.util.logging.FileHandler(File(logs, "harmony-%g.log").absolutePath, 1_000_000, 3, true)
+            handler.formatter = java.util.logging.SimpleFormatter()
+            java.util.logging.Logger.getLogger("com.harmony").addHandler(handler)
+            java.util.logging.Logger.getLogger("com.harmony").info("---- Harmony started · ${System.getProperty("os.name")} · Java ${System.getProperty("java.version")}")
+        }
+    }
+
     /** This computer's songs converted to FLAC for phones that can't play their format (APE, WavPack, DSD...). */
     val connectConverted: File by lazy { connectCache.resolveSibling("connect-converted").apply { mkdirs() } }
 }

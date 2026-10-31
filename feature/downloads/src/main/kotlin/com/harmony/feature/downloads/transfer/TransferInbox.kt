@@ -88,11 +88,13 @@ class TransferInbox @Inject constructor(
         if (offer.id in handled || isRunning(offer.id)) return
         if (alwaysFrom(pc.id)) {
             handled += offer.id
+            TransferWorker.note(context, "offer ${offer.id.take(8)}: ${offer.items.size} file(s) from computer ${pc.id.take(8)}, accepted without asking")
             start(pc, offer)
             return
         }
         if (_prompt.value != null) return
         handled += offer.id
+        TransferWorker.note(context, "offer ${offer.id.take(8)}: ${offer.items.size} file(s) from computer ${pc.id.take(8)}, asking")
         _prompt.value = Prompt(pc, offer, downloads.transferFolderLabel(), firstTime = !prefs.getBoolean(KEY_EXPLAINED, false))
     }
 
@@ -108,6 +110,7 @@ class TransferInbox @Inject constructor(
         val edit = prefs.edit().putBoolean(KEY_EXPLAINED, true)
         if (always) edit.putBoolean(KEY_ALWAYS + p.computer.id, true)
         edit.apply()
+        TransferWorker.note(context, "offer ${p.offer.id.take(8)}: accepted${if (always) " (always from this computer)" else ""}")
         start(p.computer, p.offer)
     }
 
@@ -116,6 +119,7 @@ class TransferInbox @Inject constructor(
         val p = _prompt.value ?: return
         _prompt.value = null
         prefs.edit().putBoolean(KEY_EXPLAINED, true).apply()
+        TransferWorker.note(context, "offer ${p.offer.id.take(8)}: declined")
         scope.launch {
             val reports = p.offer.open.map { item ->
                 ItemReport(item.id, ItemStatus(ItemState.FAILED, 0, p.offer.statusOf(item.id).attempt, FailReason.DECLINED, message = "Declined on the phone."))

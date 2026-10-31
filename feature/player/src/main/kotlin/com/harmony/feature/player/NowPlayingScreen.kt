@@ -603,6 +603,7 @@ fun NowPlayingScreen(
                 phoneOutput = state.audioOutput,
                 output = outputChoice,
                 actions = viewModel.playOnActions,
+                diagnostics = viewModel.diagnosticsSaved.collectAsStateWithLifecycle().value,
             )
         }
     }

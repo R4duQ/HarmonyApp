@@ -81,6 +81,8 @@ internal class PlayOnActions(
     val playHere: () -> Unit = {},
     val forget: (ConnectComputer) -> Unit = {},
     val dismissError: () -> Unit = {},
+    /** Saves the Connect log for testing on devices (stage 9). */
+    val saveDiagnostics: () -> Unit = {},
 )
 
 internal object PlayOnTags {
@@ -91,6 +93,7 @@ internal object PlayOnTags {
     const val PAIR = "play_on_pair"
     const val ADDRESS = "play_on_address"
     const val ERROR = "play_on_error"
+    const val DIAGNOSTICS = "play_on_diagnostics"
     fun computer(id: String) = "play_on_pc_$id"
 }
 
@@ -106,6 +109,8 @@ internal fun PlayOnSheet(
     phoneOutput: AudioOutput,
     output: OutputChoice,
     actions: PlayOnActions,
+    /** Where the Connect log was last saved (null: not saved yet). */
+    diagnostics: String? = null,
 ) {
     LaunchedEffect(Unit) { actions.search() }
     val colors = MaterialTheme.colorScheme
@@ -160,7 +165,7 @@ internal fun PlayOnSheet(
         PlaceRow(
             icon = if (here) OutputIcons.forOutput(phoneOutput.type, output.form) else Icons.Rounded.PhoneAndroid,
             title = "This phone",
-            subtitle = if (here) phoneOutput.label else "Bring the music back, paused where it is",
+            subtitle = if (here) phoneOutput.label else "Bring the music back here, from where it is",
             selected = here,
             busy = false,
             onClick = { if (!here) actions.playHere() },
@@ -258,6 +263,14 @@ internal fun PlayOnSheet(
         }
 
         if (asking == null) AddByAddress(busy = connect.busyWith != null && connect.computers.none { it.id == connect.busyWith }, onAdd = actions.addByAddress)
+
+        // For testing on devices: what Connect did, with its timings, to send along with a report.
+        TextButton(onClick = actions.saveDiagnostics, modifier = Modifier.padding(top = 12.dp).testTag(PlayOnTags.DIAGNOSTICS)) {
+            Text("Save diagnostics", fontSize = 13.sp)
+        }
+        if (diagnostics != null) {
+            Text("Saved to $diagnostics. Share it from the Files app.", fontSize = 12.sp, color = colors.onSurfaceVariant)
+        }
     }
 }
 
