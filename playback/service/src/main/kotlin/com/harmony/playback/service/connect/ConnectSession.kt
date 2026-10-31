@@ -80,6 +80,10 @@ class ConnectSession @Inject constructor(
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val files = PhoneFileServer(context)
 
+    init {
+        ConnectDiagnostics.init(context)
+    }
+
     private val _state = MutableStateFlow(ConnectState(computers = loadPaired().map { it.computer }))
     override val state: StateFlow<ConnectState> = _state
 
@@ -363,6 +367,7 @@ class ConnectSession @Inject constructor(
                 }
             }
             result.onFailure { e ->
+                ConnectDiagnostics.log("start on ${target.name} failed: ${e.javaClass.simpleName}")
                 if (previous != null) end(error = null, tellComputer = false)
                 if (e is ConnectRefused) {
                     savePaired(loadPaired().filter { it.computer.id != target.id })
@@ -379,6 +384,7 @@ class ConnectSession @Inject constructor(
                 }
                 return@launch
             }
+            ConnectDiagnostics.log("session with ${target.name} started (direct) · playing=$playing at $position ms")
             val wasActive = isActive
             client = fresh
             _queueClient.value = fresh
@@ -406,6 +412,7 @@ class ConnectSession @Inject constructor(
     /** Back to the phone, paused where the computer was. */
     private fun end(error: String?, tellComputer: Boolean, seekBack: Boolean = true) {
         val old = client ?: return
+        ConnectDiagnostics.log("session with ${computer?.name} ended · ${error ?: "by choice"} · told computer=$tellComputer · failures=$failures")
         val position = remotePosition()
         val same = seekBack && exo?.currentMediaItem?.mediaId == sentId
         pollJob?.cancel()
@@ -461,7 +468,9 @@ class ConnectSession @Inject constructor(
             }
         }
         val phone = PhoneSide(exo)
-        val handoff = com.harmony.core.remote.handoff.Handoff(phone, pc, SystemClock.elapsedRealtime(), leadMs = HANDOFF_LEAD_MS)
+        val began = SystemClock.elapsedRealtime()
+        ConnectDiagnostics.log("handoff phone -> ${target.name}: starting (song ${item.mediaId.take(24)} at ${exo.currentPosition} ms)")
+        val handoff = com.harmony.core.remote.handoff.Handoff(phone, pc, began, leadMs = HANDOFF_LEAD_MS)
         handoffJob = scope.launch {
             pc.watch(this)
             var result: com.harmony.core.remote.handoff.HandoffResult?
@@ -476,11 +485,15 @@ class ConnectSession @Inject constructor(
                 is com.harmony.core.remote.handoff.HandoffResult.Unsure -> {
                     val at = (result as? com.harmony.core.remote.handoff.HandoffResult.Moved)?.atMs
                         ?: (result as com.harmony.core.remote.handoff.HandoffResult.Unsure).atMs
-                    Log.i(TAG, "handoff to ${target.name}: $result")
+                    ConnectDiagnostics.log(
+                        "handoff phone -> ${target.name}: $result · computer ready ${since(began, pc.readyAt)} · " +
+                            "silence ≈ ${if (pc.playingAt > 0 && phone.stoppedAt > 0) "${pc.playingAt - phone.stoppedAt} ms" else "?"} " +
+                            "(phone stop -> computer seen playing; its status is read every ${HANDOFF_POLL_MS} ms)",
+                    )
                     becomeActive(fresh, target, item, at, playing = true, state = RemoteState.PLAYING)
                 }
                 is com.harmony.core.remote.handoff.HandoffResult.Stayed -> {
-                    Log.i(TAG, "handoff to ${target.name} stayed: ${result.why}")
+                    ConnectDiagnostics.log("handoff phone -> ${target.name}: stayed (${result.why}) after ${SystemClock.elapsedRealtime() - began} ms · reached=${pc.reached}")
                     val reached = pc.reached
                     scope.launch(net) { runCatching { fresh.disconnect() } }
                     if (!reached || result.why != com.harmony.core.remote.handoff.HandoffResult.Why.NOT_READY &&
@@ -511,7 +524,9 @@ class ConnectSession @Inject constructor(
             end(error = null, tellComputer = true, seekBack = false)
             exo.playWhenReady = true
         }
-        val handoff = com.harmony.core.remote.handoff.Handoff(pc, phone, SystemClock.elapsedRealtime(), leadMs = HANDOFF_LEAD_MS)
+        val began = SystemClock.elapsedRealtime()
+        ConnectDiagnostics.log("handoff ${computer?.name} -> phone: starting (at ${remotePosition()} ms)")
+        val handoff = com.harmony.core.remote.handoff.Handoff(pc, phone, began, leadMs = HANDOFF_LEAD_MS)
         handoffJob = scope.launch {
             var result: com.harmony.core.remote.handoff.HandoffResult?
             while (true) {
@@ -519,7 +534,11 @@ class ConnectSession @Inject constructor(
                 if (result != null) break
                 delay(HANDOFF_TICK_MS)
             }
-            Log.i(TAG, "handoff to the phone: $result")
+            ConnectDiagnostics.log(
+                "handoff -> phone: $result · phone ready ${since(began, phone.readyAt)} · computer's pause confirmed " +
+                    "${if (pc.stopConfirmedAt > 0) "${pc.stopConfirmedAt - pc.stopAskedAt} ms after asking" else "?"} · " +
+                    "phone playing ${if (phone.playingAt > 0 && pc.stopConfirmedAt > 0) "${phone.playingAt - pc.stopConfirmedAt} ms after that" else "?"}",
+            )
             if (result !is com.harmony.core.remote.handoff.HandoffResult.Moved && this@ConnectSession.isActive) {
                 val unreachable = (result as? com.harmony.core.remote.handoff.HandoffResult.Stayed)?.why ==
                     com.harmony.core.remote.handoff.HandoffResult.Why.SOURCE_UNREACHABLE
@@ -531,6 +550,11 @@ class ConnectSession @Inject constructor(
         }
     }
 
+    private fun since(began: Long, at: Long) = if (at > 0) "after ${at - began} ms" else "never"
+
+    /** Saves the diagnostics log where the Files app finds it (stage 9: testing on devices). */
+    override fun exportDiagnostics(): String? = ConnectDiagnostics.save()
+
     /** The phone's own player, as a handoff source (phone to computer). */
     private inner class PhoneSide(private val exo: Player) : com.harmony.core.remote.handoff.HandoffPlayer {
         override fun songId() = exo.currentMediaItem?.mediaId
@@ -539,8 +563,13 @@ class ConnectSession @Inject constructor(
         override fun busy() = (exo as? com.harmony.playback.service.player.TwinPlayer)?.crossfadeNear(HANDOFF_LEAD_MS * 3) == true
         override fun prepare(positionMs: Long) = Unit
         override fun readiness() = if (exo.isPlaying) com.harmony.core.remote.handoff.Readiness.PLAYING else com.harmony.core.remote.handoff.Readiness.READY
+        /** When it was stopped (the start of the silence), elapsed-realtime ms. */
+        var stoppedAt = 0L
         override fun start() { exo.playWhenReady = true }
-        override fun stop() { exo.playWhenReady = false }
+        override fun stop() {
+            stoppedAt = SystemClock.elapsedRealtime()
+            exo.playWhenReady = false
+        }
         override fun stopped(): Boolean = !exo.playWhenReady
     }
 
@@ -560,7 +589,10 @@ class ConnectSession @Inject constructor(
             exo.seekTo(positionMs)
             if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
         }
-        override fun readiness(): com.harmony.core.remote.handoff.Readiness = when {
+        /** Timings for the log: when the song was ready here, and when it was heard playing. */
+        var readyAt = 0L
+        var playingAt = 0L
+        override fun readiness(): com.harmony.core.remote.handoff.Readiness = timed(when {
             exo.playerError != null -> com.harmony.core.remote.handoff.Readiness.FAILED
             started && exo.isPlaying -> com.harmony.core.remote.handoff.Readiness.PLAYING
             started -> com.harmony.core.remote.handoff.Readiness.NOT_YET
@@ -568,6 +600,13 @@ class ConnectSession @Inject constructor(
             SystemClock.elapsedRealtime() - askedAt > SEEK_SETTLE_MS && exo.playbackState == Player.STATE_READY &&
                 kotlin.math.abs(exo.currentPosition - preparedAt) < 500 -> com.harmony.core.remote.handoff.Readiness.READY
             else -> com.harmony.core.remote.handoff.Readiness.NOT_YET
+        })
+
+        private fun timed(r: com.harmony.core.remote.handoff.Readiness): com.harmony.core.remote.handoff.Readiness {
+            val now = SystemClock.elapsedRealtime()
+            if (r == com.harmony.core.remote.handoff.Readiness.READY && readyAt == 0L) readyAt = now
+            if (r == com.harmony.core.remote.handoff.Readiness.PLAYING && playingAt == 0L) playingAt = now
+            return r
         }
         override fun start() {
             started = true
@@ -599,6 +638,10 @@ class ConnectSession @Inject constructor(
         @Volatile var reached = false
             private set
 
+        /** Timings for the log (elapsed-realtime ms): when it was first seen ready, then playing. */
+        @Volatile var readyAt = 0L
+        @Volatile var playingAt = 0L
+
         fun watch(scope: CoroutineScope) {
             job = scope.launch {
                 while (true) {
@@ -615,6 +658,9 @@ class ConnectSession @Inject constructor(
                             RemoteState.PAUSED -> if (kotlin.math.abs(s.positionMs - askedFor) < 400) com.harmony.core.remote.handoff.Readiness.READY else ready
                             else -> ready
                         }
+                        val now = SystemClock.elapsedRealtime()
+                        if (ready == com.harmony.core.remote.handoff.Readiness.READY && readyAt == 0L) readyAt = now
+                        if (ready == com.harmony.core.remote.handoff.Readiness.PLAYING && playingAt == 0L) playingAt = now
                     }.onFailure { e ->
                         ready = if (e is ConnectRefused || e is ConnectSessionEnded) com.harmony.core.remote.handoff.Readiness.FAILED
                         else if (++misses >= 3) com.harmony.core.remote.handoff.Readiness.UNREACHABLE else ready
@@ -655,6 +701,9 @@ class ConnectSession @Inject constructor(
     /** The computer, as a handoff source (computer to phone): its pause must be confirmed. */
     private inner class ComputerSource(private val c: ConnectClient) : com.harmony.core.remote.handoff.HandoffPlayer {
         @Volatile private var stopState: Boolean? = false
+        /** Timings for the log: when the pause was asked, and when the computer confirmed it. */
+        @Volatile var stopAskedAt = 0L
+        @Volatile var stopConfirmedAt = 0L
         override fun songId() = sentId
         override fun positionMs() = remotePosition()
         override fun isPlaying() = wantPlay && remoteState == RemoteState.PLAYING
@@ -667,8 +716,10 @@ class ConnectSession @Inject constructor(
         }
         override fun stop() {
             stopState = false
+            stopAskedAt = SystemClock.elapsedRealtime()
             scope.launch {
                 val r = withContext(net) { runCatching { c.control(ControlRequest(ControlAction.PAUSE)) } }
+                stopConfirmedAt = SystemClock.elapsedRealtime()
                 stopState = r.fold(
                     onSuccess = { s -> s == null || s.state != RemoteState.PLAYING },
                     // A session the computer already ended isn't playing there.
@@ -685,6 +736,7 @@ class ConnectSession @Inject constructor(
         val upNext = upNextItems(exo)
         val canAdvance = exo.repeatMode != Player.REPEAT_MODE_ONE
         val wasActive = isActive
+        ConnectDiagnostics.log("session with ${target.name} started (handoff) · at $positionMs ms")
         client = fresh
         _queueClient.value = fresh
         computer = target
@@ -993,6 +1045,7 @@ class ConnectSession @Inject constructor(
         // A Wi-Fi hiccup is not the end: the computer keeps playing meanwhile. Only a
         // computer that stays silent for a while (switched off, out of range) ends it.
         failures++
+        if (failures == 1 || failures % 10 == 0) ConnectDiagnostics.log("computer not answering (${failures}x): ${e.javaClass.simpleName}")
         val now = SystemClock.elapsedRealtime()
         if (failingSince == 0L) failingSince = now
         if (failures >= MIN_FAILURES && now - failingSince >= GIVE_UP_AFTER_MS) {
@@ -1001,6 +1054,7 @@ class ConnectSession @Inject constructor(
     }
 
     private fun onStatus(status: RemoteStatus) {
+        if (failures > 0) ConnectDiagnostics.log("computer answering again after $failures failed reads")
         failures = 0
         failingSince = 0L
         val exo = exo ?: return

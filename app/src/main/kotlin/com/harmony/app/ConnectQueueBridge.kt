@@ -1,6 +1,5 @@
 package com.harmony.app
 
-import android.util.Log
 import com.harmony.core.model.QueueEntryInfo
 import com.harmony.core.model.QueueOrigin
 import com.harmony.core.model.Song
@@ -74,7 +73,7 @@ class ConnectQueueBridge @Inject constructor(
             client,
             QueueReplica(device),
             onChange = { sharedChanged.update { it + 1 } },
-            log = { Log.i(TAG, it) },
+            log = { com.harmony.playback.service.connect.ConnectDiagnostics.log("queue: $it") },
         ).start()
         val follower = QueueFollower(link, QueueMirror(device))
         val player = phonePlayer(client)

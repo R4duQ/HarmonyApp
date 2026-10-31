@@ -114,6 +114,12 @@ class PlayerController(
         engine.crossfadeMs = seconds * 1000L
     }
 
+    private val logger = java.util.logging.Logger.getLogger("com.harmony.player")
+
+    init {
+        engine.log = { logger.info(it) }
+    }
+
     /** The phone's modes as it last said (null: a phone that doesn't say). */
     private var remoteShuffle: Boolean? = null
     private var remoteRepeat: RemoteRepeat? = null
@@ -387,6 +393,7 @@ class PlayerController(
     @Synchronized
     override fun play(request: PlayRequest) {
         val t = request.track
+        logger.info("phone: play ${t.id.take(24)} at ${request.positionMs} ms · playing=${request.playing} · followUp=${request.followUp} · next=${request.upNext.size} · crossfade=${request.crossfadeSeconds}")
         val same = _phone.value != null && remoteTrack?.id == t.id &&
             engine.state.value.status.let { it == EngineStatus.PLAYING || it == EngineStatus.PAUSED || it == EngineStatus.LOADING }
         _phone.value = request.phoneName
@@ -440,6 +447,8 @@ class PlayerController(
     private fun onEngineError(source: String, at: Long) {
         val t = remoteTrack ?: return
         if (_phone.value == null) return
+        // The song by id only: its address carries the phone's token.
+        logger.info("phone song ${t.id.take(24)} broke off at $at ms (from ${if (source == t.url) "the phone" else "the copy here"})")
         val copy = cache?.localFor(keyOf(t))
         if (source != t.url && source != copy) return
         // The copy kept here wouldn't play: it goes (fetched once more), and the song carries on from the phone.
@@ -639,6 +648,7 @@ class PlayerController(
 
     @Synchronized
     override fun control(request: ControlRequest) {
+        logger.info("phone: ${request.action.name.lowercase()}${request.positionMs?.let { " at $it ms" } ?: ""} · engine ${engine.state.value.status}")
         if (_phone.value == null) {
             // The computer's own music took over; play on the phone brings its song back.
             val aside = setAside ?: return
