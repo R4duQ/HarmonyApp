@@ -438,6 +438,8 @@ class AudioEngine(
                         trackStartFrame = out.framesPlayed() + out.queuedFrames()
                         trackStarted = true
                         if (!paused) out.start()
+                        // A length set since the read above (setDuration takes this lock) is kept, not overwritten with 0.
+                        if (duration <= 0) _state.value.takeIf { it.source == src }?.let { duration = it.durationMs }
                         _state.value = EngineState(if (paused) EngineStatus.PAUSED else EngineStatus.PLAYING, src, duration)
                     }
                     boundaryPending = false
