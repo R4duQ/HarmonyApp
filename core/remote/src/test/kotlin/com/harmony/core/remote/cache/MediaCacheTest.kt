@@ -197,6 +197,33 @@ class MediaCacheTest {
         assertNotNull("played again: kept", c.localFor("k:old1"))
     }
 
+    @Test fun aLowerLimitFreesSpaceAtOnceKeepingTheSongPlayingAndTheNext() {
+        val p = phone()
+        var max = 2_000_000L
+        val c = MediaCache(tmp.newFolder(), { CacheLimits(max) }, { 10L * 1024 * 1024 * 1024 }, log = { println(it) }).also { closing += it }
+        for (n in listOf("old1", "old2", "now", "next")) p.song(n, 300_000)
+        for (n in listOf("old1", "old2")) {
+            c.want(listOf(CacheWant("k:$n", p.url(n), 0)))
+            waitFor(5_000, n) { c.has("k:$n") }
+            Thread.sleep(5)
+        }
+        c.want(listOf(CacheWant("k:now", p.url("now"), 0), CacheWant("k:next", p.url("next"), 1)))
+        waitFor(5_000, "both") { c.has("k:now") && c.has("k:next") }
+        assertEquals(1_200_000L, c.usage())
+        max = 700_000
+        c.trim()
+        assertTrue("within the new limit: ${c.usage()}", c.usage() <= 700_000)
+        assertNotNull("the song playing stays", c.localFor("k:now"))
+        assertNotNull("the next stays", c.localFor("k:next"))
+        assertNull(c.localFor("k:old1"))
+        assertNull(c.localFor("k:old2"))
+        // Below what the two need: they still stay (never the song playing or the next).
+        max = 100_000
+        c.trim()
+        assertNotNull(c.localFor("k:now"))
+        assertNotNull(c.localFor("k:next"))
+    }
+
     @Test fun noRoomMeansTheSongPlaysFromTheNetwork() {
         val p = phone()
         p.song("huge", 2_000_000)

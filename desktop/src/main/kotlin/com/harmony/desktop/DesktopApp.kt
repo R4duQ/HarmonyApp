@@ -151,7 +151,11 @@ class DesktopApp(
     }
 
     /** How much disk the phone's songs kept here may take (GB). Applies to the next download. */
-    fun setCacheLimit(gb: Int) = update { it.copy(cacheLimitGb = gb.coerceIn(1, 100)) }
+    fun setCacheLimit(gb: Int) {
+        update { it.copy(cacheLimitGb = gb.coerceIn(1, 100)) }
+        // A lower limit frees the space now, not at the next download.
+        cache?.let { c -> Thread({ c.trim() }, "harmony-cache-trim").apply { isDaemon = true }.start() }
+    }
 
     /** Universal Queue (beta). Off, the phone's link ends at its next request and the phone keeps its own queue. */
     fun setSharedQueue(on: Boolean) {

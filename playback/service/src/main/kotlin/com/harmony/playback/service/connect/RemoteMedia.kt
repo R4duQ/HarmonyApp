@@ -17,7 +17,8 @@ import javax.inject.Singleton
  * The copies live in the app's cache folder, never in the music library: no
  * MediaStore entry, no 24-D analysis, Android may clear them when space runs
  * short. The song playing and the next three are fetched, most urgent first,
- * resumable, up to [LIMIT_BYTES] and never more than a tenth of the free
+ * resumable, up to the limit chosen in Play on ([limitBytes], 1 GB at
+ * first; Universal Queue stage 10) and never more than a tenth of the free
  * space ([MediaCache], the same code as on the computer); without a copy the
  * player reads straight from the computer.
  */
@@ -36,7 +37,7 @@ class RemoteMedia @Inject constructor(
     private val cache: MediaCache by lazy {
         MediaCache(
             File(context.cacheDir, "connect-media").apply { mkdirs() },
-            limits = { CacheLimits(maxBytes = LIMIT_BYTES) },
+            limits = { CacheLimits(maxBytes = limitBytes) },
             log = { ConnectDiagnostics.log(it) },
         )
     }
@@ -65,6 +66,26 @@ class RemoteMedia @Inject constructor(
 
     fun urlFor(key: String): String? = synchronized(urls) { urls[key] }
 
+    /** The most the copies may take (before the tenth-of-free-space cap). */
+    val limitBytes: Long get() = prefs.getLong(KEY_LIMIT, DEFAULT_LIMIT_BYTES).takeIf { it in LIMIT_CHOICES } ?: DEFAULT_LIMIT_BYTES
+
+    /** Bytes the copies take now (whole songs and partial ones). Blocking (briefly). */
+    fun usedBytes(): Long = cache.usage()
+
+    /** A new limit (one of [LIMIT_CHOICES]); a lower one frees the space at once. Blocking. */
+    fun setLimit(bytes: Long) {
+        if (bytes !in LIMIT_CHOICES) return
+        prefs.edit().putLong(KEY_LIMIT, bytes).apply()
+        cache.trim()
+        ConnectDiagnostics.log("cache: limit ${bytes / MB} MB, using ${cache.usage() / MB} MB")
+    }
+
+    /** Removes every copy (the songs still play, from the computer). Blocking. */
+    fun clear() {
+        cache.clear()
+        ConnectDiagnostics.log("cache: emptied")
+    }
+
     /** The whole copy of [key] on the phone, if there is one. */
     fun localFor(key: String): String? = cache.localFor(key)
 
@@ -85,11 +106,15 @@ class RemoteMedia @Inject constructor(
 
     @Volatile private var lastWants: List<CacheWant> = emptyList()
 
-    private companion object {
-        const val TAG = "HarmonyRemoteMedia"
-        const val PREFS = "harmony_remote_media"
-        const val KEY_URLS = "urls"
-        const val MAX_KNOWN = 500
-        const val LIMIT_BYTES = 1L * 1024 * 1024 * 1024
+    companion object {
+        private const val PREFS = "harmony_remote_media"
+        private const val KEY_URLS = "urls"
+        private const val KEY_LIMIT = "limit_bytes"
+        private const val MAX_KNOWN = 500
+        private const val MB = 1024L * 1024
+        const val DEFAULT_LIMIT_BYTES = 1024 * MB
+
+        /** What Play on offers: 500 MB, 1, 2, 5 GB. */
+        val LIMIT_CHOICES = listOf(512 * MB, 1024 * MB, 2048 * MB, 5120 * MB)
     }
 }
