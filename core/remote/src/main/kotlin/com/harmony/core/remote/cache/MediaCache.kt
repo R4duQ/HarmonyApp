@@ -134,6 +134,16 @@ class MediaCache(
     /** Bytes on disk (complete songs and partial ones). */
     fun usage(): Long = synchronized(lock) { entries.values.sumOf { sizeOf(it) } }
 
+    /**
+     * Back within the limits now (they were lowered): least recently used
+     * songs go first; the song playing, the next one and the one being
+     * fetched stay.
+     */
+    fun trim() = synchronized(lock) {
+        makeRoom(0, active?.first, 1)
+        if (dirty) save()
+    }
+
     /** Empties the cache (the user asked); downloads wanted now start over. */
     fun clear() = synchronized(lock) {
         cancelActive = active != null
@@ -279,7 +289,7 @@ class MediaCache(
      * the song playing, the next one, or [keep]; wanted songs further ahead only
      * for a more urgent one ([priority]). False when it can't be done.
      */
-    private fun makeRoom(bytes: Long, keep: Entry, priority: Int): Boolean {
+    private fun makeRoom(bytes: Long, keep: Entry?, priority: Int): Boolean {
         val budget = budget()
         if (bytes > budget) return false
         val wantedPriority = wants.associate { it.key to it.priority }

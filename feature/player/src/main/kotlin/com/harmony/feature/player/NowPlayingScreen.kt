@@ -187,6 +187,9 @@ fun NowPlayingScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showPlayOn by remember { mutableStateOf(false) }
     val connectState by viewModel.connectState.collectAsStateWithLifecycle()
+    // A handoff that ended unsure asks where the music should be (Universal Queue, stage 10).
+    val unsureHandoff = connectState.unsure
+    LaunchedEffect(unsureHandoff) { if (unsureHandoff != null) showPlayOn = true }
 
     val song = state.currentSong
     val context = LocalContext.current

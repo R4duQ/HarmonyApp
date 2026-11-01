@@ -83,6 +83,12 @@ internal class PlayOnActions(
     val dismissError: () -> Unit = {},
     /** Saves the Connect log for testing on devices (stage 9). */
     val saveDiagnostics: () -> Unit = {},
+    /** After an unsure handoff (stage 10): play here, or leave things as they are. */
+    val continueHere: () -> Unit = {},
+    val dismissUnsure: () -> Unit = {},
+    /** The computer's songs kept on this phone (stage 10). */
+    val setCacheLimit: (Long) -> Unit = {},
+    val emptyCache: () -> Unit = {},
 )
 
 internal object PlayOnTags {
@@ -94,6 +100,12 @@ internal object PlayOnTags {
     const val ADDRESS = "play_on_address"
     const val ERROR = "play_on_error"
     const val DIAGNOSTICS = "play_on_diagnostics"
+    const val UNSURE = "play_on_unsure"
+    const val CONTINUE_HERE = "play_on_continue_here"
+    const val LEAVE_IT = "play_on_leave_it"
+    const val CACHE = "play_on_cache"
+    const val CACHE_EMPTY = "play_on_cache_empty"
+    fun cacheLimit(bytes: Long) = "play_on_cache_${bytes / (1024 * 1024)}"
     fun computer(id: String) = "play_on_pc_$id"
 }
 
@@ -155,6 +167,40 @@ internal fun PlayOnSheet(
                     Text(connect.error.orEmpty(), color = colors.onErrorContainer, fontSize = 13.sp, modifier = Modifier.weight(1f))
                     IconButton(onClick = actions.dismissError) {
                         Icon(Icons.Rounded.Close, contentDescription = "Dismiss", tint = colors.onErrorContainer)
+                    }
+                }
+            }
+        }
+
+        val unsure = connect.unsure
+        AnimatedVisibility(
+            visible = unsure != null,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            val name = unsure?.computerName ?: "The computer"
+            Surface(
+                color = colors.tertiaryContainer,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.padding(top = 14.dp).fillMaxWidth().testTag(PlayOnTags.UNSURE),
+            ) {
+                Column(Modifier.padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 6.dp)) {
+                    Text(
+                        if (connect.active != null) {
+                            "$name stopped answering just after it was told to play, so it may be playing there. This phone stays silent until you choose."
+                        } else {
+                            "$name didn't say it stopped, so it may still be playing. The music is paused on this phone."
+                        },
+                        color = colors.onTertiaryContainer,
+                        fontSize = 13.sp,
+                    )
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = actions.continueHere, modifier = Modifier.testTag(PlayOnTags.CONTINUE_HERE)) {
+                            Text("Continue here")
+                        }
+                        TextButton(onClick = actions.dismissUnsure, modifier = Modifier.testTag(PlayOnTags.LEAVE_IT)) {
+                            Text(if (connect.active != null) "Keep it there" else "Leave it", color = colors.onTertiaryContainer)
+                        }
                     }
                 }
             }
@@ -264,6 +310,11 @@ internal fun PlayOnSheet(
 
         if (asking == null) AddByAddress(busy = connect.busyWith != null && connect.computers.none { it.id == connect.busyWith }, onAdd = actions.addByAddress)
 
+        val cache = connect.phoneCache
+        if (cache != null && (cache.usedBytes > 0 || connect.computers.any { it.paired })) {
+            PhoneCacheCard(cache, onLimit = actions.setCacheLimit, onEmpty = actions.emptyCache)
+        }
+
         // For testing on devices: what Connect did, with its timings, to send along with a report.
         TextButton(onClick = actions.saveDiagnostics, modifier = Modifier.padding(top = 12.dp).testTag(PlayOnTags.DIAGNOSTICS)) {
             Text("Save diagnostics", fontSize = 13.sp)
@@ -271,6 +322,54 @@ internal fun PlayOnSheet(
         if (diagnostics != null) {
             Text("Saved to $diagnostics. Share it from the Files app.", fontSize = 12.sp, color = colors.onSurfaceVariant)
         }
+    }
+}
+
+/** The computer's songs kept on this phone: how much, the limit, and emptying it. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PhoneCacheCard(cache: com.harmony.domain.playback.PhoneCache, onLimit: (Long) -> Unit, onEmpty: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .padding(top = 18.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surfaceVariant.copy(alpha = 0.45f))
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .testTag(PlayOnTags.CACHE),
+    ) {
+        Text("Songs from your computers", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.onSurface)
+        Text(
+            "The one playing and the next few are kept here whole, so they play without waiting on the Wi-Fi. " +
+                "${sizeLabel(cache.usedBytes)} used of ${sizeLabel(cache.limitBytes)} (never more than a tenth of the free space).",
+            fontSize = 12.sp,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
+            cache.choices.forEach { bytes ->
+                FilterChip(
+                    selected = bytes == cache.limitBytes,
+                    onClick = { onLimit(bytes) },
+                    label = { Text(sizeLabel(bytes)) },
+                    modifier = Modifier.testTag(PlayOnTags.cacheLimit(bytes)),
+                )
+            }
+            TextButton(onClick = onEmpty, enabled = cache.usedBytes > 0, modifier = Modifier.testTag(PlayOnTags.CACHE_EMPTY)) {
+                Text("Empty")
+            }
+        }
+    }
+}
+
+/** 512 MB, 1 GB, 1.5 GB… */
+internal fun sizeLabel(bytes: Long): String {
+    val mb = bytes / (1024.0 * 1024.0)
+    return when {
+        mb < 1024 -> "${mb.toLong()} MB"
+        mb % 1024 == 0.0 -> "${(mb / 1024).toLong()} GB"
+        else -> String.format(java.util.Locale.US, "%.1f GB", mb / 1024)
     }
 }
 

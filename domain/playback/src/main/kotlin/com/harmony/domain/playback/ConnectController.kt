@@ -14,6 +14,24 @@ data class ConnectComputer(
     val nearby: Boolean,
 )
 
+/** The computer's songs kept on this phone so they play without waiting on the Wi-Fi. */
+data class PhoneCache(
+    val usedBytes: Long,
+    val limitBytes: Long,
+    /** The limits that can be chosen, smallest first. */
+    val choices: List<Long>,
+)
+
+/**
+ * A handoff that ended without knowing where the music is: the computer was
+ * told to play, or to pause, and stopped answering. The person decides.
+ */
+data class UnsureHandoff(
+    val computerName: String,
+    /** True: it may be playing on the computer (the phone is paused). */
+    val mayPlayThere: Boolean,
+)
+
 data class ConnectState(
     val searching: Boolean = false,
     val computers: List<ConnectComputer> = emptyList(),
@@ -24,6 +42,10 @@ data class ConnectState(
     /** A computer that wants its pairing code typed in. */
     val needsCode: ConnectComputer? = null,
     val error: String? = null,
+    /** Null until Play on is opened (read then). */
+    val phoneCache: PhoneCache? = null,
+    /** Asks "Continue here?" after a handoff that ended unsure. */
+    val unsure: UnsureHandoff? = null,
 )
 
 /**
@@ -52,6 +74,18 @@ interface ConnectController {
     fun exportDiagnostics(): String? = null
 
     fun forget(computer: ConnectComputer)
+
+    /** A new limit for the computer's songs kept on this phone (one of [PhoneCache.choices]). */
+    fun setPhoneCacheLimit(bytes: Long) {}
+
+    /** Removes the computer's songs kept on this phone (they still play, from the computer). */
+    fun emptyPhoneCache() {}
+
+    /** After an unsure handoff: plays on this phone, from where the music was ([UnsureHandoff]). */
+    fun continueHere() {}
+
+    /** After an unsure handoff: leaves things as they are. */
+    fun dismissUnsure() {}
 
     fun dismissError()
 }

@@ -213,6 +213,7 @@ class ConnectSession @Inject constructor(
     // ---- ConnectController ---------------------------------------------------------
 
     override fun search() {
+        refreshPhoneCache()
         if (searchJob?.isActive == true) return
         _state.update { it.copy(searching = true) }
         searchJob = scope.launch {
@@ -324,6 +325,66 @@ class ConnectSession @Inject constructor(
         _state.update { it.copy(error = null, needsCode = null) }
     }
 
+    // ---- The computer's songs kept on this phone (stage 10) --------------------------
+
+    private fun refreshPhoneCache() {
+        scope.launch(Dispatchers.IO) {
+            val now = com.harmony.domain.playback.PhoneCache(remoteMedia.usedBytes(), remoteMedia.limitBytes, RemoteMedia.LIMIT_CHOICES)
+            _state.update { it.copy(phoneCache = now) }
+        }
+    }
+
+    override fun setPhoneCacheLimit(bytes: Long) {
+        scope.launch(Dispatchers.IO) {
+            remoteMedia.setLimit(bytes)
+            refreshPhoneCache()
+        }
+    }
+
+    override fun emptyPhoneCache() {
+        scope.launch(Dispatchers.IO) {
+            remoteMedia.clear()
+            refreshPhoneCache()
+        }
+    }
+
+    // ---- After a handoff that ended unsure (stage 10) --------------------------------
+
+    /** Where the unsure handoff left things, while the person hasn't answered. */
+    private enum class UnsureCase {
+        /** Phone to computer: told to play, then silent; the session goes on (it may play there). */
+        MOVED,
+        /** Computer to phone: its pause wasn't confirmed; the session ended, the phone is paused. */
+        RETURNED,
+    }
+
+    private var unsureCase: UnsureCase? = null
+
+    private fun askUnsure(case: UnsureCase, name: String) {
+        unsureCase = case
+        ConnectDiagnostics.log("handoff unsure (${case.name.lowercase()}): asking whether to continue here")
+        _state.update { it.copy(unsure = com.harmony.domain.playback.UnsureHandoff(name, mayPlayThere = true), error = null) }
+    }
+
+    private fun clearUnsure(why: String) {
+        if (unsureCase == null) return
+        ConnectDiagnostics.log("handoff unsure: cleared ($why)")
+        unsureCase = null
+        _state.update { it.copy(unsure = null) }
+    }
+
+    override fun continueHere() {
+        val case = unsureCase ?: return
+        clearUnsure("continue here")
+        val exo = exo ?: return
+        // Still in the session: it ends (the computer is told to stop, if it hears), back here where it was.
+        if (case == UnsureCase.MOVED && isActive) end(error = null, tellComputer = true)
+        exo.playWhenReady = true
+        player?.notifyPlayState()
+    }
+
+    override fun dismissUnsure() = clearUnsure("left as is")
+
     // ---- Starting and ending -------------------------------------------------------
 
     private fun start(target: ConnectComputer, token: String) {
@@ -333,6 +394,7 @@ class ConnectSession @Inject constructor(
             return
         }
         if (handoffJob?.isActive == true) return
+        clearUnsure("a new start")
         // Playing here: the computer gets the song ready first and takes over at a set point
         // (Universal Queue, stage 7), instead of the phone going silent while it loads.
         if (client == null && exo.playWhenReady && exo.currentMediaItem != null) {
@@ -413,6 +475,7 @@ class ConnectSession @Inject constructor(
     private fun end(error: String?, tellComputer: Boolean, seekBack: Boolean = true) {
         val old = client ?: return
         ConnectDiagnostics.log("session with ${computer?.name} ended · ${error ?: "by choice"} · told computer=$tellComputer · failures=$failures")
+        if (unsureCase == UnsureCase.MOVED) clearUnsure("session ended")
         val position = remotePosition()
         val same = seekBack && exo?.currentMediaItem?.mediaId == sentId
         pollJob?.cancel()
@@ -491,6 +554,7 @@ class ConnectSession @Inject constructor(
                             "(phone stop -> computer seen playing; its status is read every ${HANDOFF_POLL_MS} ms)",
                     )
                     becomeActive(fresh, target, item, at, playing = true, state = RemoteState.PLAYING)
+                    if (result is com.harmony.core.remote.handoff.HandoffResult.Unsure) askUnsure(UnsureCase.MOVED, target.name)
                 }
                 is com.harmony.core.remote.handoff.HandoffResult.Stayed -> {
                     ConnectDiagnostics.log("handoff phone -> ${target.name}: stayed (${result.why}) after ${SystemClock.elapsedRealtime() - began} ms · reached=${pc.reached}")
@@ -525,8 +589,13 @@ class ConnectSession @Inject constructor(
             exo.playWhenReady = true
         }
         val began = SystemClock.elapsedRealtime()
-        ConnectDiagnostics.log("handoff ${computer?.name} -> phone: starting (at ${remotePosition()} ms)")
-        val handoff = com.harmony.core.remote.handoff.Handoff(pc, phone, began, leadMs = HANDOFF_LEAD_MS)
+        // One of the computer's songs not yet whole on the phone is read over the Wi-Fi: it is
+        // made ready further ahead, so the handoff doesn't miss its point while it buffers (stage 10).
+        val id = exo.currentMediaItem?.mediaId
+        val overWifi = id != null && com.harmony.domain.playback.RemoteSongs.isRemoteKey(id) && remoteMedia.localFor(id) == null
+        val lead = if (overWifi) HANDOFF_LEAD_OVER_WIFI_MS else HANDOFF_LEAD_MS
+        ConnectDiagnostics.log("handoff ${computer?.name} -> phone: starting (at ${remotePosition()} ms · lead $lead ms${if (overWifi) ", the computer's song read over the Wi-Fi" else ""})")
+        val handoff = com.harmony.core.remote.handoff.Handoff(pc, phone, began, leadMs = lead)
         handoffJob = scope.launch {
             var result: com.harmony.core.remote.handoff.HandoffResult?
             while (true) {
@@ -542,10 +611,10 @@ class ConnectSession @Inject constructor(
             if (result !is com.harmony.core.remote.handoff.HandoffResult.Moved && this@ConnectSession.isActive) {
                 val unreachable = (result as? com.harmony.core.remote.handoff.HandoffResult.Stayed)?.why ==
                     com.harmony.core.remote.handoff.HandoffResult.Why.SOURCE_UNREACHABLE
-                end(
-                    error = if (unreachable) "${computer?.name ?: "The computer"} didn't answer, so it may still be playing. The music is paused on this phone." else null,
-                    tellComputer = true,
-                )
+                val name = computer?.name ?: "The computer"
+                end(error = null, tellComputer = true)
+                // It may still be playing: the phone stays paused and asks (never two at once unasked).
+                if (unreachable) askUnsure(UnsureCase.RETURNED, name)
             }
         }
     }
@@ -1055,6 +1124,8 @@ class ConnectSession @Inject constructor(
 
     private fun onStatus(status: RemoteStatus) {
         if (failures > 0) ConnectDiagnostics.log("computer answering again after $failures failed reads")
+        // Answering again, and playing: it's known where the music is.
+        if (unsureCase == UnsureCase.MOVED && status.state == RemoteState.PLAYING) clearUnsure("the computer is playing")
         failures = 0
         failingSince = 0L
         val exo = exo ?: return
@@ -1316,6 +1387,8 @@ class ConnectSession @Inject constructor(
         const val REFRESH_DELAY_MS = 400L
         /** Stage 7: how far ahead the taking-over player gets the song ready, and how often the handoff looks. */
         const val HANDOFF_LEAD_MS = 1_500L
+        /** Stage 10: the lead for one of the computer's songs the phone has no whole copy of yet. */
+        const val HANDOFF_LEAD_OVER_WIFI_MS = 4_000L
         const val HANDOFF_TICK_MS = 20L
         const val HANDOFF_POLL_MS = 100L
         const val SEEK_SETTLE_MS = 150L

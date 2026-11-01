@@ -200,6 +200,7 @@ Diferențe față de `RemoteCache` actual:
 | 7 | Handoff în ambele sensuri | §3.4: fără redare dublă în niciun punct de eșec (test cu eșec injectat la fiecare pas); handoff < 1 s pe Wi-Fi bun [țintă de măsurat] | ✅ implementat. Automat: 3000 de handoff-uri simulate în ambele sensuri, cu întârzieri și un eșec injectat la fiecare pas, fără nicio suprapunere; dacă ținta pornește fără confirmarea opririi sursei, testul pică (mutație). Pe motorul real al PC-ului, prin HTTP local: telefonul se oprește la 10 ms de punct, iar PC-ul cântă după 25 ms, din același loc. **Neverificat pe dispozitive** |
 | 8 | Crossfade pe PC | motorul PC face crossfade doar cu următoarea decodată în buffer; altfel trecere normală | ✅ implementat. Automat: fade cu putere egală măsurat pe ieșire (A singur, apoi A și B se anulează la jumătate, apoi B singur, fără niciun salt); durata totală e A + B minus fade-ul; dacă următoarea nu e decodată la timp, piesele se succed fără gol și fără fade; seek în mijlocul fade-ului; setarea telefonului ajunge pe PC și e folosită pentru piesele lui. **Neverificat pe dispozitive** |
 | 9 | Testare pe dispozitive reale | matricea din §5, pași și rezultate așteptate în [UNIVERSAL-QUEUE-DEVICE-TESTS.md](UNIVERSAL-QUEUE-DEVICE-TESTS.md) | 🔧 pregătită: jurnale de diagnostic pe telefon (Play on → Save diagnostics) și pe PC (Connect → Open log folder), cu golul de handoff, căderile de rețea, cache-ul, transferurile și crossfade-ul măsurate automat. **Așteaptă runda de test pe dispozitive** |
+| 10 | Restanțele amânate: limita cache-ului pe telefon, „Continuă aici”, piesele PC-ului fără copie la handoff | limita se schimbă pe telefon și eliberează spațiul imediat (fără curenta și următoarea); după un handoff nesigur telefonul tace până alegi; o piesă a PC-ului citită prin Wi-Fi are mai mult timp de pregătire | ✅ implementat. Automat: limita coborâtă eliberează spațiul pe loc, păstrând curenta și următoarea (`MediaCacheTest`); ecranul Play on testat (întrebarea, cele două butoane, limitele, golirea). **Neverificat pe dispozitive** |
 
 ---
 
@@ -228,6 +229,18 @@ Diferențe față de `RemoteCache` actual:
 - **Album nou** (decizia 1, acum și în player): melodiile manuale care urmau se păstrează imediat după piesa aleasă, și în Smart, și în Random.
 - **PC:** primește id-ul fiecărei intrări și dacă e fixată, deci o mutare între două copii ale aceleiași melodii nu mai e confundată.
 - **Limită:** proveniența nu se salvează. După ce Android oprește aplicația, coada restaurată e toată „listă”.
+
+### Ce face etapa 10 concret
+
+- **Limita cache-ului pe telefon:** în **Play on**, cardul „Songs from your computers” arată cât ocupă piesele PC-ului păstrate pe telefon și limita lor: 500 MB, 1 GB (implicit), 2 GB sau 5 GB, niciodată peste o zecime din spațiul liber.
+  - O limită mai mică eliberează spațiul pe loc: pleacă întâi piesele folosite cel mai demult; piesa curentă și următoarea rămân.
+  - **Empty** șterge toate copiile; piesele se redau în continuare, direct de la PC.
+  - Același lucru pe PC: o limită mai mică în Connect eliberează spațiul imediat, nu la următoarea descărcare.
+- **„Continuă aici”:** după un handoff care s-a terminat fără să se știe unde e muzica, telefonul tace și întreabă (Play on se deschide singur):
+  - **telefon → PC**, PC-ul a primit „play” și n-a mai răspuns: „Continue here” încheie sesiunea (PC-ul e rugat să se oprească, dacă aude) și cântă pe telefon din același loc; „Keep it there” lasă sesiunea cum e. Întrebarea dispare singură dacă PC-ul răspunde din nou și cântă;
+  - **PC → telefon**, PC-ul n-a confirmat pauza: telefonul e pe pauză; „Continue here” îl pornește, „Leave it” îl lasă așa.
+- **Piesele PC-ului fără copie la handoff spre telefon:** dacă piesa nu e încă întreagă pe telefon, e citită prin Wi-Fi și pregătită cu 4 s înainte (în loc de 1,5 s), ca handoff-ul să nu-și rateze punctul cât se umple bufferul. Jurnalul arată ce avans s-a folosit.
+- **Ce nu face încă:** nu poate porni singur muzica pe telefon când aplicația e închisă (limita Android din §3.7).
 
 ### Ce face etapa 8 concret
 
@@ -259,8 +272,8 @@ Diferențe față de `RemoteCache` actual:
 - **Telefon → PC:** alegerea PC-ului în „Play on” cât muzica merge pe telefon. Dacă e pe pauză, se mută pe pauză, ca înainte.
 - **PC → telefon:** „This phone” cât muzica merge pe PC. **Schimbare:** muzica continuă pe telefon din același loc. Înainte revenea pe pauză. Pe pauză sau la Stop pe PC, revine tot pe pauză.
 - **Ce nu face încă:**
-  - o piesă a PC-ului (etapa 6) care trece pe telefon fără copie locală e citită direct de la PC, deci pregătirea poate dura mai mult;
-  - nu există un dialog „Continuă aici”: în cazul nesigur telefonul rămâne pe pauză, iar Play continuă pe telefon.
+  - o piesă a PC-ului (etapa 6) care trece pe telefon fără copie locală e citită direct de la PC, deci pregătirea poate dura mai mult (etapa 10 îi dă mai mult timp);
+  - dialogul „Continuă aici” pentru cazul nesigur a venit în etapa 10.
 
 ### Ce face etapa 6 concret
 
@@ -339,7 +352,7 @@ Ce măsurăm (etapele 3–9): goluri audio (număr și durată), timpul de hando
    - lista lui și selecțiile lui manuale intră după selecțiile de aici și înaintea recomandărilor;
    - recomandările lui merg la final;
    - nimic din coada de aici nu se mută.
-3. **Cache:** limitele sunt **setabile** pe PC (1–20 GB, implicit 2). Pe telefon limita e deocamdată fixă la 1 GB (setarea vine după testarea pe dispozitive). Plafonul de 10% din spațiul liber e activ peste tot.
+3. **Cache:** limitele sunt **setabile** pe PC (1–20 GB, implicit 2) și, din etapa 10, pe telefon (500 MB, 1, 2 sau 5 GB, implicit 1 GB; în Play on). Plafonul de 10% din spațiul liber e activ peste tot, iar o limită mai mică eliberează spațiul imediat.
 4. **Formate nesuportate de telefon** (APE, WavPack, WMA, DSD, ALAC, AIFF): PC-ul le **convertește în FLAC** cu ffmpeg (etapa 6, implementat). Conversia se face o singură dată pe versiune de fișier; un fișier re-etichetat primește alt id.
 
 ## Surse

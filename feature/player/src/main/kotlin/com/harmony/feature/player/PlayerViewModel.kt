@@ -72,6 +72,10 @@ class PlayerViewModel @Inject constructor(
                 _diagnosticsSaved.value = where ?: "nowhere (it couldn't be saved)"
             }
         },
+        continueHere = connect::continueHere,
+        dismissUnsure = connect::dismissUnsure,
+        setCacheLimit = connect::setPhoneCacheLimit,
+        emptyCache = connect::emptyPhoneCache,
     )
 
     private val _diagnosticsSaved = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
