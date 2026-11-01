@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **152**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 151), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **153**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 152), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -210,6 +210,14 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   place (paused, it comes back paused, as before). If the other side can't take over,
   the music simply carries on where it was; if it stops answering midway, Harmony stays
   silent rather than risk both playing at once.
+- **Choose how much room your PC's songs take on the phone.** In **Play on**, the songs
+  from your computers kept on the phone (so they play without waiting on the Wi-Fi) show
+  how much they take; the limit is 500 MB, 1 GB, 2 GB or 5 GB, never more than a tenth of
+  the free space, and **Empty** removes them (they still play, from the PC). A lower limit
+  frees the space at once, on the phone and in Harmony for Windows.
+- **"Continue here" when it isn't clear where the music is.** If the PC stops answering
+  in the middle of moving the music, the phone stays silent and asks: **Continue here**,
+  or leave it where it is. The question goes by itself once the PC answers and plays.
 - **Diagnostics for testing Connect.** On the phone, **Play on** → **Save diagnostics**
   saves a log of Connect, the shared queue, handoffs (with how long the music was silent)
   and transfers to Download/Harmony, to send from the Files app. In Harmony for Windows,
