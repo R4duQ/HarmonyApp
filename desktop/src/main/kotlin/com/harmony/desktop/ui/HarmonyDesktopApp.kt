@@ -29,7 +29,6 @@ import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
@@ -55,7 +54,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -149,12 +147,8 @@ private fun Sidebar(current: Section?, phone: String?, reconnecting: Boolean, da
             .padding(horizontal = 14.dp, vertical = 20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp, bottom = 26.dp)) {
-            Box(
-                Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(Brush.linearGradient(listOf(Color(0xFF9B78FF), Accent.PurpleDeep))),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
-            }
+            // The phone app's icon, the same mark.
+            HarmonyMark(Modifier.size(34.dp))
             Text("Harmony", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.padding(start = 11.dp))
         }
         NavItem(Section.HOME, Section.HOME == current, onSelect)
