@@ -40,7 +40,7 @@ internal object AmazonDownloadFinalizer {
             // Input format must precede -i: the provider may name encrypted MOV bytes .flac.
             // Copy the actual codec first; do not turn AAC/other lossy content into fake FLAC.
             val remux = execute(listOf(
-                "-v", "error", "-xerror", "-nostdin", "-hide_banner", "-y",
+                "-v", "error", "-xerror", "-nostdin", "-nostats", "-hide_banner", "-y",
                 "-decryption_key", key, "-f", "mov", "-i", source.absolutePath,
                 "-map", "0:a:0", "-vn", "-sn", "-dn", "-map_metadata", "-1",
                 "-c:a", "copy", "-strict", "-2", "-movflags", "+faststart",
@@ -52,7 +52,7 @@ internal object AmazonDownloadFinalizer {
             // Stream-copy can succeed with a wrong key. Decode the entire private result, and use
             // FFmpeg's actual input codec rather than trusting the provider's codec/extension.
             val validation = execute(listOf(
-                "-v", "info", "-xerror", "-nostdin", "-hide_banner",
+                "-v", "info", "-xerror", "-nostdin", "-nostats", "-hide_banner",
                 "-i", output.absolutePath, "-map", "0:a:0", "-vn", "-sn", "-dn",
                 "-f", "null", "-",
             ))

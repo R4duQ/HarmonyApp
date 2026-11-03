@@ -37,6 +37,7 @@ class AmazonDownloadFinalizerTest {
         assertEquals("mov", remux[remux.indexOf("-f") + 1])
         assertEquals("copy", remux[remux.indexOf("-c:a") + 1])
         assertFalse(calls.last().contains("-decryption_key"))
+        assertTrue(calls.last().contains("-nostats")) // progress must not push codec info out of bounded logs
         assertFalse(calls.last().contains("-t")) // check the whole audio, not a short prefix
     }
 
