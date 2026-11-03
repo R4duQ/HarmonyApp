@@ -15,6 +15,13 @@ Recognize computes Shazam audio fingerprints on the phone with a Kotlin port of 
 Upstream license files and copyright notices remain authoritative for the respective upstream projects.
 
 
+## Mornye downloads on Android (the Mornye build)
+
+- Mornye 5.3.0 (MIT), copyright (c) 2026 zarzet.
+  Source: https://github.com/mornyeapp/Mornye/tree/172229d7e5f9be87f0694d20c18942dd683298d9
+  The Rust runtime (rust_backend) and its Kotlin bindings are built from source by
+  scripts/ci/build-mornye-backend.sh and are not committed as binaries.
+
 ## Mornye downloads on iOS
 
 - Mornye 5.2.5 (MIT), copyright (c) 2026 zarzet.
