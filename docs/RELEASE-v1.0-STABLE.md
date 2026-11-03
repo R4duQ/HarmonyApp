@@ -1,8 +1,15 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **154**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 153), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **155**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 154), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 155 — Amazon Music fix
+
+Amazon Music downloads now complete the provider-requested local MOV audio step before
+FLAC finalization, in both Stable and Mornye. Harmony checks that the entire result
+decodes and that its actual codec is lossless FLAC or ALAC before accepting it. Tidal,
+Qobuz, Deezer and provider fallback rules are unchanged.
 
 ## Download
 
