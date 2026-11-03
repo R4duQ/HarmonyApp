@@ -27,10 +27,10 @@ class AmazonDownloadFinalizerFfmpegTest {
         return AmazonDownloadFinalizer.Execution(finished && process.exitValue() == 0, log.readText())
     }
 
-    private fun fixture(codec: String, encrypt: Boolean = true): Pair<File, File> {
+    private fun fixture(codec: String, encrypt: Boolean = true, bits: Int = 16, sampleRate: Int = 48000): Pair<File, File> {
         val original = File(temp.root, "reference-$codec.wav")
-        assertTrue(execute(listOf("-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-            "-t", "0.35", "-c:a", "pcm_s16le", original.absolutePath)).success)
+        assertTrue(execute(listOf("-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=$sampleRate",
+            "-t", "0.35", "-c:a", "pcm_s${bits}le", original.absolutePath)).success)
         // Deliberately misleading extension, matching Amazon's descriptor-driven input.
         val encrypted = File(temp.root, "encrypted-$codec.flac")
         val encryption = if (encrypt) listOf("-encryption_scheme", "cenc-aes-ctr",
@@ -52,11 +52,11 @@ class AmazonDownloadFinalizerFfmpegTest {
     }
 
     @Test fun providerMovResultsKeepTheExactDecodedAudio() = runBlocking {
-        for (codec in listOf("flac", "alac")) {
+        for ((codec, bits, sampleRate) in listOf(Triple("flac", 16, 48000), Triple("flac", 24, 96000), Triple("alac", 16, 48000))) {
             // FFmpeg's CENC muxer does not preserve ALAC's configuration in a usable fixture.
             // Test encrypted FLAC and a valid clear ALAC descriptor result, without inventing
             // an encrypted ALAC fixture that is undecodable even with the correct key.
-            val (original, encrypted) = fixture(codec, encrypt = codec == "flac")
+            val (original, encrypted) = fixture(codec, encrypt = codec == "flac", bits = bits, sampleRate = sampleRate)
             val result = AmazonDownloadFinalizer.finish("amazon", response(), encrypted, temp.root) { execute(it) }
             assertEquals(codec, result.codec)
             assertEquals(pcmHash(original), pcmHash(result.file))
