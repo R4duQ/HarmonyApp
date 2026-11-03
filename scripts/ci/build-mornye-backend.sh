@@ -11,7 +11,7 @@ set -euo pipefail
 # bindings come from the same source. Intended for GitHub-hosted Ubuntu runners
 # and local Linux builds.
 
-MORNYE_TAG="${MORNYE_TAG:-v5.2.5}"
+MORNYE_TAG="${MORNYE_TAG:-v5.3.0}"
 MORNYE_NDK_VERSION="${MORNYE_NDK_VERSION:-30.0.16248370}"
 # Mornye builds its Android library for ARM only; Harmony's Mornye build is a phone build.
 MORNYE_ABIS="${MORNYE_ABIS:-arm64-v8a}"

@@ -1,7 +1,7 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **153**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 152), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **154**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 153), so it installs as an
 update over any of them. Library, playlists and settings are kept.
 
 ## Download
@@ -9,7 +9,7 @@ update over any of them. Library, playlists and settings are kept.
 - `Harmony-v1.0-arm64-v8a.apk`: for phones (64-bit ARM, Android 10 or newer). The stable
   build: downloads run on SpotiFLAC 4.9.6, as before.
 - `Harmony-v1.0-mornye-arm64-v8a.apk`: the same app for phones, with downloads running on
-  Mornye 5.2.5 instead (see below). Try it if you want the newer download runtime.
+  Mornye 5.3.0 instead (see below). Try it if you want the newer download runtime.
 - `Harmony-v1.0-x86_64.apk`: for the Android emulator only (stable build).
 - `Harmony-v1.0-iOS-unsigned.ipa`: Harmony for iPhone (iOS 16 or newer), unsigned. Install it
   from Windows or a Mac with Sideloadly or AltStore, which sign it with your Apple ID; with a
@@ -24,7 +24,7 @@ downloads differ.
 SpotiFLAC, the download runtime behind Harmony's lossless downloads, has become
 **Mornye**, and from version 5 its Go runtime was replaced by a new one written in Rust.
 The stable build keeps SpotiFLAC 4.9.6, which still runs every current download
-extension. The Mornye build uses Mornye 5.2.5 with the same extensions (Tidal, Qobuz,
+extension. The Mornye build uses Mornye 5.3.0 with the same extensions (Tidal, Qobuz,
 Deezer, Amazon), the same requests and the same answers, so downloads look and behave
 the same. Differences you may notice:
 
@@ -210,6 +210,12 @@ Harmony for Windows is a separate download, on its own release: **Harmony for Wi
   place (paused, it comes back paused, as before). If the other side can't take over,
   the music simply carries on where it was; if it stops answering midway, Harmony stays
   silent rather than risk both playing at once.
+- **Mornye 5.3.0 in the Mornye build** (was 5.2.5). Its download runtime now treats the
+  same recording found at different services as one song, keeps the cover art when a
+  playlist is downloaded, prefers Deezer releases that can actually be played when it
+  matches by ISRC, reads Opus tags with large artwork, keeps WAV INFO and ID3 tags in step,
+  and copes with storage that can't rename a finished file in one step. The stable build
+  is unchanged (SpotiFLAC 4.9.6). The iPhone build stays on Mornye 5.2.5 for now.
 - **Choose how much room your PC's songs take on the phone.** In **Play on**, the songs
   from your computers kept on the phone (so they play without waiting on the Wi-Fi) show
   how much they take; the limit is 500 MB, 1 GB, 2 GB or 5 GB, never more than a tenth of
