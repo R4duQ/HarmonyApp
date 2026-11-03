@@ -51,8 +51,8 @@ import javax.inject.Singleton
  * v7.7 host goals:
  *  - keep the v7.0 signed-session completion and Android deep-link callback flow;
  *  - preserve successful provider results instead of masking host-side failures with later fallback errors;
- *  - detect and redact SpotiFLAC's decryption descriptor before local format probing;
- *  - never implement protected-stream decryption or provider access-control bypasses;
+ *  - complete Amazon's provider-supplied MOV descriptor with bundled FFmpeg before format probing;
+ *  - keep other providers' descriptor handling unchanged and never expose keys in diagnostics;
  *  - reproduce the unencrypted lossless container finalization policy;
  *  - initialize the bundled FFmpeg independently of yt-dlp, and use a two-stage
  *    FLAC-in-MP4 finalizer (bit-exact remux first, official-style FLAC encode fallback);
@@ -768,21 +768,60 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     // incorrectly rejected that success before host finalization.
                     // Reproduce the lossless-only portion here because Harmony
                     // invokes the Go backend directly rather than the Flutter host.
-                    val file = resolveOutputFile(
+                    var file = resolveOutputFile(
                         jobDir = jobDir,
                         reportedPath = response.optString("file_path").ifBlank { response.optString("file") },
                         reportedName = response.optString("file_name"),
                     )
 
-                    // The official SpotiFLAC host parses an optional decryption
-                    // descriptor from a successful backend result and performs
-                    // that stage before container conversion. Harmony intentionally
-                    // does not implement protected-stream decryption. Detect it
-                    // here, redact the key, and preserve the successful provider
-                    // as the real cause instead of rotating to another provider
-                    // and later surfacing an unrelated 429/not-found error.
+                    // Amazon returns a successful provider result before the host's MOV step.
+                    // Only Amazon uses this finalizer; all other providers keep their existing guard.
                     val decryptionInfo = inspectDownloadDecryption(response)
-                    if (decryptionInfo != null) {
+                    if (decryptionInfo != null && reportedProvider == "amazon") {
+                        onProgress(SpotiFlacTransferProgress(
+                            SpotiFlacStage.FINALIZING, provider = "amazon",
+                            detail = "Finishing Amazon Music audio…",
+                        ))
+                        try {
+                            val source = file ?: throw AmazonDownloadFinalizer.Failure(
+                                "source", "Amazon's downloaded audio file is missing.",
+                            )
+                            val completed = finishAmazonDownload(response, source, jobDir)
+                            file = completed.file
+                            response.apply {
+                                put("file_path", completed.file.absolutePath)
+                                put("file", completed.file.absolutePath)
+                                put("file_name", completed.file.name)
+                                put("audio_codec", completed.codec)
+                                put("actual_extension", ".m4a")
+                                put("actual_container", "mp4")
+                                put("requires_container_conversion", true)
+                                remove("decryption")
+                                remove("decryption_key")
+                            }
+                            attemptDiagnostic.put("host_stage", "amazon_audio_ready")
+                            attemptDiagnostic.put("decryption", decryptionInfo.toSafeJson())
+                        } catch (failure: AmazonDownloadFinalizer.Failure) {
+                            attemptDiagnostic.put("host_stage", "amazon_finalization_failed")
+                            attemptDiagnostic.put("amazon_stage", failure.stage)
+                            attemptDiagnostic.put("decryption", decryptionInfo.toSafeJson())
+                            diagnostics.put(attemptDiagnostic)
+                            throw SpotiFlacException(
+                                message = failure.message ?: "Amazon audio finalization failed.",
+                                errorType = "amazon_finalization_failed",
+                                provider = "amazon",
+                                technicalDetails = JSONObject().apply {
+                                    put("registry", activeRegistrySummary)
+                                    put("provider", "amazon")
+                                    put("provider_success", true)
+                                    put("host_stage", "amazon_finalization_failed")
+                                    put("amazon_stage", failure.stage)
+                                    put("decryption", decryptionInfo.toSafeJson())
+                                    put("attempts", diagnostics)
+                                }.toString(2),
+                            )
+                        }
+                    } else if (decryptionInfo != null) {
                         attemptDiagnostic.apply {
                             put("output_found", file != null)
                             put("host_stage", "decryption_required")
@@ -2117,6 +2156,42 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val diagnostic: JSONObject,
     )
 
+    /** Uses the existing verified FFmpeg runtime, timeout and cancellation for Amazon only. */
+    private suspend fun finishAmazonDownload(
+        response: JSONObject, source: File, jobDir: File,
+    ): AmazonDownloadFinalizer.Completed = withContext(Dispatchers.IO) {
+        try {
+            prepareFfmpegRuntime()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            throw AmazonDownloadFinalizer.Failure("runtime", "FFmpeg could not be prepared for Amazon Music on this phone.")
+        }
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val executable = listOf(File(nativeDir, "libffmpeg.so"), File(nativeDir, "libffmpeg.bin.so"))
+            .firstOrNull { it.isFile && it.length() > 0L }
+            ?: throw AmazonDownloadFinalizer.Failure("runtime", "FFmpeg is missing from this installation.")
+        if (!executable.canExecute()) runCatching { executable.setExecutable(true, false) }
+        AmazonDownloadFinalizer.finish("amazon", response, source, jobDir) { arguments ->
+            var result = AmazonDownloadFinalizer.Execution(false, "")
+            for (profile in FfmpegEnvironmentProfile.entries) {
+                val log = File(jobDir, "harmony-amazon-${UUID.randomUUID()}.log")
+                val attempt = try {
+                    runFfmpegProcess(
+                        listOf(executable.absolutePath) + arguments, log, nativeDir,
+                        LOSSLESS_FINALIZER_TIMEOUT_SECONDS, profile,
+                    )
+                } finally {
+                    // A failed FFmpeg invocation can echo input options. Never keep its log.
+                    log.delete()
+                }
+                result = AmazonDownloadFinalizer.Execution(attempt.success, attempt.logTail)
+                if (attempt.success) break
+            }
+            result
+        }
+    }
+
     private data class DownloadDecryptionInfo(
         val normalizedStrategy: String,
         val keyLength: Int,
@@ -2138,7 +2213,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
     /**
      * Mirrors only the descriptor *detection* portion of SpotiFLAC Mobile's
      * DownloadDecryptionDescriptor.fromDownloadResult(). No key material is
-     * returned to diagnostics and Harmony does not execute a decrypt command.
+     * returned to diagnostics. Execution is restricted to the Amazon path above.
      */
     private fun inspectDownloadDecryption(response: JSONObject): DownloadDecryptionInfo? {
         val descriptor = response.optJSONObject("decryption")
