@@ -112,7 +112,14 @@ jobs:
           ./build/shuffle-host/shuffle_test
           echo "HARMONY_SHUFFLE_HOST_LIB_DIR=$PWD/build/shuffle-host" >> "$GITHUB_ENV"
 
+      - name: Install host FFmpeg for Amazon finalizer tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Playback and download tests
+        env:
+          HARMONY_TEST_FFMPEG: /usr/bin/ffmpeg
         run: >-
           ./gradlew
           :playback:service:testReleaseUnitTest
