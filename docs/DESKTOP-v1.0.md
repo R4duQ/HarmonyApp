@@ -61,6 +61,8 @@ say "Windows protected your PC": choose **More info**, then **Run anyway**.
   phone is connected and the phone's song is set aside, paused; play on the phone brings it
   back.
   If Windows asks whether Harmony may use the network, allow it on private networks.
+- **The same icon as on the phone.** The window, the taskbar, the Start menu and the installer
+  show Harmony's mark from the phone app, the slanted H on amber, and so does the sidebar.
 
 Harmony for Windows uses FFmpeg (LGPL build, from BtbN/FFmpeg-Builds) to read and decode
 audio; its licence is installed next to it.
