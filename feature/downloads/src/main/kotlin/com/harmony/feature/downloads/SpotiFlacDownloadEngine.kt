@@ -77,6 +77,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
     /** SpotiFLAC's Go runtime or Mornye's Rust one, depending on the build. */
     private val backend: SpotiFlacBackend = createSpotiFlacBackend()
 
+    /** "Mornye" in the Mornye build, "SpotiFLAC" in the stable one: the engine behind album and track downloads. */
+    val engineName: String get() = backend.displayName
+
     // MainActivity can receive the deep link before a workflow ViewModel is
     // recreated after browser verification. Replay preserves that completion,
     // while SharedFlow lets Downloads and Playlist Transfer observe the result;
@@ -1357,8 +1360,16 @@ class SpotiFlacDownloadEngine @Inject constructor(
             put("track_name", title)
             put("artist_name", artist)
             put("album_name", track.album)
-            put("album_artist", artist)
+            put("album_artist", track.albumTags?.albumArtist?.takeIf(String::isNotBlank) ?: artist)
             put("cover_url", track.thumbnailUrl.orEmpty())
+            // An album's own numbering and date, embedded with the rest (embed_metadata).
+            track.albumTags?.let { tags ->
+                put("track_number", tags.trackNumber.coerceAtLeast(0))
+                put("disc_number", tags.discNumber.coerceAtLeast(0))
+                put("total_tracks", tags.totalTracks.coerceAtLeast(0))
+                put("total_discs", tags.totalDiscs.coerceAtLeast(0))
+                put("release_date", tags.releaseDate)
+            }
             put("output_dir", jobDir.absolutePath)
             put("audio_format", "LOSSLESS")
             // Quality is selected from the installed provider's capabilities

@@ -14,7 +14,17 @@ import java.text.Normalizer
 import java.util.Locale
 import javax.inject.Inject
 
-data class AlbumEdition(val id: String, val title: String, val artist: String, val cover: String)
+data class AlbumEdition(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val cover: String,
+    /** Tracks on this edition, 0 when the search didn't say. */
+    val trackCount: Int = 0,
+    /** "album", "single", "ep", "compile"; "" when unknown. */
+    val recordType: String = "",
+    val explicit: Boolean = false,
+)
 
 /** Stable identity for albums opened from Downloads, independent of engine. */
 internal fun downloadsAlbumId(editionId: String): String {
@@ -62,7 +72,10 @@ class AlbumMetadataClient @Inject constructor() {
         val data = get("https://api.deezer.com/search/album?q=$query&limit=25").getJSONArray("data")
         (0 until data.length()).map { data.getJSONObject(it) }.map { a ->
             AlbumEdition(a.getLong("id").toString(), a.optString("title"),
-                a.optJSONObject("artist")?.optString("name").orEmpty(), a.optString("cover_big"))
+                a.optJSONObject("artist")?.optString("name").orEmpty(), a.optString("cover_big"),
+                trackCount = a.optInt("nb_tracks", 0).coerceAtLeast(0),
+                recordType = a.optString("record_type").takeIf { it.length in 1..20 }.orEmpty(),
+                explicit = a.optBoolean("explicit_lyrics", false))
         }.filter { it.title.isNotBlank() && it.artist.isNotBlank() }.distinctBy { it.id }.take(25)
     }
 
@@ -104,8 +117,12 @@ class AlbumMetadataClient @Inject constructor() {
             page = get(url.toString())
         }
         check(rows.size == total && rows.map { it.id }.distinct().size == total) { "The complete album tracklist is unavailable. Retry later." }
-        AlbumJourney(shflId, edition.title, edition.artist, edition.cover, edition.id,
-            rows.sortedWith(compareBy<AlbumJourneyTrack> { it.disc }.thenBy { it.number }))
+        // The largest cover Deezer has (1000 px), for the tags and the album sheet; the search's 500 px otherwise.
+        val cover = album.optString("cover_xl").takeIf { it.startsWith("https://") } ?: edition.cover
+        val released = album.optString("release_date").takeIf { it.matches(Regex("\\d{4}(-\\d{2}-\\d{2})?")) }.orEmpty()
+        AlbumJourney(shflId, edition.title, edition.artist, cover, edition.id,
+            rows.sortedWith(compareBy<AlbumJourneyTrack> { it.disc }.thenBy { it.number }),
+            releaseDate = released)
     }
 
     private fun get(url: String): JSONObject {

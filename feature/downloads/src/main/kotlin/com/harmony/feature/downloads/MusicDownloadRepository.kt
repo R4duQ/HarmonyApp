@@ -596,13 +596,13 @@ class MusicDownloadRepository @Inject constructor(
      * Publish a completed engine download through Harmony's one shared storage path.
      * The source remains in app-private staging until MediaStore/SAF has accepted it.
      */
-    suspend fun publishStagedFlac(tempFile: File, suggestedFileName: String): ConvertedFlac =
+    suspend fun publishStagedFlac(tempFile: File, suggestedFileName: String, subfolders: List<String> = emptyList()): ConvertedFlac =
         withContext(Dispatchers.IO) {
             val requestedName = sanitizeFileName(suggestedFileName).let {
                 if (it.endsWith(".flac", ignoreCase = true)) it else "$it.flac"
             }
             try {
-                val destination = publishFlac(tempFile, requestedName)
+                val destination = publishFlac(tempFile, requestedName, AlbumFiles.folders(subfolders))
                 val size = context.contentResolver.openAssetFileDescriptor(destination, "r")
                     ?.use { it.length }
                     ?.takeIf { it >= 0L }
@@ -614,13 +614,13 @@ class MusicDownloadRepository @Inject constructor(
         }
 
     /** Publish a locally encoded SpotiFLAC MP3 through the same download folder. */
-    suspend fun publishStagedMp3(tempFile: File, suggestedFileName: String): ConvertedFlac =
+    suspend fun publishStagedMp3(tempFile: File, suggestedFileName: String, subfolders: List<String> = emptyList()): ConvertedFlac =
         withContext(Dispatchers.IO) {
             val requestedName = sanitizeFileName(suggestedFileName).let {
                 if (it.endsWith(".mp3", ignoreCase = true)) it else "$it.mp3"
             }
             try {
-                val destination = publishAudio(tempFile, requestedName, "audio/mpeg", "MP3")
+                val destination = publishAudio(tempFile, requestedName, "audio/mpeg", "MP3", AlbumFiles.folders(subfolders))
                 val size = context.contentResolver.openAssetFileDescriptor(destination, "r")
                     ?.use { it.length }
                     ?.takeIf { it >= 0L }
@@ -919,13 +919,50 @@ class MusicDownloadRepository @Inject constructor(
     suspend fun publishSoulseekFlac(downloaded: SoulseekDownloadedFile): ConvertedFlac =
         publishStagedFlac(downloaded.tempFile, downloaded.suggestedFileName)
 
-    private fun publishAudio(source: File, requestedName: String, mimeType: String, formatLabel: String): Uri {
+    private fun publishAudio(
+        source: File,
+        requestedName: String,
+        mimeType: String,
+        formatLabel: String,
+        subfolders: List<String> = emptyList(),
+    ): Uri {
         val customFolder = selectedDownloadFolderUri()
         return if (customFolder == null) {
-            publishAudioToMediaStore(source, requestedName, mimeType, formatLabel)
+            publishAudioToMediaStore(source, requestedName, mimeType, formatLabel, subfolders)
         } else {
-            publishAudioToTree(source, requestedName, mimeType, formatLabel, customFolder)
+            publishAudioToTree(source, requestedName, mimeType, formatLabel, customFolder, subfolders)
         }
+    }
+
+    /**
+     * The folder [subfolders] (already safe names, see [AlbumFiles.folders])
+     * inside the chosen download folder, made where missing; the folder
+     * itself when there are none.
+     */
+    private fun treeFolder(treeUri: Uri, subfolders: List<String>): Uri {
+        val resolver = context.contentResolver
+        var parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+        for (name in subfolders) {
+            val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, DocumentsContract.getDocumentId(parent))
+            val existing = resolver.query(
+                children,
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE),
+                null, null, null,
+            )?.use { cursor ->
+                var found: String? = null
+                while (found == null && cursor.moveToNext()) {
+                    if (cursor.getString(1) == name && cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) found = cursor.getString(0)
+                }
+                found
+            }
+            parent = if (existing != null) DocumentsContract.buildDocumentUriUsingTree(treeUri, existing)
+            else DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name)
+                ?: throw HarmonyDownloadException(
+                    userMessage = "Android couldn't create the album folder in the selected folder.",
+                    technicalDetails = "createDocument(dir) returned null under $treeUri",
+                )
+        }
+        return parent
     }
 
     private fun publishAudioToTree(
@@ -934,6 +971,7 @@ class MusicDownloadRepository @Inject constructor(
         mimeType: String,
         formatLabel: String,
         treeUri: Uri,
+        subfolders: List<String> = emptyList(),
     ): Uri {
         val resolver = context.contentResolver
         val hasWritePermission = resolver.persistedUriPermissions.any { permission ->
@@ -945,10 +983,7 @@ class MusicDownloadRepository @Inject constructor(
                 technicalDetails = "Persisted SAF write permission is missing for $treeUri",
             )
         }
-        val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri),
-        )
+        val parentDocumentUri = treeFolder(treeUri, subfolders)
         val destination = DocumentsContract.createDocument(
             resolver,
             parentDocumentUri,
@@ -978,12 +1013,13 @@ class MusicDownloadRepository @Inject constructor(
         requestedName: String,
         mimeType: String,
         formatLabel: String,
+        subfolders: List<String> = emptyList(),
     ): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, requestedName)
             put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
-            put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/Harmony/Downloads")
+            put(MediaStore.Audio.Media.RELATIVE_PATH, AlbumFiles.relativePath("${Environment.DIRECTORY_MUSIC}/Harmony/Downloads", subfolders))
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
@@ -1158,16 +1194,16 @@ class MusicDownloadRepository @Inject constructor(
         }.getOrElse { "could not validate MP3 container: ${it.message ?: it::class.java.simpleName}" }
     }
 
-    private fun publishFlac(source: File, requestedName: String): Uri {
+    private fun publishFlac(source: File, requestedName: String, subfolders: List<String> = emptyList()): Uri {
         val customFolder = selectedDownloadFolderUri()
         return if (customFolder == null) {
-            publishFlacToMediaStore(source, requestedName)
+            publishFlacToMediaStore(source, requestedName, subfolders)
         } else {
-            publishFlacToTree(source, requestedName, customFolder)
+            publishFlacToTree(source, requestedName, customFolder, subfolders)
         }
     }
 
-    private fun publishFlacToTree(source: File, requestedName: String, treeUri: Uri): Uri {
+    private fun publishFlacToTree(source: File, requestedName: String, treeUri: Uri, subfolders: List<String> = emptyList()): Uri {
         val resolver = context.contentResolver
         val hasWritePermission = resolver.persistedUriPermissions.any { permission ->
             permission.uri == treeUri && permission.isWritePermission
@@ -1179,10 +1215,7 @@ class MusicDownloadRepository @Inject constructor(
             )
         }
 
-        val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri),
-        )
+        val parentDocumentUri = treeFolder(treeUri, subfolders)
         val destination = DocumentsContract.createDocument(
             resolver,
             parentDocumentUri,
@@ -1208,14 +1241,14 @@ class MusicDownloadRepository @Inject constructor(
         }
     }
 
-    private fun publishFlacToMediaStore(source: File, requestedName: String): Uri {
+    private fun publishFlacToMediaStore(source: File, requestedName: String, subfolders: List<String> = emptyList()): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, requestedName)
             put(MediaStore.Audio.Media.MIME_TYPE, "audio/flac")
             put(
                 MediaStore.Audio.Media.RELATIVE_PATH,
-                "${Environment.DIRECTORY_MUSIC}/Harmony/Downloads",
+                AlbumFiles.relativePath("${Environment.DIRECTORY_MUSIC}/Harmony/Downloads", subfolders),
             )
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }

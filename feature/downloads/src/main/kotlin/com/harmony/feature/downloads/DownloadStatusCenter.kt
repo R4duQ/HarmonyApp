@@ -16,6 +16,10 @@ data class ActiveDownload(
     /** 0f..1f, or null when the size is not known yet (indeterminate). */
     val fraction: Float? = null,
     val albumId: String? = null,
+    /** The album track this transfer is (AlbumJourneyTrack.id), for the album's per-track progress. */
+    val trackId: String? = null,
+    /** Transfer speed, 0 when unknown. */
+    val bytesPerSecond: Long = 0L,
 )
 
 /** A finished download, shown briefly and then dismissed. */

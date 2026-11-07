@@ -1,8 +1,26 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **155**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 154), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **156**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 155), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 156 — Album downloads, rebuilt
+
+- **Download a whole album in one tap.** In Downloads › Albums, every search result has a
+  **Download Album** button (and **Tracks** to pick songs). Albums wait their turn in a
+  queue and download one after another, through the same engine as single tracks (Mornye
+  in the Mornye build, SpotiFLAC in the stable one).
+- **One card per album in the queue.** A 14-track album is one card: "Downloading (3/14)",
+  the percentage, the speed and a progress line; open it to see each track (queued, a
+  progress ring, "24D Indexed ✔", Retry). Pause, Resume, Retry the failed tracks or Cancel
+  the album; skip a song that hasn't started, or retry just one.
+- **Album files that sort like albums.** Songs are saved as `Artist/Album/01 - Title.flac`
+  in your download folder, with the album artist, track and disc numbers, the release date
+  and the large cover written into each file.
+- **Ready for Smart Shuffle at once.** When an album is done, its new songs are measured
+  straight away (unless Settings says to analyze only while charging).
+- **Downloads in Cyber-Glass**, like the library: the Tracks and Albums tabs, the album
+  queue and the album page.
 
 ## Build 155 — Amazon Music fix
 
