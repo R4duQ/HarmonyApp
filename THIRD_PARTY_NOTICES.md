@@ -17,8 +17,8 @@ Upstream license files and copyright notices remain authoritative for the respec
 
 ## Mornye downloads on Android (the Mornye build)
 
-- Mornye 5.3.0 (MIT), copyright (c) 2026 zarzet.
-  Source: https://github.com/mornyeapp/Mornye/tree/172229d7e5f9be87f0694d20c18942dd683298d9
+- Mornye 5.3.1 (MIT), copyright (c) 2026 zarzet.
+  Source: https://github.com/mornyeapp/Mornye/tree/e7a8f754a618d28ab0baf88ada3f65ab9d41534a
   The Rust runtime (rust_backend) and its Kotlin bindings are built from source by
   scripts/ci/build-mornye-backend.sh and are not committed as binaries.
 
