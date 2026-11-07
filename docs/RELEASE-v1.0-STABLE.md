@@ -1,8 +1,14 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **156**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 155), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **157**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 156), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 157 — Mornye 5.3.1
+
+The Mornye build's downloads (tracks and albums) now run on Mornye 5.3.1 (was 5.3.0). A
+download extension that stops answering now times out instead of waiting indefinitely; the
+rest of 5.3.1 is Mornye's own app. The stable build (SpotiFLAC 4.9.6) is unchanged.
 
 ## Build 156 — Album downloads, rebuilt
 
@@ -34,7 +40,7 @@ Qobuz, Deezer and provider fallback rules are unchanged.
 - `Harmony-v1.0-arm64-v8a.apk`: for phones (64-bit ARM, Android 10 or newer). The stable
   build: downloads run on SpotiFLAC 4.9.6, as before.
 - `Harmony-v1.0-mornye-arm64-v8a.apk`: the same app for phones, with downloads running on
-  Mornye 5.3.0 instead (see below). Try it if you want the newer download runtime.
+  Mornye 5.3.1 instead (see below). Try it if you want the newer download runtime.
 - `Harmony-v1.0-x86_64.apk`: for the Android emulator only (stable build).
 - `Harmony-v1.0-iOS-unsigned.ipa`: Harmony for iPhone (iOS 16 or newer), unsigned. Install it
   from Windows or a Mac with Sideloadly or AltStore, which sign it with your Apple ID; with a
@@ -49,7 +55,7 @@ downloads differ.
 SpotiFLAC, the download runtime behind Harmony's lossless downloads, has become
 **Mornye**, and from version 5 its Go runtime was replaced by a new one written in Rust.
 The stable build keeps SpotiFLAC 4.9.6, which still runs every current download
-extension. The Mornye build uses Mornye 5.3.0 with the same extensions (Tidal, Qobuz,
+extension. The Mornye build uses Mornye 5.3.1 with the same extensions (Tidal, Qobuz,
 Deezer, Amazon), the same requests and the same answers, so downloads look and behave
 the same. Differences you may notice:
 

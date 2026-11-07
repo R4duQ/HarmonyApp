@@ -14,13 +14,13 @@ import java.io.File
  * requests, responses and extensions are the same. What changed is the shape
  * of the API: one [ExtensionManager] object owns the runtime instead of global
  * functions. The mapping follows Mornye's own Android host
- * (android/app/src/rust/.../RustCoreBackendApplication.kt in Mornye 5.3.0).
+ * (android/app/src/rust/.../RustCoreBackendApplication.kt in Mornye 5.3.1).
  */
 internal fun createSpotiFlacBackend(): SpotiFlacBackend = MornyeSpotiFlacBackend
 
 private object MornyeSpotiFlacBackend : SpotiFlacBackend {
     override val displayName = "Mornye"
-    override val version = "5.3.0"
+    override val version = "5.3.1"
     override val callbackScheme = "mornye"
     override val nativeLibrary = "mornye_mobile"
 
