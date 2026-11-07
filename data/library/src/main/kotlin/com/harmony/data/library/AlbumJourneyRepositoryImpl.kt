@@ -70,6 +70,7 @@ class AlbumJourneyRepositoryImpl @Inject constructor(@ApplicationContext context
             put("id", a.id); put("title", a.title); put("artist", a.artist); put("cover", a.coverUrl)
             put("edition", a.editionId); put("source", a.source); put("format", a.format)
             put("reviewed", a.reviewed); put("remindAfter", a.remindAfter)
+            put("releaseDate", a.releaseDate); put("queuedAt", a.queuedAt)
             put("tracks", JSONArray().apply { a.tracks.forEach { t -> put(JSONObject().apply {
                 put("id", t.id); put("title", t.title); put("artist", t.artist); put("duration", t.durationMs)
                 put("disc", t.disc); put("number", t.number); put("uri", t.uri)
@@ -95,7 +96,8 @@ class AlbumJourneyRepositoryImpl @Inject constructor(@ApplicationContext context
                         (0 until ranges.length()).map { k -> ranges.getJSONArray(k).let { ListenedRange(it.getLong(0), it.getLong(1)) } },
                         t.optLong("playbackDuration"), t.optBoolean("selected", true))
                 } }, a.optString("source", "SPOTIFLAC"), a.optString("format", "FLAC_LOSSLESS"),
-                a.optBoolean("reviewed"), a.optLong("remindAfter"))
+                a.optBoolean("reviewed"), a.optLong("remindAfter"),
+                a.optString("releaseDate"), a.optLong("queuedAt"))
         } }
     }.getOrDefault(emptyList())
 }

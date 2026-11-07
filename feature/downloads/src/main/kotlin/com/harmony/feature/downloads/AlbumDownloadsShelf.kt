@@ -1,83 +1,86 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.harmony.core.ui.component.EditorialPalette
-import com.harmony.core.ui.component.EditorialSectionLabel
+import com.harmony.core.ui.theme.CyberGlassColors
 
 /**
- * The Discover albums you've started, as notification pills.
+ * Album downloads in the Downloads queue: one collapsible card per album
+ * (a 15-track album is one card, not 15 rows), the running and queued ones
+ * first. Tap a card's arrow for its tracks, the card for the album sheet.
  *
- * Two things were wrong before. The rows were bare TextButtons with a
- * Column inside, so they rendered in the Material theme's own primary
- * colour — teal — while every other section of this screen used the
- * editorial palette; the shelf looked like it belonged to a different app.
- * It also took no palette parameter at all, so passing one was impossible
- * rather than merely forgotten. And an album shelf with no covers makes
- * you read titles to find the record you want, when the cover is the thing
- * you'd actually recognise.
- *
- * Now it takes [palette] like every sibling section, uses the same
- * [NotificationPill] as Recent downloads and the edition chooser, and
- * shows the real artwork the journey already carries.
+ * Finished albums show the latest few; "Show all" lists every album you
+ * opened or downloaded (Discover's included).
  */
 @Composable
 fun AlbumDownloadsShelf(
     onOpenAlbum: (String) -> Unit,
-    palette: EditorialPalette,
-    viewModel: AlbumDownloadViewModel = hiltViewModel(),
+    viewModel: AlbumQueueViewModel = hiltViewModel(),
 ) {
-    val albums by viewModel.journeys.collectAsStateWithLifecycle()
-    val work by viewModel.jobs.collectAsStateWithLifecycle()
-    if (albums.isEmpty()) return
+    val batches by viewModel.batches.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    // Which cards are open survives the Tracks/Albums switch and rotation.
+    var expanded by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    if (batches.isEmpty()) return
+    val glass = CyberGlassColors
+    val ordered = batches.sortedWith(compareBy<AlbumBatch> { rank(it.state) })
+    val shown = if (showAll) ordered else ordered.filter { it.active || it.state == AlbumBatchState.PAUSED || it.failed > 0 } +
+        ordered.filterNot { it.active || it.state == AlbumBatchState.PAUSED || it.failed > 0 }.take(RECENT_FINISHED)
+    val active = batches.count { it.active }
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-        EditorialSectionLabel(
-            "Your album downloads",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        albums.asReversed().forEach { album ->
-            val inProgress = work.any { !it.state.isFinished && album.id in it.tags }
-            val total = album.tracks.size
-            // "In progress" leads when it applies: it is the only part of
-            // this line that is about right now rather than a running
-            // total, so burying it at the end behind two ratios was
-            // exactly backwards.
-            val detail = buildList {
-                if (inProgress) add("In progress")
-                add("${album.availableCount}/$total downloaded")
-                add("${album.heardCount}/$total heard")
-            }.joinToString(" · ")
-
-            NotificationPill(
-                title = album.title,
-                detail = detail,
-                palette = palette,
-                modifier = Modifier.padding(horizontal = 20.dp),
-                coverUrl = album.coverUrl,
-                onClick = { onOpenAlbum(album.id) },
-                action = {
-                    PillAction(
-                        icon = Icons.Rounded.ChevronRight,
-                        contentDescription = "Open ${album.title}",
-                        palette = palette,
-                        onClick = { onOpenAlbum(album.id) },
-                    )
-                },
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("ALBUM QUEUE", color = glass.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.4.sp, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            if (active > 0) Text("$active active", color = glass.LiveInk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+        message?.let { CyberNotice(it, error = true, onDismiss = viewModel::dismissMessage) }
+        shown.forEach { batch ->
+            AlbumBatchCard(
+                batch = batch,
+                expanded = batch.albumId in expanded,
+                onToggle = { expanded = if (batch.albumId in expanded) expanded - batch.albumId else expanded + batch.albumId },
+                onOpen = { onOpenAlbum(batch.albumId) },
+                onPause = { viewModel.pause(batch.albumId) },
+                onResume = { viewModel.resume(batch.albumId) },
+                onCancel = { viewModel.cancel(batch.albumId) },
+                onRetryTrack = { viewModel.retryTrack(batch.albumId, it) },
+                onSkipTrack = { viewModel.skipTrack(batch.albumId, it) },
             )
-            Spacer(Modifier.height(8.dp))
+        }
+        if (ordered.size > shown.size || showAll) {
+            TextButton(onClick = { showAll = !showAll }) {
+                Text(if (showAll) "Show fewer" else "Show all ${ordered.size} albums", color = glass.Cyan)
+            }
         }
     }
+}
+
+private const val RECENT_FINISHED = 3
+
+/** Running first, then waiting, then needing attention, then done. */
+private fun rank(state: AlbumBatchState): Int = when (state) {
+    AlbumBatchState.DOWNLOADING, AlbumBatchState.INDEXING -> 0
+    AlbumBatchState.QUEUED -> 1
+    AlbumBatchState.PAUSED, AlbumBatchState.PARTIAL, AlbumBatchState.FAILED -> 2
+    AlbumBatchState.READY -> 3
+    AlbumBatchState.COMPLETED -> 4
 }

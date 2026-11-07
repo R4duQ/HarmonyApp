@@ -14,6 +14,14 @@ data class AlbumJourney(
     val format: String = "FLAC_LOSSLESS",
     val reviewed: Boolean = false,
     val remindAfter: Long = 0L,
+    /** "2013-05-17", "2013", or "" when the metadata had none. */
+    val releaseDate: String = "",
+    /**
+     * When this album was queued for download (epoch ms), 0 when it isn't.
+     * Albums download one after another, oldest first; the job clears it
+     * when it is done with the album (finished, failed or paused).
+     */
+    val queuedAt: Long = 0L,
 ) {
     val availableCount get() = tracks.count { it.uri != null }
     val selectedMissing get() = tracks.filter { it.selectedForDownload && it.uri == null }

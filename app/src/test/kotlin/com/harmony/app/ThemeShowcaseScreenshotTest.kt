@@ -265,4 +265,65 @@ class ThemeShowcaseScreenshotTest {
             }
         }
     }
+
+    // ---- Albums in Downloads (Cyber-Glass) ----------------------------------------------
+
+    private fun albumTracks(): List<com.harmony.domain.library.repository.AlbumJourneyTrack> = listOf(
+        "Give Life Back to Music", "The Game of Love", "Giorgio by Moroder", "Within", "Instant Crush",
+        "Lose Yourself to Dance", "Touch", "Get Lucky",
+    ).mapIndexed { i, t -> com.harmony.domain.library.repository.AlbumJourneyTrack("$i", t, "Daft Punk", 240_000L + i * 17_000L, 1, i + 1) }
+
+    /** One album mid-download: indexed, indexing, saved, downloading at 62 %, waiting, failed, skipped. */
+    private fun downloadingBatch(): com.harmony.feature.downloads.AlbumBatch {
+        val s = com.harmony.feature.downloads.AlbumTrackStatus
+        val t = albumTracks()
+        val rows = listOf(
+            t[0].copy(uri = "content://0", status = s.INDEXED), t[1].copy(uri = "content://1", status = s.INDEXED),
+            t[2].copy(uri = "content://2", status = s.INDEXING), t[3].copy(status = s.DOWNLOADING),
+            t[4], t[5].copy(status = s.NEEDS_RETRY, error = "No provider had this edition"),
+            t[6].copy(selectedForDownload = false, status = s.SKIPPED), t[7],
+        )
+        val album = com.harmony.domain.library.repository.AlbumJourney("ram", "Random Access Memories", "Daft Punk", "", "6575789",
+            rows, releaseDate = "2013-05-17", queuedAt = 1L)
+        val live = com.harmony.feature.downloads.ActiveDownload("Within", "Mornye", "Downloading", 0.62f, albumId = "ram",
+            trackId = "3", bytesPerSecond = 3_400_000L)
+        return com.harmony.feature.downloads.AlbumBatches.of(album, com.harmony.feature.downloads.AlbumWork.RUNNING, true, live)
+    }
+
+    private fun queuedBatch(): com.harmony.feature.downloads.AlbumBatch {
+        val album = com.harmony.domain.library.repository.AlbumJourney("disc", "Discovery", "Daft Punk", "", "302127",
+            albumTracks().take(6), releaseDate = "2001-03-12", queuedAt = 2L)
+        return com.harmony.feature.downloads.AlbumBatches.of(album, com.harmony.feature.downloads.AlbumWork.RUNNING, false, null)
+    }
+
+    @Test fun albumSearchAndQueue() = listOf(false, true).forEach { dark ->
+        shoot("07_album_search_queue", dark) {
+            Column(Modifier.fillMaxSize().background(CyberGlassColors.Page).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                com.harmony.feature.downloads.AlbumBatchCard(downloadingBatch(), expanded = false, onToggle = {}, onOpen = {}, onPause = {},
+                    onResume = {}, onCancel = {}, onRetryTrack = {}, onSkipTrack = {})
+                com.harmony.feature.downloads.AlbumBatchCard(queuedBatch(), expanded = false, onToggle = {}, onOpen = {}, onPause = {},
+                    onResume = {}, onCancel = {}, onRetryTrack = {}, onSkipTrack = {})
+                com.harmony.feature.downloads.AlbumSearchCard(
+                    com.harmony.feature.downloads.AlbumEdition("1", "Homework", "Daft Punk", "", trackCount = 16, recordType = "album"),
+                    quality = "HI-RES", busy = false, loading = false, onOpen = {}, onDownloadAll = {})
+                com.harmony.feature.downloads.AlbumSearchCard(
+                    com.harmony.feature.downloads.AlbumEdition("2", "Alive 2007", "Daft Punk", "", trackCount = 12, recordType = "album", explicit = true),
+                    quality = "FLAC", busy = false, loading = false, onOpen = {}, onDownloadAll = {}, queuedLabel = "Queued")
+            }
+        }
+    }
+
+    @Test fun albumSheet() = listOf(false, true).forEach { dark ->
+        shoot("08_album_sheet", dark) {
+            val batch = downloadingBatch()
+            Column(Modifier.fillMaxSize().background(CyberGlassColors.Page).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                com.harmony.feature.downloads.AlbumBatchHeader(batch, quality = "HI-RES", engine = "Mornye", onMaster = {}, masterEnabled = true)
+                com.harmony.feature.downloads.CyberGlassPanel(corner = 18.dp) {
+                    Column(Modifier.padding(vertical = 4.dp)) {
+                        batch.tracks.forEach { row -> com.harmony.feature.downloads.AlbumTrackLine(row, onRetry = {}, onSkip = {}) }
+                    }
+                }
+            }
+        }
+    }
 }

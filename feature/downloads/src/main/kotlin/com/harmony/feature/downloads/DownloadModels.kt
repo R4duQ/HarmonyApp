@@ -14,6 +14,8 @@ data class IdentifiedTrack(
     val spotifyId: String? = null,
     /** Deezer metadata id used by the existing manual SpotiFLAC search. */
     val metadataId: String? = null,
+    /** Album-level tags, for a track downloaded as part of an album. */
+    val albumTags: AlbumTags? = null,
 ) {
     val displayName: String
         get() = listOf(artist, title)
@@ -22,6 +24,22 @@ data class IdentifiedTrack(
             .ifBlank { sourceTitle.ifBlank { "Harmony download" } }
 }
 
+
+/**
+ * The album a track belongs to, written into its file by the download
+ * engine (Mornye's and SpotiFLAC's request contract v1: track_number,
+ * disc_number, total_tracks, total_discs, release_date, album_artist), so
+ * the album's songs group and sort as one album everywhere.
+ */
+data class AlbumTags(
+    val albumArtist: String,
+    val trackNumber: Int,
+    val discNumber: Int,
+    val totalTracks: Int,
+    val totalDiscs: Int,
+    /** "2013-05-17", "2013" or "". */
+    val releaseDate: String,
+)
 
 data class SpotiFlacSearchCandidate(
     val metadataId: String,

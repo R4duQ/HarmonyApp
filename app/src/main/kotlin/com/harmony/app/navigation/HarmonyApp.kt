@@ -186,9 +186,11 @@ fun HarmonyApp(
             currentRoute?.startsWith("playlist/") == true ||
             currentRoute?.startsWith("smart_playlist/") == true -> greenPalette()
         currentRoute == Routes.EQUALIZER -> bluePalette()
-        currentRoute == Routes.DISCOVER || currentRoute == Routes.ALBUM_DOWNLOAD -> coralPalette()
+        currentRoute == Routes.DISCOVER -> coralPalette()
+        // Downloads and its album sheet wear Cyber-Glass, like the library.
+        currentRoute == Routes.ALBUM_DOWNLOAD -> com.harmony.core.ui.component.libraryPalette()
         currentRoute == Routes.HOME -> amberPalette()
-        currentRoute == Routes.DOWNLOADS -> amberPalette()
+        currentRoute == Routes.DOWNLOADS -> com.harmony.core.ui.component.libraryPalette()
         currentRoute == Routes.SETTINGS -> stonePalette()
         currentRoute == Routes.RECOGNIZE -> lavenderPalette()
         // Any destination added later without a palette still gets sane

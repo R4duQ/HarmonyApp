@@ -3,8 +3,6 @@ package com.harmony.feature.downloads
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.ExistingWorkPolicy
-import androidx.work.WorkManager
 import com.harmony.domain.library.repository.*
 import com.harmony.domain.library.usecase.ScanLibraryUseCase
 import com.harmony.domain.playback.PlaybackController
@@ -14,14 +12,15 @@ import com.harmony.core.ui.network.InternetMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
+/**
+ * The album sheet: choose an edition, the tracks and the source, then
+ * download, pause, resume, cancel or retry, through the app's one album
+ * queue ([AlbumDownloadQueue]).
+ */
 @HiltViewModel
 class AlbumDownloadViewModel @Inject constructor(
     @ApplicationContext context: Context,
@@ -32,27 +31,21 @@ class AlbumDownloadViewModel @Inject constructor(
     private val favorites: FavoritesRepository,
     private val scan: ScanLibraryUseCase,
     private val spoti: SpotiFlacDownloadEngine,
-    private val soulseek: SoulseekClient,
-    downloadStatusCenter: DownloadStatusCenter,
+    private val queue: AlbumDownloadQueue,
+    soulseek: SoulseekClient,
 ) : ViewModel() {
-    private val work = WorkManager.getInstance(context)
-    private val selectionMutex = Mutex()
     val internet = InternetMonitor.get(context).state
 
     /**
      * Soulseek's live connection state, surfaced so the screen can say up
-     * front that the selected engine cannot run.
-     *
-     * The check in [start] stays where it is — it is the one that actually
-     * guards the download — but it only fires when the button is pressed,
-     * which meant selecting Soulseek while signed out looked like a working
-     * choice right up until it failed.
+     * front that the selected engine cannot run. The queue checks it again
+     * when the album is queued.
      */
     val soulseekConnection = soulseek.connectionState
-    val downloadProgress = downloadStatusCenter.active
     val journeys = albums.journeys
-    val jobs = work.getWorkInfosForUniqueWorkFlow(AlbumDownloadWorker.WORK)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val batches = queue.batches
+    /** "Mornye" or "SpotiFLAC", whichever this build downloads with. */
+    val engineName = spoti.engineName
     val editions = MutableStateFlow<List<AlbumEdition>>(emptyList())
     val busy = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
@@ -95,53 +88,33 @@ class AlbumDownloadViewModel @Inject constructor(
         val songs = library.observeSongs().first()
         albums.save(journey.copy(tracks = journey.tracks.map { track ->
             AlbumTrackMatcher.match(track, journey.title, songs)?.let { song ->
-                track.copy(uri = song.uri, status = "Already in library")
+                track.copy(uri = song.uri, status = AlbumTrackStatus.IN_LIBRARY)
             } ?: track
         }))
         message.value = null
     }
 
+    /** Download all / the selected tracks: the album joins the queue. */
     fun start(id: String, source: DownloadSource, format: SpotiFlacOutputFormat, wifiOnly: Boolean) = action(online = true) {
-        selectionMutex.withLock {
-            val outputFormat = AlbumDownloadPolicy.formatFor(source, format)
-            if (source == DownloadSource.SOULSEEK) check(soulseek.connectionState.value.status == SoulseekConnectionStatus.CONNECTED) {
-                "Connect Soulseek in Downloads first, then return to download the selected tracks."
-            }
-            check(withContext(Dispatchers.IO) { work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get() }.none { !it.state.isFinished }) {
-                "An album is already queued. Pause it or wait for it to finish."
-            }
-            val current = albums.journeys.value.first { it.id == id }
-            val selection = current.selectedMissing.map { it.id }
-            check(selection.isNotEmpty()) { "Select at least one missing track to download." }
-            albums.save(current.copy(source = source.name, format = outputFormat.name,
-                reviewed = false, remindAfter = 0L,
-                tracks = if (current.reviewed) current.tracks.map { it.copy(coverage = emptyList(), playbackDurationMs = 0L) } else current.tracks))
-            val request = AlbumDownloadWorker.request(id, wifiOnly, selection, source.name, outputFormat.name)
-            withContext(Dispatchers.IO) {
-                work.enqueueUniqueWork(AlbumDownloadWorker.WORK, ExistingWorkPolicy.KEEP, request).result.get()
-                check(work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get().any { it.id == request.id }) {
-                    "Another album was queued first. Wait for it or pause it before starting this album."
-                }
-            }
-            message.value = "${selection.size} tracks queued. Completed files are kept if you pause."
-        }
+        val count = queue.queue(id, source, format, wifiOnly)
+        val ahead = queue.batches.value.count { it.albumId != id && it.active }
+        message.value = if (ahead > 0) "$count tracks queued after ${if (ahead == 1) "1 album" else "$ahead albums"}."
+            else "$count tracks queued. Saved tracks are kept if you pause."
     }
+    fun pause(id: String) = action { queue.pause(id) }
+    fun resume(id: String) = action(online = true) { queue.resume(id) }
+    fun cancel(id: String) = action { queue.cancel(id); message.value = "Album cancelled. Saved tracks stay on your phone." }
+    fun retryTrack(id: String, trackId: String) = action(online = true) { queue.retryTrack(id, trackId) }
+    fun skipTrack(id: String, trackId: String) = action { queue.skipTrack(id, trackId) }
+
     fun select(id: String, trackId: String? = null, selected: Boolean) {
-        if (busy.value) return
-        // Serialize rapid checkbox taps rather than dropping them while another
-        // preference write is in progress. Start waits for these writes too.
+        // Rapid checkbox taps are serialized by the queue, not dropped.
         viewModelScope.launch {
-            try { selectionMutex.withLock {
-                check(withContext(Dispatchers.IO) { work.getWorkInfosForUniqueWork(AlbumDownloadWorker.WORK).get() }
-                    .none { !it.state.isFinished && id in it.tags }) { "Pause the album before changing its selection." }
-                val album = albums.journeys.value.first { it.id == id }
-                val ids = AlbumDownloadPolicy.selectedIds(album, trackId, selected)
-                albums.selectDownloads(id, ids)
-            } } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { message.value = e.message ?: "Could not save the selected tracks." }
+            try { queue.select(id, trackId, selected) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { message.value = e.message ?: "Could not save the selected tracks." }
         }
     }
-    fun pause() { work.cancelUniqueWork(AlbumDownloadWorker.WORK) }
 
     fun play(id: String) = action {
         scan(force = false).collect { }
@@ -169,8 +142,10 @@ class AlbumDownloadViewModel @Inject constructor(
             SpotiFlacRequestOwner.ALBUM_DOWNLOAD)
         val challenge = spoti.getVerificationChallenge("tidal-web")
         verificationUrl.value = challenge.verificationUrl
-        message.value = if (challenge.authenticated || !challenge.pending) "Provider ready. Tap Resume album." else "Finish verification in your browser, then return and resume."
+        message.value = if (challenge.authenticated || !challenge.pending) "Provider ready. Tap Resume." else "Finish verification in your browser, then return and resume."
     }
+
+    fun dismissMessage() { message.value = null }
 
     private fun action(online: Boolean = false, block: suspend () -> Unit) {
         if (online && !internet.value.ready) { message.value = internet.value.message; return }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
@@ -77,7 +78,9 @@ fun DownloadsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val identity = state.preferredDownloadSource.identity()
-    val palette = animatedEditorialPalette(identity.palette)
+    // Downloads wears Cyber-Glass, like Library (obsidian and cyan in dark, pearl in light):
+    // tracks, albums and the album queue look like one screen.
+    val palette = com.harmony.core.ui.theme.CyberGlassPalette
 
     // Soulseek is peer-to-peer and keeps its login-gated layout. SpotiFLAC
     // checks its provider session in parallel, while public metadata search is
@@ -125,7 +128,7 @@ fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.field)
+            .background(com.harmony.core.ui.theme.CyberGlassColors.Page)
             .verticalScroll(rememberScrollState())
             .padding(bottom = LocalFloatingChromeHeight.current),
     ) {
@@ -158,13 +161,20 @@ fun DownloadsScreen(
             modifier = Modifier.padding(horizontal = 20.dp),
         )
 
-        AlbumDownloadsShelf(onOpenAlbum, palette)
+        // The album queue, above both tabs: a running album stays in sight while you search for tracks.
+        AlbumDownloadsShelf(onOpenAlbum)
 
         if (!converterArmed) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FilterChip(selected = !albumsMode, onClick = { albumsMode = false }, label = { Text("Tracks") })
-                FilterChip(selected = albumsMode, onClick = { albumsMode = true }, label = { Text("Albums") })
-            }
+            com.harmony.core.ui.component.GlassSegmentedTabs(
+                tabs = listOf(
+                    com.harmony.core.ui.component.EditorialTab("Tracks", icon = Icons.Rounded.GraphicEq),
+                    com.harmony.core.ui.component.EditorialTab("Albums", icon = Icons.Rounded.Album),
+                ),
+                selected = if (albumsMode) 1 else 0,
+                onSelect = { albumsMode = it == 1 },
+                palette = palette,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+            )
             if (albumsMode) {
                 // Soulseek album search needs a live peer session, so the
                 // search box is gated on it the same way the Tracks tab's
@@ -183,7 +193,7 @@ fun DownloadsScreen(
                             if (state.soulseekFormatPreference.preferredExtension == "mp3") SpotiFlacOutputFormat.MP3_320
                             else SpotiFlacOutputFormat.FLAC_LOSSLESS
                         } else state.spotiFlacOutputFormat,
-                        palette = palette, onOpenAlbum = onOpenAlbum)
+                        onOpenAlbum = onOpenAlbum)
                 }
             }
         }
