@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.harmony.app"
-        versionCode = 155
+        versionCode = 156
         versionName = "1.0"
 
         // Optional single-ABI build: -PharmonyAbi=arm64-v8a
