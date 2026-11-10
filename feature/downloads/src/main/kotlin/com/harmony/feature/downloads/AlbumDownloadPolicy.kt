@@ -23,6 +23,18 @@ internal object AlbumDownloadPolicy {
         return album.tracks.filter { it.id in ids }.sortedWith(compareBy<AlbumJourneyTrack> { it.disc }.thenBy { it.number })
     }
 
+    /** How far a downloaded file's length may be from the edition's track and still be that recording. */
+    const val RECORDING_TOLERANCE_MS = 5_000L
+
+    /**
+     * Whether a downloaded file is the recording this edition lists: its
+     * length is known and within [RECORDING_TOLERANCE_MS] of the track's. A
+     * live take, an extended mix or a radio edit of the same title is another
+     * recording, and a file whose length cannot be read proves nothing.
+     */
+    fun isSameRecording(expectedMs: Long, actualMs: Long): Boolean =
+        actualMs > 0 && kotlin.math.abs(actualMs - expectedMs) <= RECORDING_TOLERANCE_MS
+
     fun downloadLabel(album: AlbumJourney): String = when {
         album.selectedMissing.isEmpty() -> "Select tracks to download"
         album.availableCount == 0 && album.selectedMissing.size == album.tracks.size -> "Download full album (${album.tracks.size})"
