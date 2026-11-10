@@ -248,7 +248,8 @@ class SpotiFlacResumeAcceptanceTest {
             val slowToStop = FakeTransfer(chunkBytes = 64 * 1024) { received ->
                 if (received >= original.size / 2) {
                     aIsMidTransfer.countDown()
-                    letALateResultArrive.await(10, TimeUnit.SECONDS)   // ignores the cancel for now
+                    // Ignores the cancel for now, and the interrupt that follows it.
+                    DownloadTestKit.awaitLikeNative(letALateResultArrive, 10_000)
                 }
             }
             val aThread = Thread {
@@ -274,7 +275,8 @@ class SpotiFlacResumeAcceptanceTest {
             val aReportedPath = a.target.path
             letALateResultArrive.countDown()
             val deadline = System.currentTimeMillis() + 5_000
-            while (a.lease.writing && System.currentTimeMillis() < deadline) Thread.sleep(5)
+            // The folder is tidied right after the call is counted as returned.
+            while ((a.lease.writing || a.lease.folder.exists()) && System.currentTimeMillis() < deadline) Thread.sleep(5)
             assertFalse(a.lease.writing)
 
             // A's late file is gone with its folder, and was never B's to hand on.

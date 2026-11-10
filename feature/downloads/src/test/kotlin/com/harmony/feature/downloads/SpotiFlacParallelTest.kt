@@ -97,6 +97,8 @@ class SpotiFlacParallelTest {
         val timeline = DownloadTimeline { System.currentTimeMillis() }
         val target = File(lease.folder, "$provider - Title.flac")
         val cancel = AtomicBoolean(false)
+        /** The engine told the runtime to stop this job. */
+        val toldToStop = CountDownLatch(1)
         var served: String? = null
 
         fun run(transfer: FakeTransfer): WatchedCall.Result {
@@ -108,7 +110,7 @@ class SpotiFlacParallelTest {
                     transfer.download(cdn.url, target) { received, total -> activity.note(received, total); timeline.progress(received) }.toJson()
                 } finally { lease.nativeFinished() }
             }
-            val result = WatchedCall(tickMs = 2, letGoMs = 500).await(future, activity, { cancel.get() }) { }
+            val result = WatchedCall(tickMs = 2, letGoMs = 500).await(future, activity, { cancel.get() }) { toldToStop.countDown() }
             timeline.callEnded()
             lease.close(if (result is WatchedCall.Result.Returned) StagingLeases.Disposition.KEEP_OUTPUT else StagingLeases.Disposition.DELETE)
             return result
@@ -128,7 +130,7 @@ class SpotiFlacParallelTest {
             val bothMidTransfer = CountDownLatch(2)
             val go = CountDownLatch(1)
             fun paced(job: Job, half: Int) = FakeTransfer(chunkBytes = 32 * 1024) { received ->
-                if (received >= half) { bothMidTransfer.countDown(); go.await(10, TimeUnit.SECONDS) }
+                if (received >= half) { bothMidTransfer.countDown(); DownloadTestKit.awaitLikeNative(go, 10_000) }
                 if (job.cancel.get()) throw java.io.IOException("cancelled")
             }
             var tidalResult: WatchedCall.Result? = null
@@ -137,8 +139,10 @@ class SpotiFlacParallelTest {
             val t2 = Thread { qobuzResult = qobuz.run(paced(qobuz, qobuzAudio.size / 2)) }.apply { start() }
             assertTrue("both transfers are in flight at once", bothMidTransfer.await(10, TimeUnit.SECONDS))
 
-            // Cancel Qobuz mid-transfer; Tidal goes on.
+            // Cancel Qobuz mid-transfer; Tidal goes on. The runtime only lets go
+            // once it has been told to stop, as the real one does.
             qobuz.cancel.set(true)
+            assertTrue("the cancel reached the runtime", qobuz.toldToStop.await(10, TimeUnit.SECONDS))
             go.countDown()
             t1.join(10_000); t2.join(10_000)
 

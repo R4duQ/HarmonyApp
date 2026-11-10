@@ -1,13 +1,17 @@
 package com.harmony.feature.downloads
 
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpServer
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONObject
 
@@ -17,6 +21,19 @@ internal object DownloadTestKit {
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     fun sha256(file: File): String = sha256(file.readBytes())
+
+    /**
+     * Waits the way a native call does: `Thread.interrupt` (what cancelling
+     * its Future sends) does not reach code running in the runtime.
+     */
+    fun awaitLikeNative(latch: CountDownLatch, timeoutMs: Long): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        while (true) {
+            val left = deadline - System.nanoTime()
+            if (left <= 0) return false
+            try { if (latch.await(left, TimeUnit.NANOSECONDS)) return true } catch (_: InterruptedException) { }
+        }
+    }
 
     /** Bytes that start like a FLAC file and are different for each [seed]. */
     fun audio(size: Int, seed: Int): ByteArray {
@@ -28,6 +45,9 @@ internal object DownloadTestKit {
 /**
  * One file on a local HTTP server, behaving as a provider's CDN can:
  * validators, ranges, `If-Range`, and the ways a transfer goes wrong.
+ *
+ * Plain sockets, one request per connection: Android unit tests compile
+ * against the Android class library, which has no JDK HTTP server.
  */
 internal class TestCdn(content: ByteArray, etag: String = "\"v1\"") : AutoCloseable {
     @Volatile var content: ByteArray = content
@@ -46,43 +66,81 @@ internal class TestCdn(content: ByteArray, etag: String = "\"v1\"") : AutoClosea
     val bodyBytesSent = AtomicLong()
     val rangeRequests = AtomicLong()
 
-    private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
-        createContext("/track.flac") { exchange -> runCatching { answer(exchange) }; exchange.close() }
-        executor = java.util.concurrent.Executors.newCachedThreadPool { runnable -> Thread(runnable, "test-cdn").apply { isDaemon = true } }
-        start()
+    private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+    private val workers = Executors.newCachedThreadPool { runnable -> Thread(runnable, "test-cdn").apply { isDaemon = true } }
+
+    init {
+        Thread({
+            while (!server.isClosed) {
+                val socket = try { server.accept() } catch (closed: IOException) { break }
+                workers.execute { socket.use { connection -> runCatching { answer(connection) } } }
+            }
+        }, "test-cdn-accept").apply { isDaemon = true }.start()
     }
 
-    val url: String get() = "http://127.0.0.1:${server.address.port}/track.flac"
+    val url: String get() = "http://127.0.0.1:${server.localPort}/track.flac"
 
-    private fun answer(exchange: HttpExchange) {
+    /** The request line and headers (names in lower case), or null when the client went away first. */
+    private fun readRequest(socket: Socket): Pair<String, Map<String, String>>? {
+        val input = socket.getInputStream()
+        val head = ByteArrayOutputStream()
+        var matched = 0
+        while (matched < 4) {
+            val next = input.read()
+            if (next < 0 || head.size() > 64 * 1024) return null
+            head.write(next)
+            matched = if (next == "\r\n\r\n"[matched].code) matched + 1 else if (next == '\r'.code) 1 else 0
+        }
+        val lines = head.toString("ISO-8859-1").split("\r\n").filter { it.isNotEmpty() }
+        val headers = lines.drop(1).mapNotNull { line ->
+            val colon = line.indexOf(':')
+            if (colon <= 0) null else line.substring(0, colon).trim().lowercase() to line.substring(colon + 1).trim()
+        }.toMap()
+        return (lines.firstOrNull() ?: return null) to headers
+    }
+
+    private fun answer(socket: Socket) {
+        val (requestLine, headers) = readRequest(socket) ?: return
+        val output = socket.getOutputStream()
+        val path = requestLine.split(' ').getOrNull(1).orEmpty()
+        if (!path.startsWith("/track.flac")) {
+            output.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            output.flush()
+            return
+        }
         requests.incrementAndGet()
         if (delayMs > 0) Thread.sleep(delayMs)
         val body = content
         val tag = etag
-        val range = exchange.requestHeaders.getFirst("Range")
-        val ifRange = exchange.requestHeaders.getFirst("If-Range")
+        val range = headers["range"]
+        val ifRange = headers["if-range"]
         var from = 0
-        var status = 200
+        var status = "200 OK"
+        var contentRange = ""
         if (range != null) rangeRequests.incrementAndGet()
         if (range != null && !ignoreRange && (ifRange == null || ifRange == tag || ignoreIfRange)) {
             from = range.removePrefix("bytes=").substringBefore('-').toInt().coerceIn(0, body.size)
-            status = 206
-            exchange.responseHeaders.add("Content-Range", "bytes $from-${body.size - 1}/${body.size}")
+            status = "206 Partial Content"
+            contentRange = "Content-Range: bytes $from-${body.size - 1}/${body.size}\r\n"
         }
-        exchange.responseHeaders.add("ETag", tag)
-        exchange.responseHeaders.add("Accept-Ranges", "bytes")
         val length = body.size - from
-        exchange.sendResponseHeaders(status, length.toLong())
         val drop = dropAfterBytes
         val send = if (drop in 0 until length) drop.toInt() else length
         if (drop in 0 until length) dropAfterBytes = -1
-        exchange.responseBody.write(body, from, send)
-        exchange.responseBody.flush()
+        output.write(
+            ("HTTP/1.1 $status\r\n${contentRange}ETag: $tag\r\nAccept-Ranges: bytes\r\n" +
+                "Content-Length: $length\r\nConnection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1),
+        )
         bodyBytesSent.addAndGet(send.toLong())
+        output.write(body, from, send)
+        output.flush()
         // Fewer bytes than promised, then the connection goes: what a dropped link looks like.
     }
 
-    override fun close() = server.stop(0)
+    override fun close() {
+        runCatching { server.close() }
+        workers.shutdownNow()
+    }
 }
 
 /**
