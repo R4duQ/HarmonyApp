@@ -110,8 +110,14 @@ class SpotiFlacException(
     message: String,
     val errorType: String? = null,
     cause: Throwable? = null,
-    val technicalDetails: String? = null,
+    technicalDetails: String? = null,
     val provider: String? = null,
     val verificationUrl: String? = null,
     val verificationChallenge: SpotiFlacVerificationChallenge? = null,
-) : Exception(message, cause)
+) : Exception(message, cause) {
+    /**
+     * What a person can read, copy and share from "Details": never a token, a
+     * key or a signed URL (SpotiFlacRedaction), whoever built the text.
+     */
+    val technicalDetails: String? = technicalDetails?.let(SpotiFlacRedaction::redact)
+}
