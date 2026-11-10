@@ -20,6 +20,8 @@ data class ActiveDownload(
     val trackId: String? = null,
     /** Transfer speed, 0 when unknown. */
     val bytesPerSecond: Long = 0L,
+    /** The same album's other tracks downloading at the same time, each with its own track id and progress. */
+    val parallel: List<ActiveDownload> = emptyList(),
 )
 
 /** A finished download, shown briefly and then dismissed. */

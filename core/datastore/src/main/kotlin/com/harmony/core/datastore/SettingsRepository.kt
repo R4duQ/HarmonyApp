@@ -37,6 +37,13 @@ data class UserSettings(
     val dynamicColors: Boolean = true,
     val chargingOnlyAnalysis: Boolean = false,
     /**
+     * An experiment, off unless switched on: albums download two tracks at
+     * once where the download engine can (the Mornye build). It stays an
+     * experiment until it is shown on a phone to shorten an album without
+     * costing playback or failing more often.
+     */
+    val experimentalParallelDownloads: Boolean = false,
+    /**
      * Swiping Harmony away from Recents while music plays: false (the
      * default, "strict close") stops playback and removes the notification;
      * true ("smart close") keeps playing in the background, and only a
@@ -72,6 +79,7 @@ class SettingsRepository @Inject constructor(
         val AMOLED = booleanPreferencesKey("amoled_dark")
         val DYNAMIC = booleanPreferencesKey("dynamic_colors")
         val CHARGING_ONLY = booleanPreferencesKey("charging_only_analysis")
+        val PARALLEL_DOWNLOADS = booleanPreferencesKey("experimental_parallel_downloads")
         val KEEP_PLAYING_AFTER_SWIPE = booleanPreferencesKey("keep_playing_after_swipe")
         val CROSSFADE = intPreferencesKey("crossfade_seconds")
         val REPLAYGAIN = stringPreferencesKey("replaygain_mode")
@@ -106,6 +114,7 @@ class SettingsRepository @Inject constructor(
             amoledDark = p[Keys.AMOLED] ?: false,
             dynamicColors = p[Keys.DYNAMIC] ?: true,
             chargingOnlyAnalysis = p[Keys.CHARGING_ONLY] ?: false,
+            experimentalParallelDownloads = p[Keys.PARALLEL_DOWNLOADS] ?: false,
             keepPlayingAfterSwipe = p[Keys.KEEP_PLAYING_AFTER_SWIPE] ?: false,
             crossfadeSeconds = (p[Keys.CROSSFADE] ?: 0).coerceIn(0, 12),
             replayGainMode = p[Keys.REPLAYGAIN]
@@ -174,6 +183,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setAmoledDark(on: Boolean) = edit { it[Keys.AMOLED] = on }
     suspend fun setDynamicColors(on: Boolean) = edit { it[Keys.DYNAMIC] = on }
     suspend fun setChargingOnlyAnalysis(on: Boolean) = edit { it[Keys.CHARGING_ONLY] = on }
+    suspend fun setExperimentalParallelDownloads(on: Boolean) = edit { it[Keys.PARALLEL_DOWNLOADS] = on }
 
     suspend fun setKeepPlayingAfterSwipe(on: Boolean) = edit { it[Keys.KEEP_PLAYING_AFTER_SWIPE] = on }
     suspend fun setCrossfadeSeconds(seconds: Int) = edit { it[Keys.CROSSFADE] = seconds.coerceIn(0, 12) }

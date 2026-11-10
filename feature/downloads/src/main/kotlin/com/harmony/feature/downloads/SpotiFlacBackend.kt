@@ -34,6 +34,23 @@ internal interface SpotiFlacBackend {
     val runtimeDirectory: String
 
     /**
+     * Whether a download request names its own provider. The Go runtime routes
+     * by a runtime-wide provider order, so only one download may run; a
+     * runtime that routes per request can run several.
+     */
+    val routesPerRequest: Boolean get() = false
+
+    /** How many downloads the runtime can run at once (1 unless [routesPerRequest]). */
+    val parallelDownloads: Int get() = 1
+
+    /**
+     * Whether [initialize] may be called again while the app runs, to move to
+     * a newer set of provider packages between downloads. A runtime that
+     * cannot takes the new set the next time the app starts.
+     */
+    val reinitializable: Boolean get() = false
+
+    /**
      * Starts the runtime: extension sources in [extensionsDir], their encrypted
      * data in [dataDir] under [masterKey]. Extensions may only write downloads
      * under [downloadRoot].

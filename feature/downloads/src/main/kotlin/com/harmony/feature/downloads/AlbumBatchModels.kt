@@ -161,19 +161,22 @@ object AlbumBatches {
      */
     fun of(album: AlbumJourney, work: AlbumWork, processing: Boolean, live: ActiveDownload?): AlbumBatch {
         val mine = live?.takeIf { it.albumId == album.id && processing && work == AlbumWork.RUNNING }
+        // Every transfer in flight for this album, by track (several when the engine downloads in parallel).
+        val transfers = (listOfNotNull(mine) + mine?.parallel.orEmpty())
+            .mapNotNull { transfer -> transfer.trackId?.let { it to transfer } }.toMap()
         val multiDisc = album.tracks.any { it.disc > 1 }
         val rows = album.tracks.map { track ->
             val phase = phaseOf(track, processing && work == AlbumWork.RUNNING)
-            val current = mine != null && mine.trackId == track.id && phase == AlbumTrackPhase.DOWNLOADING
+            val transfer = transfers[track.id]?.takeIf { phase == AlbumTrackPhase.DOWNLOADING }
             AlbumTrackRow(
                 track = track,
                 number = if (multiDisc) "${track.disc}.${track.number.toString().padStart(2, '0')}"
                     else track.number.toString().padStart(2, '0'),
                 phase = phase,
-                fraction = if (current) mine?.fraction?.coerceIn(0f, 1f) else null,
+                fraction = transfer?.fraction?.coerceIn(0f, 1f),
                 detail = when {
                     track.error != null && (phase == AlbumTrackPhase.FAILED || phase == AlbumTrackPhase.VERIFY) -> track.error
-                    current -> mine?.detail
+                    transfer != null -> transfer.detail
                     else -> null
                 },
             )
@@ -197,7 +200,8 @@ object AlbumBatches {
             inBatch.any { it.track.status == AlbumTrackStatus.PAUSED } -> AlbumBatchState.PAUSED
             else -> AlbumBatchState.READY
         }
-        val currentShare = current?.fraction ?: 0f
+        // Each track in flight counts for the share of it that has arrived.
+        val currentShare = rows.filter { it.phase == AlbumTrackPhase.DOWNLOADING }.sumOf { (it.fraction ?: 0f).toDouble() }.toFloat()
         val fraction = if (total == 0) 0f else ((completed + currentShare) / total).coerceIn(0f, 1f)
         return AlbumBatch(
             albumId = album.id,
@@ -212,7 +216,7 @@ object AlbumBatches {
             total = total,
             failed = failed,
             fraction = fraction,
-            bytesPerSecond = if (state == AlbumBatchState.DOWNLOADING) mine?.bytesPerSecond ?: 0L else 0L,
+            bytesPerSecond = if (state == AlbumBatchState.DOWNLOADING) transfers.values.sumOf { it.bytesPerSecond } else 0L,
             currentTrackId = current?.track?.id,
             tracks = rows,
         )

@@ -24,6 +24,16 @@ private object MornyeSpotiFlacBackend : SpotiFlacBackend {
     override val callbackScheme = "mornye"
     override val nativeLibrary = "mornye_mobile"
 
+    // The Rust planner takes the provider from the request (service, with
+    // use_fallback off), so downloads do not share a route. Two at once is
+    // what the Tidal provider declares (maxConcurrentDownloads); the others
+    // allow three.
+    override val routesPerRequest = true
+    override val parallelDownloads = 2
+
+    // initialize() shuts the previous ExtensionManager down and starts a new one.
+    override val reinitializable = true
+
     // Its own directory: the Go runtime's encrypted extension storage is not
     // this runtime's to rewrite, and the stable build may be installed again.
     override val runtimeDirectory = "mornye/runtime-v1"

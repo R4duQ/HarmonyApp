@@ -115,6 +115,7 @@ class SettingsViewModel @Inject constructor(
     fun setAmoled(on: Boolean) = launch { settings.setAmoledDark(on) }
     fun setDynamicColors(on: Boolean) = launch { settings.setDynamicColors(on) }
     fun setChargingOnly(on: Boolean) = launch { settings.setChargingOnlyAnalysis(on) }
+    fun setExperimentalParallelDownloads(on: Boolean) = launch { settings.setExperimentalParallelDownloads(on) }
     fun setKeepPlayingAfterSwipe(on: Boolean) = launch { settings.setKeepPlayingAfterSwipe(on) }
     fun setCrossfade(seconds: Int) = launch { settings.setCrossfadeSeconds(seconds) }
     fun setReplayGain(mode: ReplayGainMode) = launch { settings.setReplayGainMode(mode) }
@@ -445,6 +446,15 @@ fun SettingsScreen(
             palette = palette,
             trailing = {
                 EditorialSwitch(state.chargingOnlyAnalysis, viewModel::setChargingOnly, palette)
+            },
+        )
+
+        EditorialSettingRow(
+            title = "Two album tracks at once (experimental)",
+            subtitle = "Mornye build only. One at a time while music plays. Off by default",
+            palette = palette,
+            trailing = {
+                EditorialSwitch(state.experimentalParallelDownloads, viewModel::setExperimentalParallelDownloads, palette)
             },
         )
 
