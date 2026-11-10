@@ -130,7 +130,7 @@ class SpotiFlacParallelTest {
             val bothMidTransfer = CountDownLatch(2)
             val go = CountDownLatch(1)
             fun paced(job: Job, half: Int) = FakeTransfer(chunkBytes = 32 * 1024) { received ->
-                if (received >= half) { bothMidTransfer.countDown(); go.await(10, TimeUnit.SECONDS) }
+                if (received >= half) { bothMidTransfer.countDown(); DownloadTestKit.awaitLikeNative(go, 10_000) }
                 if (job.cancel.get()) throw java.io.IOException("cancelled")
             }
             var tidalResult: WatchedCall.Result? = null

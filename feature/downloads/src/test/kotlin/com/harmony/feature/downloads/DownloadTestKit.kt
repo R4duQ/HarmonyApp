@@ -9,7 +9,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONObject
 
@@ -19,6 +21,19 @@ internal object DownloadTestKit {
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     fun sha256(file: File): String = sha256(file.readBytes())
+
+    /**
+     * Waits the way a native call does: `Thread.interrupt` (what cancelling
+     * its Future sends) does not reach code running in the runtime.
+     */
+    fun awaitLikeNative(latch: CountDownLatch, timeoutMs: Long): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        while (true) {
+            val left = deadline - System.nanoTime()
+            if (left <= 0) return false
+            try { if (latch.await(left, TimeUnit.NANOSECONDS)) return true } catch (_: InterruptedException) { }
+        }
+    }
 
     /** Bytes that start like a FLAC file and are different for each [seed]. */
     fun audio(size: Int, seed: Int): ByteArray {
