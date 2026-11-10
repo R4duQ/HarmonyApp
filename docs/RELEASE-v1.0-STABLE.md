@@ -1,8 +1,28 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **158**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 157), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **159**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 158), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 159 — Steadier, safer downloads
+
+- **Large files on a slow connection finish.** A download is no longer stopped after 95
+  seconds in all; it goes on for as long as data keeps arriving, and is stopped only when
+  it stalls.
+- **An interrupted download can continue.** After Pause, a dropped connection or a restart,
+  the next attempt picks up what was already received where the provider allows it (Tidal),
+  and starts clean when the file changed in between.
+- **Downloads start sooner.** The providers already on the phone are used at once; the
+  provider registry is checked in the background and a newer version is taken between
+  downloads. Updating one provider no longer signs you out of the others.
+- **Albums do less twice.** One cover request per album instead of one per track; track
+  lookups are remembered; each track gets the album's own artist, track and disc numbers.
+  (The album artist used to be overwritten with the track's artist.)
+- **Safer provider updates.** A provider package is installed only if it matches its
+  checksum, is not older than the one in use and asks to reach no hosts beyond the ones
+  known for that provider; one provider that fails no longer stops the others.
+- **Cleaner diagnostics.** Download details no longer include tokens, keys or signed links.
+- **Experimental, off by default:** Settings › *Two album tracks at once* (Mornye build).
 
 ## Build 158 — Mix from this song
 

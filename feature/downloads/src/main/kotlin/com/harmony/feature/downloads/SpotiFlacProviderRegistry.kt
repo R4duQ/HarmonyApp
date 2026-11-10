@@ -31,7 +31,7 @@ internal data class RegistrySnapshot(
             packages.joinToString { "${it.id}@${it.version}" }
 }
 
-/** Official registry discovery, with an immutable snapshot for network/registry failures. */
+/** Official registry discovery, cached, with an immutable snapshot for network/registry failures. */
 internal object SpotiFlacProviderRegistry {
     const val OFFICIAL_REGISTRY_URL =
         "https://raw.githubusercontent.com/mornyeapp/Mornye-Extension/main/registry.json"
@@ -60,15 +60,40 @@ internal object SpotiFlacProviderRegistry {
         sha256 = hash,
     )
 
-    fun resolve(fetch: () -> String): RegistrySnapshot = runCatching { parse(fetch()) }.getOrElse { failure ->
-        RegistrySnapshot(
-            packages = fallbackPackages,
-            updatedAt = "bundled-fallback",
-            source = "bundled fallback after registry error: ${failure.message ?: failure.javaClass.simpleName}",
-        )
+    fun resolve(fetch: () -> String): RegistrySnapshot = resolve("", null, fetch)
+
+    /**
+     * The registry for a runtime of [appVersion]: from [cache] while it is
+     * fresh, else fetched (and cached); when it cannot be fetched, the stale
+     * cached copy, and only then the packages pinned in this build.
+     */
+    fun resolve(appVersion: String, cache: SpotiFlacRegistryCache?, fetch: () -> String): RegistrySnapshot {
+        cache?.fresh()?.let { text ->
+            runCatching { parse(text, appVersion) }.getOrNull()?.let { return it.copy(source = "${it.source} (cached)") }
+        }
+        return runCatching {
+            val text = fetch()
+            parse(text, appVersion).also { cache?.write(text) }
+        }.getOrElse { failure ->
+            val reason = failure.message ?: failure.javaClass.simpleName
+            cache?.read()?.let { text ->
+                runCatching { parse(text, appVersion) }.getOrNull()
+                    ?.let { return it.copy(source = "cached registry (stale) after registry error: $reason") }
+            }
+            RegistrySnapshot(
+                packages = fallbackPackages,
+                updatedAt = "bundled-fallback",
+                source = "bundled fallback after registry error: $reason",
+            )
+        }
     }
 
-    fun parse(raw: String): RegistrySnapshot {
+    /**
+     * [appVersion] is the runtime's version ("" = unknown): a package that
+     * needs a newer one cannot load, so its entry is left out and the provider
+     * keeps the pinned package instead.
+     */
+    fun parse(raw: String, appVersion: String = ""): RegistrySnapshot {
         val root = JSONObject(raw)
         val extensions = root.optJSONArray("extensions") ?: error("registry has no extensions array")
         val byId = mutableMapOf<String, ProviderPackage>()
@@ -80,6 +105,9 @@ internal object SpotiFlacProviderRegistry {
             val hash = node.optString("sha256").trim().lowercase(Locale.ROOT)
             val version = node.optString("version").trim()
             if (!isTrustedProviderUrl(url, id) || !hash.matches(Regex("[0-9a-f]{64}")) || version.isBlank()) continue
+            val needs = node.optString("min_app_version").ifBlank { node.optString("minAppVersion") }.trim()
+            if (appVersion.isNotBlank() && needs.isNotBlank() &&
+                SpotiFlacProviderGate.compareVersions(needs, appVersion) > 0) continue
             byId[id] = ProviderPackage(id, names.getValue(id), version, url, hash)
         }
         return RegistrySnapshot(

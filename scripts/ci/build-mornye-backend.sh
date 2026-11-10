@@ -12,6 +12,18 @@ set -euo pipefail
 # and local Linux builds.
 
 MORNYE_TAG="${MORNYE_TAG:-v5.3.1}"
+# The commit the tag must point at. A tag can be moved; a commit cannot. When
+# MORNYE_TAG changes, this changes with it (and THIRD_PARTY_NOTICES.md).
+MORNYE_COMMIT="${MORNYE_COMMIT:-}"
+if [[ -z "$MORNYE_COMMIT" ]]; then
+  case "$MORNYE_TAG" in
+    v5.3.1) MORNYE_COMMIT="e7a8f754a618d28ab0baf88ada3f65ab9d41534a" ;;
+    *)
+      echo "ERROR: no pinned commit for Mornye $MORNYE_TAG; set MORNYE_COMMIT to the reviewed commit" >&2
+      exit 17
+      ;;
+  esac
+fi
 MORNYE_NDK_VERSION="${MORNYE_NDK_VERSION:-30.0.16248370}"
 # Mornye builds its Android library for ARM only; Harmony's Mornye build is a phone build.
 MORNYE_ABIS="${MORNYE_ABIS:-arm64-v8a}"
@@ -34,6 +46,12 @@ rm -rf "$WORK_DIR" "$STAGE_DIR"
 mkdir -p "$WORK_DIR"
 git clone --quiet --depth 1 --branch "$MORNYE_TAG" \
   https://github.com/spotiflacapp/SpotiFLAC-Mobile.git "$SOURCE_DIR"
+ACTUAL_COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
+if [[ "$ACTUAL_COMMIT" != "$MORNYE_COMMIT" ]]; then
+  echo "ERROR: Mornye $MORNYE_TAG is at $ACTUAL_COMMIT, not the pinned $MORNYE_COMMIT." >&2
+  echo "       The tag moved (or the pin is stale): review the new source before building it." >&2
+  exit 18
+fi
 
 # rust-toolchain.toml selects the pinned toolchain; install it up front so the
 # failure, if any, names the toolchain rather than a crate.

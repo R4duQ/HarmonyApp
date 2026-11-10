@@ -22,7 +22,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,6 +40,9 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -72,10 +77,44 @@ class SpotiFlacDownloadEngine @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val initMutex = Mutex()
-    private val providerStateMutex = Mutex()
 
     /** SpotiFLAC's Go runtime or Mornye's Rust one, depending on the build. */
     private val backend: SpotiFlacBackend = createSpotiFlacBackend()
+
+    /** The most downloads this runtime can run at once. */
+    private val runtimeParallel: Int = backend.parallelDownloads.coerceAtLeast(1)
+
+    /** Whether this build's runtime could download two tracks at once (the experiment below). */
+    val parallelDownloadsSupported: Boolean get() = runtimeParallel > 1
+
+    /**
+     * How many tracks an album downloads at once: one, unless the two-at-once
+     * experiment was switched on ([setParallelDownloadsEnabled]) on a runtime
+     * that supports it. It stays an experiment until it is shown on a phone to
+     * shorten an album without costing playback or failing more often.
+     */
+    val parallelDownloads: Int
+        get() = if (providerPrefs.getBoolean(KEY_PARALLEL_DOWNLOADS, false)) runtimeParallel else 1
+
+    fun setParallelDownloadsEnabled(enabled: Boolean) {
+        providerPrefs.edit().putBoolean(KEY_PARALLEL_DOWNLOADS, enabled && parallelDownloadsSupported).apply()
+    }
+
+    // A download plan holds one permit; sign-in and verification steps, which
+    // change what the providers will answer, wait for the plans in flight and
+    // hold them all (one such step at a time).
+    private val planPermits = Semaphore(runtimeParallel)
+    private val providerStateMutex = Mutex()
+
+    private suspend fun <T> withProviderStateExclusive(block: suspend () -> T): T = providerStateMutex.withLock {
+        var held = 0
+        try {
+            repeat(runtimeParallel) { planPermits.acquire(); held++ }
+            block()
+        } finally {
+            repeat(held) { planPermits.release() }
+        }
+    }
 
     /** "Mornye" in the Mornye build, "SpotiFLAC" in the stable one: the engine behind album and track downloads. */
     val engineName: String get() = backend.displayName
@@ -102,7 +141,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
     // downloadByStrategy can block in native/extension HTTP work. Keeping it on a
     // small dedicated executor makes the JNI boundary deterministic while a
     // separate control executor remains able to deliver cancellation/progress.
-    private val nativeDownloadExecutor = Executors.newFixedThreadPool(2) { runnable ->
+    private val nativeDownloadExecutor = Executors.newFixedThreadPool(backend.parallelDownloads.coerceAtLeast(1) + 2) { runnable ->
         Thread(runnable, "Harmony-SpotiFLAC-download").apply { isDaemon = true }
     }
     private val nativeControlExecutor = Executors.newSingleThreadExecutor { runnable ->
@@ -111,12 +150,76 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
     private val providerPrefs = context.getSharedPreferences(PROVIDER_STATE_PREFS, Context.MODE_PRIVATE)
 
+    /** The last package accepted per provider, per runtime (the two builds accept different versions). */
+    private val acceptedPackages = object : AcceptedPackages {
+        private fun key(providerId: String) = "$KEY_ACCEPTED_PACKAGE_PREFIX${backend.nativeLibrary}_$providerId"
+
+        override fun get(providerId: String): ProviderPackage? =
+            providerPrefs.getString(key(providerId), null)?.let { raw ->
+                runCatching {
+                    val node = JSONObject(raw)
+                    ProviderPackage(
+                        id = providerId,
+                        displayName = providerDisplay(providerId),
+                        version = node.getString("version"),
+                        url = node.getString("url"),
+                        sha256 = node.getString("sha256"),
+                    )
+                }.getOrNull()
+            }
+
+        override fun put(accepted: ProviderPackage) {
+            val node = JSONObject().put("version", accepted.version).put("url", accepted.url).put("sha256", accepted.sha256)
+            providerPrefs.edit().putString(key(accepted.id), node.toString()).apply()
+        }
+    }
+
     @Volatile private var initialized = false
-    @Volatile private var activeItemId: String? = null
-    @Volatile private var activeJobDir: File? = null
-    @Volatile private var nativeTransferActive = false
+    /** One download in flight: its runtime id, its own staging folder, its clocks. */
+    private class ActiveTransfer(
+        val itemId: String,
+        val lease: StagingLeases.Lease,
+        val owner: SpotiFlacRequestOwner,
+        val activity: TransferActivity,
+        val timeline: DownloadTimeline,
+    ) {
+        val jobDir: File get() = lease.folder
+
+        /** True while a provider call is running (the only time the runtime reports progress). */
+        @Volatile var transferring = false
+
+        /** Cancel was tapped: nothing of this job is kept. */
+        @Volatile var cancelledByUser = false
+    }
+
+    private val activeTransfers = ConcurrentHashMap<String, ActiveTransfer>()
+
+    private val providerSlots = ConcurrentHashMap<String, Semaphore>()
+
+    private fun providerSlot(providerId: String): Semaphore =
+        providerSlots.getOrPut(providerId) { Semaphore(SpotiFlacParallelPolicy.perProvider(providerId)) }
+
+    /** Who holds which staging folder; a late native result can only land in its own job's. */
+    private val stagingLeases = StagingLeases(File(context.cacheDir, "spotiflac/staging"))
+    private val watchedCall = WatchedCall(WATCHDOG_TICK_MS, CANCEL_DELIVERY_TIMEOUT_MS)
+
+    /** song.link answers by track URL, and a pause when it says it is asked too often. */
+    private val songLinkMemory =
+        LookupMemory<ProviderIdentifiers>(SONG_LINK_MEMORY, SONG_LINK_TTL_MS, SystemClock::elapsedRealtime)
+
+    /** Requests Harmony itself makes (registry, packages, song.link, covers), for the timelines. */
+    private val hostRequests = AtomicInteger()
+
+    /** A newer provider set is in the store; the engine moves to it between downloads. */
+    @Volatile private var pendingProviderUpdate = false
+    private val providerRefreshRunning = AtomicBoolean(false)
+
+    /** The timeline of each file handed out, until whoever imports it reports back. */
+    private val handedOut = ConcurrentHashMap<String, Pair<String, DownloadTimeline>>()
     @Volatile private var ffmpegPackagesDir: File? = null
     @Volatile private var activeRegistrySummary: String = "provider registry not initialized"
+    /** The providers whose packages were installed and loaded this run, in priority order. */
+    @Volatile private var availableProviders: List<String> = PROVIDER_PRIORITY
     @Volatile private var providerQualityOptions: Map<String, List<SpotiFlacQualityOption>> = emptyMap()
     // Persist only the provider ID (never auth/session material) so an Android
     // process recreation during browser verification does not forget that Tidal
@@ -130,8 +233,58 @@ class SpotiFlacDownloadEngine @Inject constructor(
         outputFormat: SpotiFlacOutputFormat = SpotiFlacOutputFormat.FLAC_LOSSLESS,
         requestOwner: SpotiFlacRequestOwner = SpotiFlacRequestOwner.DOWNLOADS,
         onProgress: (SpotiFlacTransferProgress) -> Unit,
-    ): SpotiFlacDownloadedFile = DownloadEngineGate.run(requestOwner in setOf(SpotiFlacRequestOwner.ALBUM_DOWNLOAD, SpotiFlacRequestOwner.DISCOVERY_DOWNLOAD)) {
-        downloadExclusive(track, outputFormat, requestOwner, onProgress)
+    ): SpotiFlacDownloadedFile {
+        val albumWork = requestOwner in ALBUM_OWNERS
+        return DownloadEngineGate.run(albumWork, parallel = if (albumWork) parallelDownloads else 1) {
+            adoptProviderUpdate()
+            downloadExclusive(track, outputFormat, requestOwner, onProgress)
+        }
+    }
+
+    /**
+     * Moves to a newer provider set found in the background, but only between
+     * downloads: with nothing in flight and no sign-in step running, the
+     * runtime is started again on the new packages.
+     */
+    private suspend fun adoptProviderUpdate() {
+        if (!pendingProviderUpdate || !backend.reinitializable || activeTransfers.isNotEmpty()) return
+        withProviderStateExclusive {
+            if (pendingProviderUpdate && activeTransfers.isEmpty()) {
+                initMutex.withLock {
+                    pendingProviderUpdate = false
+                    initialized = false
+                }
+            }
+        }
+    }
+
+    /**
+     * Whoever imports a downloaded file says how long that took, which closes
+     * the download's timeline (the last phase the engine cannot see).
+     */
+    fun reportImported(file: SpotiFlacDownloadedFile, importMs: Long) {
+        val (jobId, timeline) = handedOut.remove(file.tempFile.path) ?: return
+        timeline.add(DownloadTimeline.Phase.IMPORT, importMs)
+        recordTimeline(timeline.summary(jobId, "imported"))
+    }
+
+    /** The last download timelines, newest last: ids, counts and timings only. */
+    fun recentTimelines(): List<String> = synchronized(recentTimelineLines) { recentTimelineLines.toList() }
+
+    private val recentTimelineLines = ArrayDeque<String>()
+
+    private fun recordTimeline(line: String) {
+        synchronized(recentTimelineLines) {
+            recentTimelineLines.addLast(line)
+            while (recentTimelineLines.size > TIMELINES_KEPT) recentTimelineLines.removeFirst()
+        }
+        runCatching { android.util.Log.i(TIMELINE_TAG, line) }
+        // A small file next to the other logs, so a baseline taken on a phone can be shared.
+        runCatching {
+            val log = File(context.filesDir, TIMELINE_FILE)
+            if (log.length() > TIMELINE_FILE_MAX_BYTES) log.writeText(log.readLines().takeLast(200).joinToString("\n", postfix = "\n"))
+            log.appendText("${System.currentTimeMillis()} $line\n")
+        }
     }
 
     private suspend fun downloadExclusive(
@@ -142,21 +295,38 @@ class SpotiFlacDownloadEngine @Inject constructor(
             "SpotiFLAC needs a track title before it can resolve a lossless source."
         }
 
+        val timeline = DownloadTimeline(SystemClock::elapsedRealtime)
+        timeline.coldStart = !initialized
+        val requestsBefore = hostRequests.get()
         ensureNetworkAvailable()
         onProgress(SpotiFlacTransferProgress(SpotiFlacStage.PREPARING))
-        ensureReady(onProgress)
+        timeline.measure(DownloadTimeline.Phase.INIT) { ensureReady(onProgress) }
 
         val itemId = "harmony-${UUID.randomUUID()}"
-        val jobDir = File(context.cacheDir, "spotiflac/staging/$itemId").apply {
-            deleteRecursively()
-            check(mkdirs() || isDirectory) { "Could not create SpotiFLAC staging directory." }
-        }
-        activeItemId = itemId
-        activeJobDir = jobDir
+        // The folder is the track's, not the attempt's, so a later attempt can
+        // continue a partial transfer (SpotiFlacStaging).
+        val stagingKey = SpotiFlacStaging.key(
+            listOf(
+                track.isrc.orEmpty(), track.spotifyId.orEmpty(), track.metadataId.orEmpty(), track.artist,
+                track.title.ifBlank { track.sourceTitle }, track.album, track.durationMs.toString(), outputFormat.name,
+            ),
+        )
+        // A folder nobody else holds: the track's own when free (so a partial
+        // transfer is continued), otherwise one only this job has (StagingLeases).
+        val current = ActiveTransfer(
+            itemId = itemId,
+            lease = withContext(Dispatchers.IO) { stagingLeases.open(stagingKey, itemId) },
+            owner = requestOwner,
+            activity = TransferActivity(PROVIDER_DEADLINES, SystemClock::elapsedRealtime),
+            timeline = timeline,
+        ).also { activeTransfers[itemId] = it }
+        val jobDir = current.jobDir
+        var disposition = StagingLeases.Disposition.DELETE
+        var outcome = "failed"
 
         val poller: Job = launch(Dispatchers.IO) {
             while (isActive) {
-                runCatching { if (nativeTransferActive) readProgress(itemId) else null }
+                runCatching { if (current.transferring) readProgress(itemId, current) else null }
                     .getOrNull()
                     ?.let(onProgress)
                 delay(PROGRESS_POLL_MS)
@@ -174,9 +344,21 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
             // song.link only adds Tidal/Qobuz/Spotify ids; the track's own ids are enough to
             // start, so a slow song.link must not hold the download on "Resolving".
-            val providerIds = awaitWithin(SONG_LINK_DEADLINE_MS, lookupScope) {
-                resolveProviderIdentifiers(track)
-            } ?: basicProviderIdentifiers(track)
+            val ownIds = basicProviderIdentifiers(track)
+            val firstProvider = providerOrderForDownload().firstOrNull()
+            val providerIds = timeline.measure(DownloadTimeline.Phase.RESOLVE) {
+                if (firstProvider != null &&
+                    SpotiFlacProviderMatch.hasExactId(firstProvider, ownIds.deezerId, ownIds.tidalId, ownIds.qobuzId)
+                ) {
+                    // The provider tried first is asked by its own exact id: nothing to wait
+                    // for. The other providers' ids are looked up meanwhile and picked up
+                    // by a later attempt if there is one.
+                    prefetchProviderIdentifiers(listOf(track))
+                    ownIds
+                } else {
+                    awaitWithin(SONG_LINK_DEADLINE_MS, lookupScope) { resolveProviderIdentifiers(track) } ?: ownIds
+                }
+            }
             onProgress(
                 SpotiFlacTransferProgress(
                     stage = SpotiFlacStage.RESOLVING,
@@ -185,9 +367,12 @@ class SpotiFlacDownloadEngine @Inject constructor(
             )
 
             val baseRequest = buildDownloadRequest(track, providerIds, jobDir, itemId)
-            val response = providerStateMutex.withLock {
-                executeProviderPlan(baseRequest, outputFormat, itemId, jobDir, onProgress)
+            val response = planPermits.withPermit {
+                executeProviderPlan(baseRequest, outputFormat, current, onProgress) {
+                    songLinkIdentity(track)?.let(songLinkMemory::get)
+                }
             }
+            val finalizingSince = SystemClock.elapsedRealtime()
             // Native status may remain "preparing" after returning a file. It
             // must not overwrite the host's quality conversion/import stages.
             poller.cancel()
@@ -261,6 +446,11 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
             clearPendingVerificationTrack()
             val actualFlac = if (outputFormat.isLosslessOutput) SpotiFlacQualityPolicy.read(outputFile) else null
+            timeline.add(DownloadTimeline.Phase.FINALIZE, SystemClock.elapsedRealtime() - finalizingSince)
+            disposition = StagingLeases.Disposition.KEEP_OUTPUT
+            outcome = "downloaded"
+            if (handedOut.size > TIMELINES_KEPT) handedOut.clear()
+            handedOut[outputFile.path] = itemId to timeline
             SpotiFlacDownloadedFile(
                 tempFile = outputFile,
                 suggestedFileName = suggested,
@@ -278,11 +468,21 @@ class SpotiFlacDownloadEngine @Inject constructor(
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
                 runCatching { nativeControl { backend.cancelDownload(itemId) } }
-                withContext(Dispatchers.IO) { jobDir.deleteRecursively() }
             }
+            // Pause, or the job was stopped: what was received stays for Resume.
+            // Cancel by hand keeps nothing.
+            disposition = if (current.cancelledByUser) StagingLeases.Disposition.DELETE else StagingLeases.Disposition.KEEP_RESUMABLE
+            outcome = if (current.cancelledByUser) "cancelled" else "paused"
             throw cancelled
         } catch (t: Throwable) {
-            withContext(Dispatchers.IO) { jobDir.deleteRecursively() }
+            // A dropped connection, a stall or a rate limit: the next attempt continues
+            // from what was received. Anything else (not found, verification, a transfer
+            // that no longer matches, the phone's own failure) starts clean.
+            val kind = SpotiFlacFailures.kind((t as? SpotiFlacException)?.errorType, t.message)
+            disposition = if (!current.cancelledByUser && kind.keepsPartial) {
+                StagingLeases.Disposition.KEEP_RESUMABLE
+            } else StagingLeases.Disposition.DELETE
+            outcome = if (current.cancelledByUser) "cancelled" else kind.name.lowercase(Locale.ROOT)
             if (t is SpotiFlacException) {
                 if (t.errorType.equals("verification_required", ignoreCase = true)) {
                     rememberPendingVerificationTrack(track, requestOwner)
@@ -302,19 +502,63 @@ class SpotiFlacDownloadEngine @Inject constructor(
             withContext(NonCancellable) {
                 runCatching { nativeControl { backend.clearItemProgress(itemId) } }
             }
-            activeItemId = null
-            activeJobDir = null
-            nativeTransferActive = false
+            current.transferring = false
+            activeTransfers.remove(itemId)
+            // Tidied now, or the moment the native call lets go of the folder: never
+            // under a call that may still be writing into it.
+            withContext(NonCancellable + Dispatchers.IO) { current.lease.close(disposition) }
+            timeline.hostRequests(hostRequests.get() - requestsBefore)
+            recordTimeline(timeline.summary(itemId, outcome))
         }
     }
 
+    /**
+     * Cancels the Downloads screen's own transfer. Album tracks belong to their
+     * WorkManager job. The runtime is told to stop; the job's files go when it
+     * has (see [StagingLeases]), not while it may still be writing them.
+     */
     fun cancelCurrentDownload() {
-        if (DownloadEngineGate.albumOwnsTransfer) return // Album cancellation belongs to its WorkManager job.
-        val itemId = activeItemId
-        if (itemId != null) {
-            nativeControlExecutor.execute { runCatching { backend.cancelDownload(itemId) } }
+        activeTransfers.values.filter { it.owner !in ALBUM_OWNERS }.forEach { transfer ->
+            transfer.cancelledByUser = true
+            nativeControlExecutor.execute { runCatching { backend.cancelDownload(transfer.itemId) } }
         }
-        activeJobDir?.deleteRecursively()
+    }
+
+    /**
+     * What is known about [track] on each provider before any transfer: whether
+     * the provider's own id for the recording is known, and whether it has it.
+     * The runtimes Harmony ships check availability only inside a download
+     * (Mornye 5.3.1 keeps `check_availability` to itself; its mobile API has
+     * `download_by_strategy` and `download`), so the state is honestly
+     * [SpotiFlacAvailabilityState.UNKNOWN] until a runtime offers the check.
+     * Asks nobody: it uses the ids the track carries and what song.link
+     * already answered.
+     */
+    internal fun checkAvailability(track: IdentifiedTrack): List<SpotiFlacAvailability> {
+        val ids = songLinkIdentity(track)?.let(songLinkMemory::get) ?: basicProviderIdentifiers(track)
+        return availableProviders.map { provider ->
+            SpotiFlacAvailability(
+                provider = provider,
+                matched = SpotiFlacProviderMatch.hasExactId(provider, ids.deezerId, ids.tidalId, ids.qobuzId),
+                state = SpotiFlacAvailabilityState.UNKNOWN,
+                reason = "${backend.displayName} ${backend.version} confirms availability only as part of a download.",
+            )
+        }
+    }
+
+    /**
+     * Looks up the provider ids of [tracks] ahead of their downloads (an
+     * album's next tracks), so each download finds its answer waiting instead
+     * of asking song.link while the track sits on "Resolving".
+     */
+    fun prefetchProviderIdentifiers(tracks: List<IdentifiedTrack>) {
+        if (tracks.isEmpty()) return
+        lookupScope.launch {
+            for (track in tracks) {
+                if (songLinkMemory.paused) break
+                runCatching { resolveProviderIdentifiers(track) }
+            }
+        }
     }
 
     /**
@@ -328,7 +572,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val normalized = providerId.trim()
         require(normalized.isNotBlank()) { "Provider id is required for SpotiFLAC verification." }
         ensureReady { }
-        return providerStateMutex.withLock { readVerificationChallengeNative(normalized) }
+        return withProviderStateExclusive { readVerificationChallengeNative(normalized) }
     }
 
     /**
@@ -417,7 +661,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
             return result
         }
 
-        val result = providerStateMutex.withLock {
+        val result = withProviderStateExclusive {
             completeVerificationCallbackLocked(
                 expectedProviderId = providerId,
                 callbackUrl = callbackUrl,
@@ -557,7 +801,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val normalized = providerId.trim()
         if (normalized.isBlank()) return
         ensureReady { }
-        providerStateMutex.withLock {
+        withProviderStateExclusive {
             runCatching { nativeControl { backend.clearPendingAuth(normalized) } }
             clearPersistedCallbackState(normalized)
         }
@@ -590,34 +834,83 @@ class SpotiFlacDownloadEngine @Inject constructor(
             // explains which APK the user needs.
             SpotiFlacNativeRuntime.requireCompatible(context, backend.nativeLibrary)
 
-            onProgress(
-                SpotiFlacTransferProgress(
-                    stage = SpotiFlacStage.PROVIDERS,
-                    detail = "Checking the official SpotiFLAC extension registry…",
-                ),
+            val runtimeBase = File(context.filesDir, backend.runtimeDirectory)
+            val store = SpotiFlacPackageStore(
+                File(runtimeBase, "packages"), acceptedPackages, SpotiFlacProviderRegistry.fallbackPackages,
             )
+            val startup = SpotiFlacProviderStartup(store, PROVIDER_PRIORITY)
 
-            val registry = withContext(Dispatchers.IO) { resolveProviderRegistry() }
-            activeRegistrySummary = registry.summary
+            // Providers this phone has already run are used at once; the registry is
+            // asked off to the side and a newer set waits for a moment between
+            // downloads. Only a first run has to wait for the registry.
+            val cached = withContext(Dispatchers.IO) { startup.cached() }
+            val set: ProviderSet
+            val source: String
+            if (cached.packages.isNotEmpty()) {
+                set = cached
+                source = "last accepted packages (registry checked in the background)"
+                refreshProvidersInBackground(startup, cached.fingerprint)
+            } else {
+                onProgress(
+                    SpotiFlacTransferProgress(
+                        stage = SpotiFlacStage.PROVIDERS,
+                        detail = "Checking the official SpotiFLAC extension registry…",
+                    ),
+                )
+                val registry = withContext(Dispatchers.IO) { resolveProviderRegistry() }
+                onProgress(
+                    SpotiFlacTransferProgress(
+                        stage = SpotiFlacStage.PROVIDERS,
+                        detail = "Verifying current SpotiFLAC provider packages…",
+                    ),
+                )
+                // Each provider's package, verified and reviewed (SpotiFlacPackageStore). A
+                // provider whose package cannot be had is left out; it does not stop the others.
+                set = withContext(Dispatchers.IO) { startup.fromRegistry(registry, ::downloadProviderPackage) }
+                source = registry.source
+            }
+            val resolved = set.packages
+            val packageNotes = set.notes
+            if (resolved.isEmpty()) {
+                throw SpotiFlacException(
+                    "No download provider could be installed. Check the connection and try again.",
+                    "provider_install",
+                    technicalDetails = "source=$source\n${packageNotes.joinToString("\n")}",
+                )
+            }
+            activeRegistrySummary = "$source; fingerprint=${set.fingerprint}; " +
+                resolved.joinToString { "${it.accepted.id}@${it.accepted.version}" } +
+                if (packageNotes.isEmpty()) "" else "; " + packageNotes.joinToString("; ")
 
-            // The runtime fingerprint changes whenever one of the provider package
+            // The runtime fingerprint changes whenever one of the installed package
             // hashes changes. This prevents a stale restored extension VM from
             // shadowing a newer .sflx file after an update.
-            val runtimeRoot = File(
-                context.filesDir,
-                "${backend.runtimeDirectory}/${registry.fingerprint}",
-            )
-            val extensionsDir = File(runtimeRoot, "extensions").apply { mkdirs() }
-            val dataDir = File(runtimeRoot, "data").apply { mkdirs() }
+            val runtimeRoot = File(runtimeBase, set.fingerprint)
+            val extensionsDir = File(runtimeRoot, "extensions")
+            val dataDir = File(runtimeRoot, "data")
+            val previous = rememberedRuntime()
 
-            onProgress(
-                SpotiFlacTransferProgress(
-                    stage = SpotiFlacStage.PROVIDERS,
-                    detail = "Verifying current SpotiFLAC provider packages…",
-                ),
-            )
             withContext(Dispatchers.IO) {
-                registry.packages.forEach { provider -> installProviderIfNeeded(provider, extensionsDir) }
+                // A new set starts in a new folder. The providers whose package did not
+                // change keep their settings and signed session (SpotiFlacRuntimeLayout).
+                if (previous != null && previous.fingerprint != set.fingerprint && !dataDir.exists()) {
+                    val unchanged = resolved.map { it.accepted }
+                        .filter { previous.hashes[it.id].equals(it.sha256, ignoreCase = true) }.map { it.id }
+                    SpotiFlacRuntimeLayout.carryOver(File(runtimeBase, "${previous.fingerprint}/data"), dataDir, unchanged)
+                }
+                extensionsDir.mkdirs()
+                dataDir.mkdirs()
+                resolved.forEach { item ->
+                    SpotiFlacProviderInstaller.install(item.accepted, extensionsDir) { _, partial ->
+                        item.file.copyTo(partial, overwrite = true)
+                    }
+                }
+                // Only these packages may be in the directory the runtime loads.
+                val wanted = resolved.map { "${it.accepted.id}.sflx" }.toSet()
+                extensionsDir.listFiles()?.forEach { file ->
+                    if (file.isFile && file.name.endsWith(".sflx") && file.name !in wanted) file.delete()
+                }
+                store.prune(resolved.map { it.accepted })
             }
 
             // SpotiFLAC 4.9+ encrypts extension settings, session material and
@@ -629,6 +922,13 @@ class SpotiFlacDownloadEngine @Inject constructor(
 
             // Every download is staged under here; the Rust runtime refuses writes anywhere else.
             val stagingRoot = File(context.cacheDir, "spotiflac/staging").apply { mkdirs() }
+            // Partial transfers nobody came back for.
+            withContext(Dispatchers.IO) {
+                SpotiFlacStaging.sweep(
+                    stagingRoot, STAGING_MAX_AGE_MS, System.currentTimeMillis(),
+                    keep = stagingLeases.heldNames, budgetBytes = STAGING_BUDGET_BYTES,
+                )
+            }
             nativeControl {
                 backend.initialize(
                     extensionsDir.absolutePath,
@@ -638,20 +938,34 @@ class SpotiFlacDownloadEngine @Inject constructor(
                 )
                 val loadResult = JSONObject(backend.loadExtensionsFromDir(extensionsDir.absolutePath))
                 val errors = loadResult.optJSONArray("errors")
-                if (errors != null && errors.length() > 0) {
-                    val messages = (0 until errors.length())
-                        .mapNotNull { errors.optString(it).takeIf(String::isNotBlank) }
-                    val realErrors = messages.filterNot(::isBenignDuplicateExtensionMessage)
-                    if (realErrors.isNotEmpty()) {
-                        throw SpotiFlacException(
-                            "SpotiFLAC provider initialization failed: ${realErrors.first()}",
-                            "provider_init",
-                            technicalDetails = "registry=${registry.summary}\n${loadResult}",
-                        )
-                    }
+                val realErrors = (0 until (errors?.length() ?: 0))
+                    .mapNotNull { errors?.optString(it)?.takeIf(String::isNotBlank) }
+                    .filterNot(::isBenignDuplicateExtensionMessage)
+                // One provider that does not load must not take the others down with it:
+                // the download plan simply runs on the ones that did.
+                val loaded = loadedProviderIds()
+                val usable = PROVIDER_PRIORITY.filter { id -> id in loaded && resolved.any { it.accepted.id == id } }
+                if (usable.isEmpty()) {
+                    throw SpotiFlacException(
+                        "SpotiFLAC provider initialization failed: ${realErrors.firstOrNull() ?: "no provider loaded"}",
+                        "provider_init",
+                        technicalDetails = "registry=$activeRegistrySummary\n${loadResult}",
+                    )
                 }
+                if (realErrors.isNotEmpty()) {
+                    activeRegistrySummary += "; load errors: " + realErrors.joinToString("; ") { it.take(200) }
+                }
+                availableProviders = usable
                 providerQualityOptions = readInstalledProviderQualityOptions()
                 restoreProviderConfiguration()
+            }
+            // The set that works is remembered with the one before it (to carry sessions
+            // over next time, and to go back to); older runtime folders go.
+            if (previous?.fingerprint != set.fingerprint) {
+                rememberRuntime(set, previousFingerprint = previous?.fingerprint)
+            }
+            withContext(Dispatchers.IO) {
+                SpotiFlacRuntimeLayout.prune(runtimeBase, setOfNotNull(set.fingerprint, rememberedRuntime()?.previous))
             }
             initialized = true
         }
@@ -671,10 +985,15 @@ class SpotiFlacDownloadEngine @Inject constructor(
     private suspend fun executeProviderPlan(
         baseRequest: JSONObject,
         outputFormat: SpotiFlacOutputFormat,
-        itemId: String,
-        jobDir: File,
+        current: ActiveTransfer,
         onProgress: (SpotiFlacTransferProgress) -> Unit,
+        latestIds: () -> ProviderIdentifiers? = { null },
     ): JSONObject {
+        val itemId = current.itemId
+        val jobDir = current.jobDir
+        // Naming the provider in the request is what lets two downloads run side
+        // by side; with one at a time the runtime-wide route stays, as before.
+        val routePerRequest = backend.routesPerRequest && parallelDownloads > 1
         val diagnostics = JSONArray()
         val blockedForThisDownload = linkedSetOf<String>()
         var lastFailure: JSONObject? = null
@@ -715,7 +1034,10 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     continue
                 }
                 nativeControl {
-                    configureProviderRoute(listOf(currentProvider))
+                    // The Go runtime routes by a runtime-wide order; Mornye's takes
+                    // the provider from the request below, so downloads running
+                    // side by side never change each other's route.
+                    if (!routePerRequest) configureProviderRoute(listOf(currentProvider))
                     backend.resetDownloadCancel(itemId)
                 }
 
@@ -734,7 +1056,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     // Keep the unified extension entrypoint, but prevent the Go
                     // router from moving on to another provider behind Harmony's
                     // back. This keeps verification and 429 attribution exact.
-                    put("service", "")
+                    put("service", if (routePerRequest) currentProvider else "")
+                    // Ids song.link answered since the request was built (a later provider's).
+                    latestIds()?.let { applyIdentifiers(this, it) }
                     put("use_extensions", true)
                     put("use_fallback", false)
                     put("allow_fallback", false)
@@ -742,17 +1066,19 @@ class SpotiFlacDownloadEngine @Inject constructor(
                     put("extension_fallback_provider_ids", JSONArray(listOf(currentProvider)))
                 }
 
-                val response = try {
-                    nativeTransferActive = true
-                    callDownloadWithWatchdog(
-                        request = request,
-                        itemId = itemId,
-                        label = label,
-                        timeoutMs = PROVIDER_WATCHDOG_MS,
-                    )
-                } finally {
-                    nativeTransferActive = false
+                // No more calls into one provider at once than its package allows.
+                val response = providerSlot(currentProvider).withPermit {
+                    try {
+                        current.timeline.callStarted(withContext(Dispatchers.IO) { SpotiFlacStaging.resumableBytes(jobDir) })
+                        current.transferring = true
+                        callDownloadWithWatchdog(request = request, current = current, label = label)
+                    } finally {
+                        current.transferring = false
+                    }
                 }
+                // One last look, so a fast transfer between two polls is still counted.
+                runCatching { readProgress(itemId, current) }
+                current.timeline.callEnded(response.optInt("attempts", 0))
                 // With an isolated route, an unlabelled backend failure still
                 // belongs to the provider Harmony explicitly selected.
                 val reportedProvider = verificationProviderId(response) ?: currentProvider
@@ -789,7 +1115,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
                             val source = file ?: throw AmazonDownloadFinalizer.Failure(
                                 "source", "Amazon's downloaded audio file is missing.",
                             )
-                            val completed = finishAmazonDownload(response, source, jobDir)
+                            val completed = current.timeline.measure(DownloadTimeline.Phase.FINALIZE) {
+                                finishAmazonDownload(response, source, jobDir)
+                            }
                             file = completed.file
                             response.apply {
                                 put("file_path", completed.file.absolutePath)
@@ -862,7 +1190,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
                                 detail = "Finalizing lossless ${probe.displayName} to native FLAC…",
                             ),
                         )
-                        val finalization = finalizeLosslessContainerToFlac(file, jobDir, probe)
+                        val finalization = current.timeline.measure(DownloadTimeline.Phase.FINALIZE) {
+                            finalizeLosslessContainerToFlac(file, jobDir, probe)
+                        }
                         attemptDiagnostic.put("container_finalization", finalization.diagnostic)
                         if (finalization.outputFile != null) {
                             val finalizedFile = finalization.outputFile
@@ -894,7 +1224,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
                             // device cannot convert a 192 kHz source, another
                             // provider may offer native FLAC within the ceiling.
                             val accepted = if (outputFormat.isLosslessOutput) {
-                                enforceFlacQualityLimit(usableFile, jobDir, outputFormat, reportedProvider, onProgress)
+                                current.timeline.measure(DownloadTimeline.Phase.FINALIZE) {
+                                    enforceFlacQualityLimit(usableFile, jobDir, outputFormat, reportedProvider, onProgress)
+                                }
                             } else usableFile
                             response.put(HARMONY_VALIDATED_FILE_PATH, accepted.absolutePath)
                             diagnostics.put(attemptDiagnostic)
@@ -1107,8 +1439,10 @@ class SpotiFlacDownloadEngine @Inject constructor(
             }
             throw failure
         } finally {
-            withContext(NonCancellable) {
-                runCatching { nativeControl { restoreProviderConfiguration() } }
+            if (!routePerRequest) {
+                withContext(NonCancellable) {
+                    runCatching { nativeControl { restoreProviderConfiguration() } }
+                }
             }
         }
 
@@ -1125,39 +1459,62 @@ class SpotiFlacDownloadEngine @Inject constructor(
     private fun actionableVerification(deferred: SpotiFlacException?): SpotiFlacException? =
         deferred?.takeIf { it.verificationUrl != null }
 
+    /**
+     * One provider call, stopped when it is going nowhere rather than when it
+     * has run for a fixed time (see [TransferActivity] and [WatchedCall]): a
+     * large file on a slow connection goes on for as long as bytes keep
+     * arriving. A call stopped or cancelled is told so; whatever it answers
+     * afterwards is not used, and its folder is tidied only once it returned.
+     */
     private suspend fun callDownloadWithWatchdog(
         request: JSONObject,
-        itemId: String,
+        current: ActiveTransfer,
         label: String,
-        timeoutMs: Long,
     ): JSONObject = withContext(Dispatchers.IO) {
+        val itemId = current.itemId
         val startedAt = System.nanoTime()
-        val future = nativeDownloadExecutor.submit<String> {
-            backend.downloadByStrategy(request.toString())
+        current.lease.nativeStarted()
+        val future = try {
+            nativeDownloadExecutor.submit<String> {
+                try {
+                    backend.downloadByStrategy(request.toString())
+                } finally {
+                    current.lease.nativeFinished()
+                }
+            }
+        } catch (rejected: Throwable) {
+            current.lease.nativeFinished()
+            throw rejected
         }
-        try {
-            val raw = future.get(timeoutMs, TimeUnit.MILLISECONDS)
-            parseBackendResponse(raw, label, elapsedMs(startedAt))
-        } catch (_: TimeoutException) {
-            runCatching {
-                nativeControlExecutor.submit { backend.cancelDownload(itemId) }
-                    .get(CANCEL_DELIVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            }
-            future.cancel(true)
-            JSONObject().apply {
-                put("success", false)
-                put("error_type", "provider_timeout")
-                put("error", "$label exceeded Harmony's ${timeoutMs / 1000}s watchdog.")
-                put("elapsed_ms", elapsedMs(startedAt))
-            }
-        } catch (execution: ExecutionException) {
-            val cause = execution.cause ?: execution
+        val result = try {
+            watchedCall.await(
+                call = future,
+                activity = current.activity,
+                isCancelled = { !isActive },
+                stopNative = {
+                    nativeControlExecutor.submit { backend.cancelDownload(itemId) }
+                        .get(CANCEL_DELIVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                },
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (cause: Throwable) {
             throw SpotiFlacException(
                 "$label failed at the native Go boundary: ${cause.message ?: cause.javaClass.simpleName}",
                 "native_bridge",
                 cause = cause,
                 technicalDetails = "registry=$activeRegistrySummary",
             )
+        }
+        when (result) {
+            is WatchedCall.Result.Returned -> parseBackendResponse(result.raw, label, elapsedMs(startedAt))
+            is WatchedCall.Result.Stopped -> JSONObject().apply {
+                put("success", false)
+                put("error_type", "provider_timeout")
+                put("error", "$label ${result.reason} (${current.activity.receivedBytes / (1024 * 1024)} MB received).")
+                put("elapsed_ms", elapsedMs(startedAt))
+            }
+            WatchedCall.Result.Cancelled -> throw CancellationException("Download cancelled")
         }
     }
 
@@ -1196,11 +1553,12 @@ class SpotiFlacDownloadEngine @Inject constructor(
     }
 
     private fun providerOrderForDownload(): List<String> {
+        val usable = availableProviders
         val preferred = lastSuccessfulProviderId
-        if (preferred.isNullOrBlank() || preferred !in PROVIDER_PRIORITY) return PROVIDER_PRIORITY
-        return buildList(PROVIDER_PRIORITY.size) {
+        if (preferred.isNullOrBlank() || preferred !in usable) return usable
+        return buildList(usable.size) {
             add(preferred)
-            PROVIDER_PRIORITY.filterTo(this) { it != preferred }
+            usable.filterTo(this) { it != preferred }
         }
     }
 
@@ -1298,12 +1656,14 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
     }
 
-    private fun retryAfterSeconds(response: JSONObject, retryOrdinal: Int): Long {
-        val advertised = response.optLong("retry_after_seconds", 0L)
-        if (advertised > 0L) return advertised.coerceIn(MIN_GATEWAY_COOLDOWN_SECONDS, MAX_GATEWAY_COOLDOWN_SECONDS)
-        val fallback = DEFAULT_GATEWAY_COOLDOWN_SECONDS shl retryOrdinal.coerceIn(0, 2)
-        return fallback.coerceAtMost(MAX_GATEWAY_COOLDOWN_SECONDS)
-    }
+    /** How long to leave the provider alone: its own Retry-After when it gave one (SpotiFlacFailures). */
+    private fun retryAfterSeconds(response: JSONObject, retryOrdinal: Int): Long = SpotiFlacFailures.retryAfterSeconds(
+        advertised = response.optLong("retry_after_seconds", 0L),
+        retryOrdinal = retryOrdinal,
+        fallbackSeconds = DEFAULT_GATEWAY_COOLDOWN_SECONDS,
+        minSeconds = MIN_GATEWAY_COOLDOWN_SECONDS,
+        maxSeconds = MAX_GATEWAY_COOLDOWN_SECONDS,
+    )
 
     private fun registerGatewayCooldown(response: JSONObject, retryOrdinal: Int): Long {
         val seconds = retryAfterSeconds(response, retryOrdinal)
@@ -1420,7 +1780,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
     }
 
-    private suspend fun readProgress(itemId: String): SpotiFlacTransferProgress? {
+    private suspend fun readProgress(itemId: String, current: ActiveTransfer? = null): SpotiFlacTransferProgress? {
         val raw = nativeControl { backend.getAllDownloadProgress() }
         if (raw.isBlank()) return null
         val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
@@ -1429,6 +1789,9 @@ class SpotiFlacDownloadEngine @Inject constructor(
         val total = firstLong(node, "total_bytes", "totalBytes", "total")
         val downloaded = firstLong(node, "downloaded_bytes", "downloadedBytes", "downloaded", "bytes_downloaded")
         val percentage = firstDouble(node, "progress", "percent", "percentage", "progress_percent")
+        // What the watchdog goes by: bytes that arrived since it last looked.
+        current?.activity?.note(downloaded, total)
+        current?.timeline?.progress(downloaded)
         val fraction = when {
             total > 0L && downloaded >= 0L ->
                 (downloaded.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
@@ -1540,9 +1903,57 @@ class SpotiFlacDownloadEngine @Inject constructor(
         // Enabling is idempotent and done only as part of initialization/restore.
         // We never disable providers during a download attempt because unloading
         // an extension can unregister its provider from the Go runtime.
-        PROVIDER_PRIORITY.forEach { backend.setExtensionEnabled(it, true) }
-        configureProviderRoute(PROVIDER_PRIORITY)
+        availableProviders.forEach { backend.setExtensionEnabled(it, true) }
+        configureProviderRoute(availableProviders)
     }
+
+    private class RememberedRuntime(val fingerprint: String, val previous: String?, val hashes: Map<String, String>)
+
+    private fun rememberedRuntime(): RememberedRuntime? =
+        providerPrefs.getString("$KEY_RUNTIME_SET_PREFIX${backend.nativeLibrary}", null)?.let { raw ->
+            runCatching {
+                val node = JSONObject(raw)
+                val packages = node.getJSONObject("packages")
+                RememberedRuntime(
+                    fingerprint = node.getString("fingerprint"),
+                    previous = node.optString("previous").takeIf(String::isNotBlank),
+                    hashes = packages.keys().asSequence().associateWith { packages.getString(it) },
+                )
+            }.getOrNull()
+        }
+
+    private fun rememberRuntime(set: ProviderSet, previousFingerprint: String?) {
+        val packages = JSONObject()
+        set.packages.forEach { packages.put(it.accepted.id, it.accepted.sha256) }
+        val node = JSONObject().put("fingerprint", set.fingerprint).put("previous", previousFingerprint.orEmpty())
+            .put("packages", packages)
+        providerPrefs.edit().putString("$KEY_RUNTIME_SET_PREFIX${backend.nativeLibrary}", node.toString()).apply()
+    }
+
+    /**
+     * Asks the registry while downloads go on with the providers at hand. A
+     * different set is verified into the store and waits ([adoptProviderUpdate]);
+     * nothing the running downloads use is touched.
+     */
+    private fun refreshProvidersInBackground(startup: SpotiFlacProviderStartup, runningFingerprint: String) {
+        if (!providerRefreshRunning.compareAndSet(false, true)) return
+        lookupScope.launch {
+            try {
+                val next = startup.fromRegistry(resolveProviderRegistry(), ::downloadProviderPackage)
+                if (next.packages.isNotEmpty() && next.fingerprint != runningFingerprint) pendingProviderUpdate = true
+            } catch (_: Throwable) {
+                // Offline or a broken registry: the providers at hand keep working.
+            } finally {
+                providerRefreshRunning.set(false)
+            }
+        }
+    }
+
+    /** The ids of the extensions the runtime has loaded. */
+    private fun loadedProviderIds(): Set<String> = runCatching {
+        val installed = JSONArray(backend.getInstalledExtensions())
+        (0 until installed.length()).mapNotNull { installed.optJSONObject(it)?.optString("id")?.takeIf(String::isNotBlank) }.toSet()
+    }.getOrDefault(emptySet())
 
     private fun readInstalledProviderQualityOptions(): Map<String, List<SpotiFlacQualityOption>> {
         val installed = JSONArray(backend.getInstalledExtensions())
@@ -1574,10 +1985,16 @@ class SpotiFlacDownloadEngine @Inject constructor(
         return normalized.contains("already installed") || normalized.contains("already loaded")
     }
 
-    private fun resolveProviderRegistry(): RegistrySnapshot =
-        SpotiFlacProviderRegistry.resolve { fetchOfficialProviderRegistry() }
+    /** The registry, asked for at most every [REGISTRY_MAX_AGE_MS]; see [SpotiFlacProviderRegistry.resolve]. */
+    private fun resolveProviderRegistry(): RegistrySnapshot = SpotiFlacProviderRegistry.resolve(
+        appVersion = backend.version,
+        cache = SpotiFlacRegistryCache(
+            File(context.filesDir, "${backend.runtimeDirectory}/registry.json"), REGISTRY_MAX_AGE_MS,
+        ),
+    ) { fetchOfficialProviderRegistry() }
 
     private fun fetchOfficialProviderRegistry(): String {
+        hostRequests.incrementAndGet()
         val connection = (URL(SpotiFlacProviderRegistry.OFFICIAL_REGISTRY_URL).openConnection() as HttpURLConnection).apply {
             connectTimeout = REGISTRY_CONNECT_TIMEOUT_MS
             readTimeout = REGISTRY_READ_TIMEOUT_MS
@@ -1589,34 +2006,38 @@ class SpotiFlacDownloadEngine @Inject constructor(
         try {
             val code = connection.responseCode
             if (code !in 200..299) error("official extension registry returned HTTP $code")
-            return connection.inputStream.bufferedReader().use { it.readText() }
+            return connection.inputStream.use { input ->
+                SpotiFlacProviderGate.readBounded(input, SpotiFlacRegistryCache.MAX_BYTES).toString(Charsets.UTF_8)
+            }
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun installProviderIfNeeded(provider: ProviderPackage, extensionsDir: File) {
-        SpotiFlacProviderInstaller.install(provider, extensionsDir) { requested, partial ->
-            val connection = (URL(requested.url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = PROVIDER_CONNECT_TIMEOUT_MS
-                readTimeout = PROVIDER_READ_TIMEOUT_MS
-                instanceFollowRedirects = true
-                requestMethod = "GET"
-                setRequestProperty("Accept", "application/octet-stream")
-                setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Bridge")
+    /** One provider package to [partial], no larger than a package can be; the store verifies it. */
+    private fun downloadProviderPackage(requested: ProviderPackage, partial: File) {
+        hostRequests.incrementAndGet()
+        val connection = (URL(requested.url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = PROVIDER_CONNECT_TIMEOUT_MS
+            readTimeout = PROVIDER_READ_TIMEOUT_MS
+            instanceFollowRedirects = true
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/octet-stream")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Bridge")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throw SpotiFlacException(
+                    "Could not download the ${requested.displayName} SpotiFLAC provider (HTTP $code).",
+                    "provider_download",
+                )
             }
-            try {
-                val code = connection.responseCode
-                if (code !in 200..299) {
-                    throw SpotiFlacException(
-                        "Could not download the ${requested.displayName} SpotiFLAC provider (HTTP $code).",
-                        "provider_download",
-                    )
-                }
-                connection.inputStream.use { input -> partial.outputStream().buffered().use(input::copyTo) }
-            } finally {
-                connection.disconnect()
+            connection.inputStream.use { input ->
+                SpotiFlacProviderGate.copyBounded(input, partial, SpotiFlacProviderGate.MAX_PACKAGE_BYTES)
             }
+        } finally {
+            connection.disconnect()
         }
     }
 
@@ -1632,62 +2053,83 @@ class SpotiFlacDownloadEngine @Inject constructor(
         )
     }
 
-    private fun resolveProviderIdentifiers(track: IdentifiedTrack): ProviderIdentifiers {
-        val deezerId = track.metadataId?.trim()?.takeIf { it.all(Char::isDigit) }
-        val deezerUrl = deezerId?.let { "https://www.deezer.com/track/$it" }
-        val spotifyId = track.spotifyId?.trim()?.takeIf { it.matches(SPOTIFY_TRACK_ID) }
-        val spotifyUrl = spotifyId?.let { "https://open.spotify.com/track/$it" }
-        val identityUrl = spotifyUrl ?: deezerUrl
-        if (identityUrl == null) {
-            return ProviderIdentifiers(deezerId = null, deezerUrl = null)
-        }
+    /** The URL song.link is asked about: the track's Spotify page, else its Deezer one. */
+    private fun songLinkIdentity(track: IdentifiedTrack): String? {
+        val own = basicProviderIdentifiers(track)
+        return own.spotifyUrl ?: own.deezerUrl
+    }
 
-        return runCatching {
-            val endpoint = "https://api.song.link/v1-alpha.1/links?url=" +
-                URLEncoder.encode(identityUrl, StandardCharsets.UTF_8.toString())
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                connectTimeout = SONG_LINK_TIMEOUT_MS
-                readTimeout = SONG_LINK_TIMEOUT_MS
-                requestMethod = "GET"
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Resolver")
-            }
-            try {
-                if (connection.responseCode !in 200..299) {
-                    return@runCatching ProviderIdentifiers(
-                        deezerId = deezerId,
-                        deezerUrl = deezerUrl,
-                        spotifyId = spotifyId,
-                        spotifyUrl = spotifyUrl,
-                    )
-                }
-                val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                val links = root.optJSONObject("linksByPlatform")
-                val spotify = links?.optJSONObject("spotify")
-                val qobuz = links?.optJSONObject("qobuz")
-                val tidal = links?.optJSONObject("tidal")
-                ProviderIdentifiers(
-                    deezerId = platformTrackId(links?.optJSONObject("deezer")) ?: deezerId,
-                    deezerUrl = links?.optJSONObject("deezer")?.optString("url")
-                        ?.takeIf(String::isNotBlank) ?: deezerUrl,
-                    spotifyId = platformTrackId(spotify) ?: spotifyId,
-                    spotifyUrl = spotify?.optString("url")?.takeIf(String::isNotBlank) ?: spotifyUrl,
-                    qobuzId = platformTrackId(qobuz),
-                    qobuzUrl = qobuz?.optString("url")?.takeIf(String::isNotBlank),
-                    tidalId = platformTrackId(tidal),
-                    tidalUrl = tidal?.optString("url")?.takeIf(String::isNotBlank),
-                )
-            } finally {
-                connection.disconnect()
-            }
-        }.getOrElse {
-            ProviderIdentifiers(
-                deezerId = deezerId,
-                deezerUrl = deezerUrl,
-                spotifyId = spotifyId,
-                spotifyUrl = spotifyUrl,
-            )
+    /**
+     * The track's ids on every provider. A confirmed answer is reused for a
+     * day, callers asking about the same track at once share one request, and
+     * after song.link says it is asked too often the track's own ids do until
+     * the pause ends.
+     */
+    private fun resolveProviderIdentifiers(track: IdentifiedTrack): ProviderIdentifiers {
+        val own = basicProviderIdentifiers(track)
+        val identityUrl = own.spotifyUrl ?: own.deezerUrl
+            ?: return ProviderIdentifiers(deezerId = null, deezerUrl = null)
+        return songLinkMemory.getOrAsk(identityUrl) { askSongLink(identityUrl, own) } ?: own
+    }
+
+    /** One request to song.link; null when it did not answer with links (nothing is remembered then). */
+    private fun askSongLink(identityUrl: String, own: ProviderIdentifiers): ProviderIdentifiers? = runCatching {
+        val endpoint = "https://api.song.link/v1-alpha.1/links?url=" +
+            URLEncoder.encode(identityUrl, StandardCharsets.UTF_8.toString())
+        hostRequests.incrementAndGet()
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            connectTimeout = SONG_LINK_TIMEOUT_MS
+            readTimeout = SONG_LINK_TIMEOUT_MS
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "Harmony/1.0 Android SpotiFLAC-Resolver")
         }
+        try {
+            val status = connection.responseCode
+            if (status == 429) {
+                val wait = connection.getHeaderField("Retry-After")?.trim()?.toLongOrNull() ?: SONG_LINK_PAUSE_SECONDS
+                songLinkMemory.pauseFor(wait.coerceIn(10L, 300L) * 1_000L)
+            }
+            if (status !in 200..299) return@runCatching null
+            val root = JSONObject(
+                connection.inputStream.use { SpotiFlacProviderGate.readBounded(it, SONG_LINK_MAX_BYTES) }
+                    .toString(Charsets.UTF_8),
+            )
+            val links = root.optJSONObject("linksByPlatform")
+            val spotify = links?.optJSONObject("spotify")
+            val qobuz = links?.optJSONObject("qobuz")
+            val tidal = links?.optJSONObject("tidal")
+            ProviderIdentifiers(
+                deezerId = platformTrackId(links?.optJSONObject("deezer")) ?: own.deezerId,
+                deezerUrl = links?.optJSONObject("deezer")?.optString("url")
+                    ?.takeIf(String::isNotBlank) ?: own.deezerUrl,
+                spotifyId = platformTrackId(spotify) ?: own.spotifyId,
+                spotifyUrl = spotify?.optString("url")?.takeIf(String::isNotBlank) ?: own.spotifyUrl,
+                qobuzId = platformTrackId(qobuz),
+                qobuzUrl = qobuz?.optString("url")?.takeIf(String::isNotBlank),
+                tidalId = platformTrackId(tidal),
+                tidalUrl = tidal?.optString("url")?.takeIf(String::isNotBlank),
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
+
+    /** Puts [ids] into a request built before they were known. */
+    private fun applyIdentifiers(request: JSONObject, ids: ProviderIdentifiers) {
+        val sourceUrl = ids.spotifyUrl ?: ids.deezerUrl.orEmpty()
+        request.put("spotify_id", ids.spotifyId.orEmpty())
+        request.put("deezer_id", ids.deezerId.orEmpty())
+        request.put("qobuz_id", ids.qobuzId.orEmpty())
+        request.put("tidal_id", ids.tidalId.orEmpty())
+        request.put("source_url", sourceUrl)
+        request.put("url", sourceUrl)
+        request.put("availability", JSONObject().apply {
+            put("deezer_id", ids.deezerId.orEmpty())
+            put("spotify_id", ids.spotifyId.orEmpty())
+            put("qobuz_id", ids.qobuzId.orEmpty())
+            put("tidal_id", ids.tidalId.orEmpty())
+        })
     }
 
     private fun platformTrackId(node: JSONObject?): String? {
@@ -2102,19 +2544,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
     }
 
-    private fun isSafeExternalHttpsUrl(raw: String): Boolean = runCatching {
-        val uri = URI(raw.trim())
-        if (!uri.scheme.equals("https", ignoreCase = true)) return@runCatching false
-        if (!uri.userInfo.isNullOrBlank()) return@runCatching false
-        val host = uri.host?.lowercase(Locale.ROOT)?.trim().orEmpty()
-        if (host.isBlank() || host == "localhost" || host.endsWith(".localhost")) return@runCatching false
-        if (host == "127.0.0.1" || host == "::1" || host.startsWith("10.") || host.startsWith("192.168.")) return@runCatching false
-        if (host.startsWith("172.")) {
-            val second = host.split('.').getOrNull(1)?.toIntOrNull()
-            if (second != null && second in 16..31) return@runCatching false
-        }
-        true
-    }.getOrDefault(false)
+    private fun isSafeExternalHttpsUrl(raw: String): Boolean = SpotiFlacUrlSafety.isPublicHttpsUrl(raw)
 
     private fun friendlyBackendFailure(response: JSONObject, diagnostics: JSONArray? = null): SpotiFlacException {
         val type = response.optString("error_type").takeIf(String::isNotBlank)
@@ -2269,16 +2699,20 @@ class SpotiFlacDownloadEngine @Inject constructor(
         reportedPath: String,
         reportedName: String = "",
     ): File? {
-        // Prefer the exact path returned by the backend when it is a local file.
+        // Prefer the exact path returned by the backend when it is a local file,
+        // but only inside this download's own staging folder: a path in a
+        // provider's answer must never make Harmony read, convert or move
+        // another file.
         if (reportedPath.isNotBlank() && !reportedPath.startsWith("content://", ignoreCase = true)) {
-            File(reportedPath).takeIf { it.isFile && it.length() > 0L }?.let { return it }
+            SpotiFlacJobFiles.owned(File(reportedPath), jobDir)?.let { return it }
         }
 
-        val candidates = jobDir.walkTopDown()
-            .filter { it.isFile && it.length() > 0L }
+        // The same rule for whatever is found by looking: regular files of this
+        // job, links resolved, nothing reached through a link out of the folder.
+        val candidates = SpotiFlacJobFiles.all(jobDir).asSequence()
             .filterNot { file ->
                 val lower = file.name.lowercase(Locale.ROOT)
-                lower.endsWith(".part") || lower.endsWith(".partial") ||
+                lower.contains(".partial") || lower.endsWith(".part") ||
                     lower.endsWith(".tmp") || lower.endsWith(".lrc") ||
                     lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
                     lower.endsWith(".png") || lower.endsWith(".webp") ||
@@ -2785,13 +3219,22 @@ class SpotiFlacDownloadEngine @Inject constructor(
     ): File = withContext(Dispatchers.IO) {
         verifyFlacSignature(source)
 
-        val title = track.title.ifBlank { track.sourceTitle }.trim()
-        val artist = track.artist.trim()
-        val album = track.album.trim()
-        val isrc = track.isrc?.trim().orEmpty()
+        val albumTags = track.albumTags
+        val tags = FlacMetadataWriter.Tags(
+            title = track.title.ifBlank { track.sourceTitle }.trim(),
+            artist = track.artist.trim(),
+            album = track.album.trim(),
+            albumArtist = albumTags?.albumArtist?.trim().orEmpty(),
+            isrc = track.isrc?.trim().orEmpty(),
+            trackNumber = albumTags?.trackNumber ?: 0,
+            totalTracks = albumTags?.totalTracks ?: 0,
+            discNumber = albumTags?.discNumber ?: 0,
+            totalDiscs = albumTags?.totalDiscs ?: 0,
+            date = albumTags?.releaseDate?.trim().orEmpty(),
+        )
         val artworkUrl = track.thumbnailUrl?.trim().orEmpty()
 
-        if (title.isBlank() && artist.isBlank() && album.isBlank() && isrc.isBlank() && artworkUrl.isBlank()) {
+        if (tags.isEmpty && artworkUrl.isBlank()) {
             return@withContext source
         }
 
@@ -2815,17 +3258,8 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
 
         val output = File(jobDir, "harmony-tagged-${UUID.randomUUID()}.flac").also { it.delete() }
-        val rewritten = runCatching {
-            rewriteNativeFlacMetadata(
-                source = source,
-                output = output,
-                title = title,
-                artist = artist,
-                album = album,
-                isrc = isrc,
-                artwork = artwork,
-            )
-        }.getOrDefault(false)
+        // The one writer of the final tags (FlacMetadataWriter).
+        val rewritten = runCatching { FlacMetadataWriter.rewrite(source, output, tags, artwork) }.getOrDefault(false)
 
         if (!rewritten || !output.isFile || output.length() < 42L || !hasNativeFlacSignature(output)) {
             runCatching { output.delete() }
@@ -2838,267 +3272,37 @@ class SpotiFlacDownloadEngine @Inject constructor(
         output
     }
 
-    private data class RawFlacMetadataBlock(
-        val type: Int,
-        val payload: ByteArray,
-    )
-
-    private data class FlacArtwork(
-        val bytes: ByteArray,
-        val mimeType: String,
-        val width: Int,
-        val height: Int,
-        val depth: Int,
-    )
-
-    /**
-     * Rewrites only FLAC metadata blocks. Audio frames after the original
-     * metadata boundary are copied byte-for-byte, so album tagging cannot alter
-     * the decoded audio or turn a verified lossless file into a transcode.
-     */
-    private fun rewriteNativeFlacMetadata(
-        source: File,
-        output: File,
-        title: String,
-        artist: String,
-        album: String,
-        isrc: String,
-        artwork: FlacArtwork?,
-    ): Boolean {
-        val blocks = mutableListOf<RawFlacMetadataBlock>()
-        var audioOffset = 0L
-
-        RandomAccessFile(source, "r").use { raf ->
-            val signature = ByteArray(4)
-            raf.readFully(signature)
-            if (!signature.contentEquals(byteArrayOf(0x66, 0x4C, 0x61, 0x43))) return false
-
-            var last = false
-            while (!last) {
-                if (raf.filePointer + 4L > raf.length()) return false
-                val header = raf.readUnsignedByte()
-                last = (header and 0x80) != 0
-                val type = header and 0x7F
-                val length = (raf.readUnsignedByte() shl 16) or
-                    (raf.readUnsignedByte() shl 8) or
-                    raf.readUnsignedByte()
-                if (type == 127 || raf.filePointer + length.toLong() > raf.length()) return false
-                val payload = ByteArray(length)
-                raf.readFully(payload)
-                blocks += RawFlacMetadataBlock(type, payload)
-            }
-            audioOffset = raf.filePointer
+    /** A cover, fetched safely and once per album (SpotiFlacArtworkFetcher), ready to embed. */
+    private val artworkFetcher = SpotiFlacArtworkFetcher(
+        maxBytes = MAX_EMBEDDED_ARTWORK_BYTES,
+        maxRedirects = MAX_ARTWORK_REDIRECTS,
+        cacheEntries = ARTWORK_CACHE_ENTRIES,
+    ) { url ->
+        hostRequests.incrementAndGet()
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = ARTWORK_CONNECT_TIMEOUT_MS
+        connection.readTimeout = ARTWORK_READ_TIMEOUT_MS
+        connection.requestMethod = "GET"
+        // Each redirect is checked before anything connects to it; the client follows none.
+        connection.instanceFollowRedirects = false
+        connection.setRequestProperty("Accept", "image/jpeg,image/png;q=0.9,*/*;q=0.2")
+        connection.setRequestProperty("User-Agent", "Harmony/1.0 Android ArtworkEmbed")
+        object : SpotiFlacArtworkFetcher.Exchange {
+            override val status: Int get() = connection.responseCode
+            override fun header(name: String): String? = connection.getHeaderField(name)
+            override fun body() = connection.inputStream
+            override fun close() = connection.disconnect()
         }
-
-        if (blocks.isEmpty() || blocks.first().type != 0 || blocks.first().payload.size != 34) return false
-
-        val existingComments = mutableListOf<String>()
-        var vendor = "Harmony"
-        blocks.filter { it.type == FLAC_BLOCK_VORBIS_COMMENT }.forEach { block ->
-            parseVorbisCommentBlock(block.payload)?.let { parsed ->
-                if (vendor == "Harmony" && parsed.first.isNotBlank()) vendor = parsed.first
-                existingComments += parsed.second
-            }
-        }
-
-        val replaceKeys = setOf("TITLE", "ARTIST", "ALBUM", "ALBUMARTIST", "ALBUM_ARTIST", "ISRC")
-        val mergedComments = existingComments.filter { comment ->
-            comment.substringBefore('=', "").trim().uppercase(Locale.ROOT) !in replaceKeys
-        }.toMutableList()
-        if (title.isNotBlank()) mergedComments += "TITLE=$title"
-        if (artist.isNotBlank()) mergedComments += "ARTIST=$artist"
-        if (album.isNotBlank()) mergedComments += "ALBUM=$album"
-        if (artist.isNotBlank() && album.isNotBlank()) mergedComments += "ALBUMARTIST=$artist"
-        if (isrc.isNotBlank()) mergedComments += "ISRC=$isrc"
-
-        val commentBlock = RawFlacMetadataBlock(
-            FLAC_BLOCK_VORBIS_COMMENT,
-            buildVorbisCommentBlock(vendor, mergedComments),
-        )
-
-        val rebuilt = mutableListOf<RawFlacMetadataBlock>()
-        var commentInserted = false
-        for (block in blocks) {
-            when {
-                block.type == FLAC_BLOCK_VORBIS_COMMENT -> {
-                    if (!commentInserted) {
-                        rebuilt += commentBlock
-                        commentInserted = true
-                    }
-                }
-                block.type == FLAC_BLOCK_PICTURE && artwork != null && flacPictureType(block.payload) == FLAC_FRONT_COVER_TYPE -> {
-                    // Replace only the front cover. Back covers/artist images/etc.
-                    // remain untouched.
-                }
-                else -> rebuilt += block
-            }
-        }
-        if (!commentInserted) {
-            rebuilt.add(1.coerceAtMost(rebuilt.size), commentBlock)
-        }
-        if (artwork != null) {
-            val picture = RawFlacMetadataBlock(FLAC_BLOCK_PICTURE, buildFlacPictureBlock(artwork))
-            val commentIndex = rebuilt.indexOfFirst { it.type == FLAC_BLOCK_VORBIS_COMMENT }
-            rebuilt.add((commentIndex + 1).coerceAtLeast(1).coerceAtMost(rebuilt.size), picture)
-        }
-
-        if (rebuilt.any { it.payload.size > FLAC_MAX_METADATA_BLOCK_BYTES }) return false
-
-        output.outputStream().buffered().use { out ->
-            out.write(byteArrayOf(0x66, 0x4C, 0x61, 0x43))
-            rebuilt.forEachIndexed { index, block ->
-                val header = block.type or if (index == rebuilt.lastIndex) 0x80 else 0
-                out.write(header)
-                val length = block.payload.size
-                out.write((length ushr 16) and 0xFF)
-                out.write((length ushr 8) and 0xFF)
-                out.write(length and 0xFF)
-                out.write(block.payload)
-            }
-
-            RandomAccessFile(source, "r").use { raf ->
-                raf.seek(audioOffset)
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val read = raf.read(buffer)
-                    if (read <= 0) break
-                    out.write(buffer, 0, read)
-                }
-            }
-        }
-        return output.isFile && output.length() > 42L
     }
 
-    private fun parseVorbisCommentBlock(payload: ByteArray): Pair<String, List<String>>? {
-        var offset = 0
-        fun readLength(): Int? {
-            if (offset + 4 > payload.size) return null
-            val value = (payload[offset].toInt() and 0xFF) or
-                ((payload[offset + 1].toInt() and 0xFF) shl 8) or
-                ((payload[offset + 2].toInt() and 0xFF) shl 16) or
-                ((payload[offset + 3].toInt() and 0xFF) shl 24)
-            offset += 4
-            return value.takeIf { it >= 0 }
-        }
-
-        val vendorLength = readLength() ?: return null
-        if (offset + vendorLength > payload.size) return null
-        val vendor = String(payload, offset, vendorLength, StandardCharsets.UTF_8)
-        offset += vendorLength
-
-        val count = readLength() ?: return null
-        if (count > FLAC_MAX_VORBIS_COMMENTS) return null
-        val comments = ArrayList<String>(count)
-        repeat(count) {
-            val length = readLength() ?: return null
-            if (offset + length > payload.size) return null
-            comments += String(payload, offset, length, StandardCharsets.UTF_8)
-            offset += length
-        }
-        return vendor to comments
-    }
-
-    private fun buildVorbisCommentBlock(vendor: String, comments: List<String>): ByteArray {
-        val out = ByteArrayOutputStream()
-        val vendorBytes = vendor.ifBlank { "Harmony" }.toByteArray(StandardCharsets.UTF_8)
-        writeLe32(out, vendorBytes.size)
-        out.write(vendorBytes)
-        writeLe32(out, comments.size)
-        comments.forEach { comment ->
-            val bytes = comment.toByteArray(StandardCharsets.UTF_8)
-            writeLe32(out, bytes.size)
-            out.write(bytes)
-        }
-        return out.toByteArray()
-    }
-
-    private fun buildFlacPictureBlock(artwork: FlacArtwork): ByteArray {
-        val out = ByteArrayOutputStream(artwork.bytes.size + 128)
-        val mime = artwork.mimeType.toByteArray(StandardCharsets.US_ASCII)
-        val description = "Cover (front)".toByteArray(StandardCharsets.UTF_8)
-        writeBe32(out, FLAC_FRONT_COVER_TYPE)
-        writeBe32(out, mime.size)
-        out.write(mime)
-        writeBe32(out, description.size)
-        out.write(description)
-        writeBe32(out, artwork.width.coerceAtLeast(0))
-        writeBe32(out, artwork.height.coerceAtLeast(0))
-        writeBe32(out, artwork.depth.coerceAtLeast(0))
-        writeBe32(out, 0)
-        writeBe32(out, artwork.bytes.size)
-        out.write(artwork.bytes)
-        return out.toByteArray()
-    }
-
-    private fun flacPictureType(payload: ByteArray): Int? {
-        if (payload.size < 4) return null
-        return ((payload[0].toInt() and 0xFF) shl 24) or
-            ((payload[1].toInt() and 0xFF) shl 16) or
-            ((payload[2].toInt() and 0xFF) shl 8) or
-            (payload[3].toInt() and 0xFF)
-    }
-
-    private fun writeLe32(out: ByteArrayOutputStream, value: Int) {
-        out.write(value and 0xFF)
-        out.write((value ushr 8) and 0xFF)
-        out.write((value ushr 16) and 0xFF)
-        out.write((value ushr 24) and 0xFF)
-    }
-
-    private fun writeBe32(out: ByteArrayOutputStream, value: Int) {
-        out.write((value ushr 24) and 0xFF)
-        out.write((value ushr 16) and 0xFF)
-        out.write((value ushr 8) and 0xFF)
-        out.write(value and 0xFF)
-    }
-
-    private fun downloadArtworkForFlac(url: String): FlacArtwork? {
-        val parsed = runCatching { URL(url) }.getOrNull() ?: return null
-        if (parsed.protocol.lowercase(Locale.ROOT) !in setOf("https", "http")) return null
-        val connection = (parsed.openConnection() as? HttpURLConnection) ?: return null
-        return try {
-            connection.connectTimeout = ARTWORK_CONNECT_TIMEOUT_MS
-            connection.readTimeout = ARTWORK_READ_TIMEOUT_MS
-            connection.requestMethod = "GET"
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty("Accept", "image/jpeg,image/png;q=0.9,*/*;q=0.2")
-            connection.setRequestProperty("User-Agent", "Harmony/1.0 Android ArtworkEmbed")
-            val code = connection.responseCode
-            if (code !in 200..299) return null
-            val advertised = connection.contentLengthLong
-            if (advertised > MAX_EMBEDDED_ARTWORK_BYTES) return null
-
-            val buffer = ByteArray(32 * 1024)
-            val out = ByteArrayOutputStream(
-                advertised.takeIf { it in 1..MAX_EMBEDDED_ARTWORK_BYTES }
-                    ?.toInt()
-                    ?: 256 * 1024,
-            )
-            var total = 0L
-            connection.inputStream.use { input ->
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    total += read
-                    if (total > MAX_EMBEDDED_ARTWORK_BYTES) return null
-                    out.write(buffer, 0, read)
-                }
-            }
-            val bytes = out.toByteArray()
-            if (bytes.isEmpty()) return null
-            val mime = detectArtworkMime(bytes, connection.contentType) ?: return null
-
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            val width = options.outWidth.coerceAtLeast(0)
-            val height = options.outHeight.coerceAtLeast(0)
-            val depth = if (mime == "image/png") 32 else 24
-            FlacArtwork(bytes, mime, width, height, depth)
-        } catch (_: Throwable) {
-            null
-        } finally {
-            connection.disconnect()
-        }
+    private fun downloadArtworkForFlac(url: String): FlacMetadataWriter.Artwork? {
+        val fetched = artworkFetcher.fetch(url) ?: return null
+        val bytes = fetched.bytes
+        val mime = detectArtworkMime(bytes, fetched.contentType) ?: return null
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        val depth = if (mime == "image/png") 32 else 24
+        return FlacMetadataWriter.Artwork(bytes, mime, options.outWidth.coerceAtLeast(0), options.outHeight.coerceAtLeast(0), depth)
     }
 
     private fun detectArtworkMime(bytes: ByteArray, contentType: String?): String? {
@@ -3428,19 +3632,45 @@ class SpotiFlacDownloadEngine @Inject constructor(
         /** Longest the song.link lookup may hold a download on "Resolving". */
         private const val SONG_LINK_DEADLINE_MS = 15_000L
         private const val ROUTER_WATCHDOG_MS = 210_000L
-        private const val PROVIDER_WATCHDOG_MS = 95_000L
+        /**
+         * What a provider call gets (TransferActivity): 95 s to deliver a first
+         * byte, as the whole call used to get; then for as long as bytes keep
+         * coming, stopped after 95 s without one (the runtime's own read timeout
+         * and retry fit inside that); 3 minutes to finish after the last byte;
+         * and 45 minutes at most.
+         */
+        private val PROVIDER_DEADLINES = TransferDeadlines(
+            firstByteMs = 95_000L, stalledMs = 95_000L, finalizeMs = 180_000L, longestMs = 45L * 60L * 1_000L,
+        )
+        private const val WATCHDOG_TICK_MS = 1_000L
+        /** A partial transfer nobody resumed is removed after a day, sooner when they add up to more than this. */
+        private const val STAGING_MAX_AGE_MS = 24L * 60L * 60L * 1_000L
+        private const val STAGING_BUDGET_BYTES = 1024L * 1024L * 1024L
+        private const val SONG_LINK_MEMORY = 512
+        /** A confirmed match is reused for a day. */
+        private const val SONG_LINK_TTL_MS = 24L * 60L * 60L * 1_000L
+        private const val KEY_PARALLEL_DOWNLOADS = "experimental_parallel_downloads"
+        private const val KEY_RUNTIME_SET_PREFIX = "runtime_set_"
+        private const val TIMELINE_TAG = "HarmonyDownload"
+        private const val TIMELINE_FILE = "download-timings.txt"
+        private const val TIMELINE_FILE_MAX_BYTES = 128L * 1024L
+        private const val TIMELINES_KEPT = 40
+        private const val SONG_LINK_PAUSE_SECONDS = 60L
+        private const val SONG_LINK_MAX_BYTES = 1L * 1024 * 1024
+        private val ALBUM_OWNERS = setOf(SpotiFlacRequestOwner.ALBUM_DOWNLOAD, SpotiFlacRequestOwner.DISCOVERY_DOWNLOAD)
         private const val CANCEL_DELIVERY_TIMEOUT_MS = 8_000L
         private const val LOSSLESS_FINALIZER_TIMEOUT_SECONDS = 180L
         private const val MP3_ENCODER_TIMEOUT_SECONDS = 240L
         private const val MP3_MIN_CONTAINER_BYTES = 128L
         private const val MP3_HEADER_SCAN_BYTES = 64L * 1024L
         private const val MP3_MAX_SYNC_SCAN = 8_192
-        private const val FLAC_BLOCK_VORBIS_COMMENT = 4
-        private const val FLAC_BLOCK_PICTURE = 6
-        private const val FLAC_FRONT_COVER_TYPE = 3
-        private const val FLAC_MAX_METADATA_BLOCK_BYTES = 0xFFFFFF
-        private const val FLAC_MAX_VORBIS_COMMENTS = 16_384
         private const val MAX_EMBEDDED_ARTWORK_BYTES = 8L * 1024L * 1024L
+        private const val MAX_ARTWORK_REDIRECTS = 3
+        /** Covers kept for the next tracks of the same album (each at most [MAX_EMBEDDED_ARTWORK_BYTES]). */
+        private const val ARTWORK_CACHE_ENTRIES = 3
+        /** The registry is asked for at most this often; a new provider version is picked up within it. */
+        private const val REGISTRY_MAX_AGE_MS = 6L * 60L * 60L * 1_000L
+        private const val KEY_ACCEPTED_PACKAGE_PREFIX = "accepted_package_"
         private const val ARTWORK_CONNECT_TIMEOUT_MS = 12_000
         private const val ARTWORK_READ_TIMEOUT_MS = 20_000
         private const val MAX_GATEWAY_RATE_LIMIT_AUTO_RETRIES = 1
