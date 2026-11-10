@@ -34,6 +34,21 @@ echo "Cloning SpotiFLAC Mobile $SPOTIFLAC_TAG..."
 git clone --quiet --depth 1 --branch "$SPOTIFLAC_TAG" \
   https://github.com/spotiflacapp/SpotiFLAC-Mobile.git "$SOURCE_DIR"
 
+# A tag can be moved; a commit cannot. The tag must be at the reviewed commit.
+PINNED_COMMIT="${SPOTIFLAC_PINNED_COMMIT:-}"
+if [[ -z "$PINNED_COMMIT" && "$SPOTIFLAC_TAG" == "v4.9.6" ]]; then
+  PINNED_COMMIT="c0f6a60706607151d278a4d22ea2fd874b191cb1"
+fi
+if [[ -z "$PINNED_COMMIT" ]]; then
+  echo "ERROR: no pinned commit for SpotiFLAC $SPOTIFLAC_TAG; set SPOTIFLAC_PINNED_COMMIT to the reviewed commit" >&2
+  exit 17
+fi
+ACTUAL_COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
+if [[ "$ACTUAL_COMMIT" != "$PINNED_COMMIT" ]]; then
+  echo "ERROR: SpotiFLAC $SPOTIFLAC_TAG is at $ACTUAL_COMMIT, not the pinned $PINNED_COMMIT." >&2
+  exit 18
+fi
+
 if [[ ! -f "$BACKEND_DIR/go.mod" ]]; then
   echo "ERROR: go_backend/go.mod is missing in $SPOTIFLAC_TAG" >&2
   exit 14
