@@ -23,6 +23,7 @@ import dagger.assisted.AssistedInject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Semaphore
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -31,10 +32,13 @@ import java.util.concurrent.TimeUnit
  * Downloads the album queue: every album with [AlbumJourney.queuedAt] set,
  * oldest first, each one's selected tracks in disc and track order.
  *
- * One transfer at a time. The download engine is shared with single-track
- * downloads ([DownloadEngineGate]), and Mornye's (and SpotiFLAC's) provider
- * order is set on the runtime, not on a request, so two downloads at once
- * would change each other's route mid-transfer.
+ * One track at a time. Two at once is an experiment, off unless switched on
+ * in Settings, and only on Mornye, whose runtime can take the provider from
+ * each request; on SpotiFLAC and Soulseek the provider order (or the peer
+ * connection) belongs to the runtime and two downloads would change each
+ * other's route mid-transfer. While music plays the album always goes back to
+ * one at a time ([SpotiFlacParallelPolicy]). The engine is shared with
+ * single-track downloads ([DownloadEngineGate]).
  *
  * For each track: reuse the same recording if it is already in the library;
  * otherwise download it through the selected engine with the album's tags
@@ -67,6 +71,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
     private val scan: ScanLibraryUseCase,
     private val analysis: AnalysisRepository,
     private val settings: SettingsRepository,
+    private val playback: com.harmony.domain.playback.PlaybackController,
     downloadStatusCenter: DownloadStatusCenter,
 ) : CoroutineWorker(context, parameters) {
     private val status = downloadStatusCenter.forOwner(album = true)
@@ -147,50 +152,53 @@ class AlbumDownloadWorker @AssistedInject constructor(
         var outcome = Outcome.DONE
         updateNotification(album.title, "Preparing ${selected.size} tracks…")
         status.publishActive(ActiveDownload(album.title, album.source, "Preparing ${selected.size} selected tracks…", albumId = album.id))
-        for ((index, original) in selected.withIndex()) {
-            ensureActive()
-            var track = trackOf(album.id, original.id) ?: continue
-            // Skipped by hand while the album was waiting or running.
-            if (track.status == AlbumTrackStatus.SKIPPED || !track.selectedForDownload) continue
-            // A published URI is checkpointed BEFORE scanning; an indexing failure must never re-download it.
-            if (track.uri?.let(::fileExists) == true) continue
-            if (track.uri != null) {
-                albums.updateTrack(album.id, track.id) { it.copy(uri = null, downloaded = false, sizeBytes = 0, coverage = emptyList()) }
-                track = track.copy(uri = null)
-            }
-            val match = AlbumTrackMatcher.match(track, album.title, library.observeSongs().first())
-            if (match != null && fileExists(match.uri)) {
-                albums.updateTrack(album.id, track.id) { it.copy(uri = match.uri, status = AlbumTrackStatus.IN_LIBRARY, error = null) }
-                continue
-            }
-            try {
-                val detail = "${index + 1}/${selected.size} · ${track.title}"
-                // Update the same notification; do not restart foreground work for each song.
-                updateNotification(album.title, detail)
-                status.publishActive(ActiveDownload(album.title, album.source, detail, albumId = album.id, trackId = track.id))
-                albums.updateTrack(album.id, track.id) { it.copy(status = AlbumTrackStatus.DOWNLOADING, error = null) }
-                // Lossless staging plus publishing need room for two copies of the current track only.
-                val estimate = (track.durationMs / 1_000 * 176_400L * 2).coerceAtLeast(64L * 1024 * 1024)
-                check(StatFs(applicationContext.cacheDir.path).availableBytes > estimate) {
-                    "Not enough temporary storage. Free space and resume the album."
+        // The library as it is now: nothing downloaded here is in it before the scan below.
+        val librarySongs = library.observeSongs().first()
+        // One track at a time, unless the two-at-once experiment is switched on in
+        // Settings and the engine can do it (SpotiFlacParallelPolicy).
+        var parallel = 1
+        if (album.source == "SPOTIFLAC") {
+            spoti.setParallelDownloadsEnabled(settings.settings.first().experimentalParallelDownloads)
+            parallel = spoti.parallelDownloads
+            // Each track's provider ids, looked up while the first ones download.
+            spoti.prefetchProviderIdentifiers(selected.filter { it.uri == null }.map { identified(album, it) })
+        }
+        fun jobsNow(): Int = SpotiFlacParallelPolicy.jobs(
+            experimentOn = parallel > 1,
+            runtimeJobs = parallel,
+            playing = playback.playerState.value.let { it.isPlaying || it.isBuffering },
+        )
+        val merge = Any()
+        var stop = false
+        coroutineScope {
+            val turns = Semaphore(parallel)
+            val inFlight = java.util.concurrent.atomic.AtomicInteger()
+            for ((index, original) in selected.withIndex()) {
+                // The worker's own check (Pause), not the coroutine scope's.
+                this@AlbumDownloadWorker.ensureActive()
+                turns.acquire()
+                // Music is playing: playback comes first, so the next track waits for the one in flight.
+                while (inFlight.get() > 0 && jobsNow() == 1) {
+                    delay(PLAYBACK_YIELD_MS)
+                    this@AlbumDownloadWorker.ensureActive()
                 }
-                downloadWhenEngineFree(album, track, multiDisc)
-                downloadedNow += track.id
-            } catch (cancelled: CancellationException) { throw cancelled
-            } catch (failure: Exception) {
-                val verification = failure is SpotiFlacException && failure.errorType.equals("verification_required", true)
-                albums.updateTrack(album.id, track.id) {
-                    it.copy(status = if (verification) AlbumTrackStatus.VERIFY else AlbumTrackStatus.NEEDS_RETRY,
-                        error = if (verification) "Open provider verification, then resume this album." else failure.message?.take(240) ?: "Download failed")
+                if (synchronized(merge) { stop }) { turns.release(); break }
+                inFlight.incrementAndGet()
+                val turn: suspend () -> Unit = {
+                    try {
+                        val result = trackTurn(album, original, index, selected.size, multiDisc, librarySongs)
+                        synchronized(merge) {
+                            if (result.downloaded) downloadedNow += original.id
+                            // STOP (login, space, verification) outranks a retry.
+                            result.outcome?.let { if (it == Outcome.STOP || outcome == Outcome.DONE) outcome = it }
+                            if (result.stop) stop = true
+                        }
+                    } finally {
+                        inFlight.decrementAndGet()
+                        turns.release()
+                    }
                 }
-                if (verification) { outcome = Outcome.STOP; break }
-                if (failure is IOException || failure.cause is IOException || failure is DownloadEngineBusyException) outcome = Outcome.RETRY_LATER
-                // Space, login and shared-engine contention need user action/waiting, not attempts on every track.
-                if (failure is IllegalStateException || failure is DownloadEngineBusyException ||
-                    (album.source == "SOULSEEK" && soulseek.connectionState.value.status != SoulseekConnectionStatus.CONNECTED)) {
-                    if (failure is IllegalStateException) outcome = Outcome.STOP
-                    break
-                }
+                if (parallel == 1) turn() else launch { turn() }
             }
         }
         // One incremental scan for the album, including partial batches, instead of a full scan per song.
@@ -204,6 +212,107 @@ class AlbumDownloadWorker @AssistedInject constructor(
             if (remaining == 0) "${after?.tracks?.count { it.selectedForDownload } ?: selected.size} tracks ready in Library."
             else "$remaining tracks need another attempt.")
         return outcome
+    }
+
+    /** What one track's turn came to: saved now, an outcome for the album, and whether the album stops here. */
+    private class TrackTurn(val downloaded: Boolean = false, val outcome: Outcome? = null, val stop: Boolean = false)
+
+    /** One selected track: skipped, found in the library, or downloaded and saved. */
+    private suspend fun trackTurn(
+        album: AlbumJourney,
+        original: AlbumJourneyTrack,
+        index: Int,
+        count: Int,
+        multiDisc: Boolean,
+        librarySongs: List<com.harmony.core.model.Song>,
+    ): TrackTurn {
+        var track = trackOf(album.id, original.id) ?: return TrackTurn()
+        // Skipped by hand while the album was waiting or running.
+        if (track.status == AlbumTrackStatus.SKIPPED || !track.selectedForDownload) return TrackTurn()
+        // A published URI is checkpointed BEFORE scanning; an indexing failure must never re-download it.
+        if (track.uri?.let(::fileExists) == true) return TrackTurn()
+        if (track.uri != null) {
+            albums.updateTrack(album.id, track.id) { it.copy(uri = null, downloaded = false, sizeBytes = 0, coverage = emptyList()) }
+            track = track.copy(uri = null)
+        }
+        val match = AlbumTrackMatcher.match(track, album.title, librarySongs)
+        if (match != null && fileExists(match.uri)) {
+            albums.updateTrack(album.id, track.id) { it.copy(uri = match.uri, status = AlbumTrackStatus.IN_LIBRARY, error = null) }
+            return TrackTurn()
+        }
+        try {
+            val detail = "${index + 1}/$count · ${track.title}"
+            // Update the same notification; do not restart foreground work for each song.
+            updateNotification(album.title, detail)
+            live.show(track.id, ActiveDownload(album.title, album.source, detail, albumId = album.id, trackId = track.id))
+            albums.updateTrack(album.id, track.id) { it.copy(status = AlbumTrackStatus.DOWNLOADING, error = null) }
+            // Lossless staging plus publishing need room for two copies of the current track only.
+            val estimate = (track.durationMs / 1_000 * 176_400L * 2).coerceAtLeast(64L * 1024 * 1024)
+            check(StatFs(applicationContext.cacheDir.path).availableBytes > estimate) {
+                "Not enough temporary storage. Free space and resume the album."
+            }
+            downloadWhenEngineFree(album, track, multiDisc)
+            return TrackTurn(downloaded = true)
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (failure: Exception) {
+            val verification = failure is SpotiFlacException && failure.errorType.equals("verification_required", true)
+            albums.updateTrack(album.id, track.id) {
+                it.copy(status = if (verification) AlbumTrackStatus.VERIFY else AlbumTrackStatus.NEEDS_RETRY,
+                    error = if (verification) "Open provider verification, then resume this album." else failure.message?.take(240) ?: "Download failed")
+            }
+            if (verification) return TrackTurn(outcome = Outcome.STOP, stop = true)
+            val retry = failure is IOException || failure.cause is IOException || failure is DownloadEngineBusyException
+            // Space, login and shared-engine contention need user action/waiting, not attempts on every track.
+            val halts = failure is IllegalStateException || failure is DownloadEngineBusyException ||
+                (album.source == "SOULSEEK" && soulseek.connectionState.value.status != SoulseekConnectionStatus.CONNECTED)
+            return TrackTurn(
+                outcome = when {
+                    failure is IllegalStateException && halts -> Outcome.STOP
+                    retry -> Outcome.RETRY_LATER
+                    else -> null
+                },
+                stop = halts,
+            )
+        } finally { live.done(track.id) }
+    }
+
+    /**
+     * The album's transfers in flight, published together: the first is the
+     * banner's, the others ride along ([ActiveDownload.parallel]) so each
+     * track row shows its own progress.
+     */
+    private inner class LiveTracks {
+        private val tracks = LinkedHashMap<String, ActiveDownload>()
+
+        @Synchronized fun show(trackId: String, download: ActiveDownload) {
+            tracks[trackId] = download
+            publish()
+        }
+
+        @Synchronized fun done(trackId: String) {
+            if (tracks.remove(trackId) != null && tracks.isNotEmpty()) publish()
+        }
+
+        private fun publish() {
+            val all = tracks.values.toList()
+            status.publishActive(all.first().copy(parallel = all.drop(1)))
+        }
+    }
+
+    private val live = LiveTracks()
+
+    /** [track] as the engines look for it, with the album's own tags to embed. */
+    private fun identified(album: AlbumJourney, track: AlbumJourneyTrack): IdentifiedTrack {
+        val tags = AlbumTags(
+            albumArtist = album.artist,
+            trackNumber = track.number,
+            discNumber = track.disc,
+            totalTracks = album.tracks.count { it.disc == track.disc },
+            totalDiscs = album.tracks.maxOf { it.disc },
+            releaseDate = album.releaseDate,
+        )
+        return IdentifiedTrack(track.artist, track.title, "${track.artist} - ${track.title}",
+            album.coverUrl, album.title, track.durationMs, metadataId = track.id, albumTags = tags)
     }
 
     /**
@@ -281,33 +390,26 @@ class AlbumDownloadWorker @AssistedInject constructor(
     // SecurityException deliberately propagates: inaccessible storage is not evidence that a file is missing.
 
     private suspend fun downloadTrack(album: AlbumJourney, track: AlbumJourneyTrack, multiDisc: Boolean) {
-        val tags = AlbumTags(
-            albumArtist = album.artist,
-            trackNumber = track.number,
-            discNumber = track.disc,
-            totalTracks = album.tracks.count { it.disc == track.disc },
-            totalDiscs = album.tracks.maxOf { it.disc },
-            releaseDate = album.releaseDate,
-        )
-        val identified = IdentifiedTrack(track.artist, track.title, "${track.artist} - ${track.title}",
-            album.coverUrl, album.title, track.durationMs, metadataId = track.id, albumTags = tags)
+        val identified = identified(album, track)
         var staged: File? = null
         val speed = TransferSpeedMeter()
         try {
             var provider: String? = null
             var username: String? = null
+            var downloaded: SpotiFlacDownloadedFile? = null
             val file: File
             val extension: String
             if (album.source == "SPOTIFLAC") {
                 val result = spoti.download(identified, SpotiFlacOutputFormat.fromName(album.format), SpotiFlacRequestOwner.ALBUM_DOWNLOAD) { p ->
-                    status.publishActive(ActiveDownload(track.title, displaySource(), p.detail ?: p.stage.label, p.fraction, album.id,
+                    live.show(track.id, ActiveDownload(track.title, displaySource(), p.detail ?: p.stage.label, p.fraction, album.id,
                         trackId = track.id, bytesPerSecond = if (p.downloadedBytes > 0) speed.sample(p.downloadedBytes) else 0L))
                 }
                 file = result.tempFile; extension = result.outputFormat.extension; provider = result.provider
+                downloaded = result
             } else {
                 check(soulseek.connectionState.value.status == SoulseekConnectionStatus.CONNECTED) { "Connect Soulseek in Downloads, then resume this album." }
                 val preference = if (album.format == "MP3_320") SoulseekFormatPreference.MP3_ONLY else SoulseekFormatPreference.FLAC_ONLY
-                status.publishActive(ActiveDownload(track.title, "Soulseek", "Finding an available peer…", null, album.id, trackId = track.id))
+                live.show(track.id, ActiveDownload(track.title, "Soulseek", "Finding an available peer…", null, album.id, trackId = track.id))
                 val candidates = soulseek.searchFlac(identified.displayName, SoulseekSearchMode.BALANCED, false, preference)
                     .filter { it.score >= 80 && it.durationSeconds?.let { d -> kotlin.math.abs(d * 1_000L - track.durationMs) <= 5_000 } != false }
                     .distinctBy { it.username.lowercase() }
@@ -322,7 +424,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
                 var last: Exception? = null
                 val progress = CoroutineScope(currentCoroutineContext()).launch {
                     soulseek.transferProgress.collect { p -> if (p != null) {
-                        status.publishActive(ActiveDownload(track.title, "Soulseek", p.status, p.fraction, album.id,
+                        live.show(track.id, ActiveDownload(track.title, "Soulseek", p.status, p.fraction, album.id,
                             trackId = track.id, bytesPerSecond = p.speedBytesPerSecond))
                     } }
                 }
@@ -338,8 +440,10 @@ class AlbumDownloadWorker @AssistedInject constructor(
                 extension = requireNotNull(chosen).extension.lowercase(); username = chosen.username
             }
             staged = file
+            // The last phase of the download's timeline: the checks and the copy into the library.
+            val importStartedAt = android.os.SystemClock.elapsedRealtime()
             val info = if (extension == "mp3") downloads.validateStagedMp3(file) else downloads.validateStagedFlac(file)
-            require(info.durationMs > 0 && kotlin.math.abs(info.durationMs - track.durationMs) <= 5_000) {
+            require(AlbumDownloadPolicy.isSameRecording(track.durationMs, info.durationMs)) {
                 "The downloaded duration does not match this edition. The file was not imported."
             }
             val name = AlbumFiles.trackFileName(track, multiDisc, extension)
@@ -356,6 +460,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
                     sampleRateHz = info.sampleRateHz, fileSizeBytes = saved.sizeBytes,
                     downloadedAt = System.currentTimeMillis(), soulseekUsername = username, originalTrackId = track.id, isrc = null))
             }
+            downloaded?.let { spoti.reportImported(it, android.os.SystemClock.elapsedRealtime() - importStartedAt) }
         } finally { staged?.delete() }
     }
 
@@ -391,6 +496,8 @@ class AlbumDownloadWorker @AssistedInject constructor(
         private const val MAX_RETRIES = 2
         private const val ENGINE_WAIT_TRIES = 10
         private const val ENGINE_WAIT_MS = 1_500L
+        /** While music plays and a track is in flight, how often to look again before starting the next. */
+        private const val PLAYBACK_YIELD_MS = 750L
 
         /**
          * The job that works through the album queue. Albums are queued by
