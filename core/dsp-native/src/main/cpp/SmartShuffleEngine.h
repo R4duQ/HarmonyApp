@@ -280,6 +280,70 @@ struct Weights {
     float echoThreshold = 0.97f;
 };
 
+/**
+ * The mix's scoring knobs: Harmony's own starting choices, not values from
+ * YouTube Music (which publishes no weights). Picked so that, with no
+ * history, the score is mostly sound, and feedback can never outweigh
+ * sounding like the seed. See SMART-SHUFFLE.md, "Mix din piesa asta".
+ */
+struct RadioWeights {
+    /**
+     * Sounding like the seed (0.7) and the session S_t (0.3). A strong local
+     * habit vouches for a song too: relevance is at least habitVouch x the
+     * co-listening score (scaled by how much history there is).
+     */
+    float relevance = 0.50f;
+    float habitVouch = 0.80f;
+    /** Fitting after the song before: smoothness, and the local habit as history allows (up to 0.6). */
+    float transition = 0.20f;
+    /** Learned preference: this session's feedback, then the long-term play record. */
+    float preference = 0.20f;
+    /** Few plays: a small, gated bonus (controlled exploration). */
+    float novelty = 0.10f;
+    /** Share of the seed in relevance (the rest is S_t). */
+    float seedShare = 0.70f;
+    /** A song new to the listener needs at least this cosine with the seed and S_t blend. */
+    float newSongGate = 0.55f;
+    /**
+     * At most this share of a batch may be new to the listener, or the share
+     * of new songs among the seed's closest matches when that is higher.
+     */
+    float newSongShare = 0.25f;
+    /** Feedback memory: each older event counts this much less. */
+    float feedbackDecay = 0.85f;
+    /** A fast skip weighs this much more than a full play. */
+    float skipWeight = 1.5f;
+    /** Score multiplier exp(skipPenalty * min(0, feedback)): a lookalike of a skip in a similar context sinks. */
+    float skipPenalty = 1.2f;
+    /** Efraimidis-Spirakis softness for the batch (lower than Smart Shuffle's: a radio stays on topic). */
+    float temperature = 0.06f;
+    /** Ordering: the cost of an artist already in the batch (variety), per earlier song of theirs. */
+    float artistRepeatCost = 0.25f;
+};
+
+/** What each stage of the last mix batch did (counts are songs). */
+struct RadioReport {
+    std::uint64_t generation = 0;
+    int fromSeed = 0;
+    int fromSession = 0;
+    int fromHabits = 0;
+    int fromRare = 0;
+    /** After the union, duplicates removed. */
+    int merged = 0;
+    /** Songs new to the listener turned away by the relevance gate. */
+    int gatedOut = 0;
+    int newPlaced = 0;
+    /** The most new songs this batch could take (the exploration cap). */
+    int newCap = 0;
+    /** Placed from outside the gate because nothing better was left (tiny libraries). */
+    int filled = 0;
+    /** 0..1: how much the play record and the session feedback are trusted. */
+    float historyConfidence = 0.0f;
+    float sessionConfidence = 0.0f;
+    bool seedMeasured = false;
+    double elapsedMs = 0.0;
+};
+
 class SmartShuffleEngine;
 
 /**
@@ -424,6 +488,37 @@ public:
                              const std::int64_t* exclude, int excludeCount,
                              std::int64_t nowMs, std::uint64_t seed);
 
+    // -- Mix from this song (an on-device radio) -------------------------------
+
+    /**
+     * "Mix din piesa asta": [count] songs for a radio started from [seedId]
+     * (the session's landmark for as long as the mix runs), to follow
+     * [currentId] and the already queued [prefix]. Local library only, in
+     * three stages after YouTube Music's (see SMART-SHUFFLE.md):
+     *
+     *  1. candidates: close to the seed, close to S_t, what followed songs
+     *     like the seed or the anchor in the local history, and rarely heard
+     *     songs that sound right; merged, duplicates removed;
+     *  2. ranking: RadioWeights over relevance to the seed, fit after the
+     *     song before, learned preference (session feedback first, weighted
+     *     by how similar its context was) and novelty;
+     *  3. filtering and order: queued and excluded songs out, artists spaced,
+     *     songs new to the listener only above an acoustic relevance gate and
+     *     at most a quarter of a batch.
+     *
+     * lastTraces() and lastAudit() describe the batch; lastRadio() its stages.
+     */
+    int generateRadio(std::int64_t seedId, std::int64_t currentId,
+                      const std::int64_t* prefix, int prefixCount,
+                      const std::int64_t* exclude, int excludeCount,
+                      int count, std::int64_t nowMs, std::uint64_t seed,
+                      std::int64_t* outIds);
+    const RadioReport& lastRadio() const { return radio_; }
+    void setRadioWeights(const RadioWeights& weights) { radioWeights_ = weights; }
+    const RadioWeights& radioWeights() const { return radioWeights_; }
+    /** The session feedback the mix learns from (newest last), for tests and the HUD. */
+    int feedbackCount() const { return static_cast<int>(feedback_.size()); }
+
     const std::vector<TrackDecisionTrace>& lastTraces() const { return traces_; }
     const BrainAuditReport& lastAudit() const { return audit_; }
 
@@ -484,6 +579,8 @@ private:
     std::vector<int> ditherAndChain(const std::vector<int>& prefixRows, const std::vector<int>& picked,
                                     std::uint64_t seed) const;
     void buildTraces(const ShuffleDiagnosticBrain::Draft& draft, bool journey, float journeyT);
+    /** One feedback event for the mix: what was heard, after what, and how it went. */
+    void rememberFeedback(int row, float signal);
     int contextZone() const;
     void rememberStart(std::int64_t id);
 
@@ -521,6 +618,20 @@ private:
     std::unordered_map<std::int64_t, std::int64_t> predecessor_;
     std::unordered_map<std::int64_t, int> pickedContext_;
     PendingSkip pendingSkip_;
+    /**
+     * The mix's session feedback, newest last (at most kFeedbackMemory): the
+     * song's vector, the vector of the song it followed, and the signal
+     * (+1 a full play, +0.8 a pick by hand, -1 a fast skip...).
+     */
+    struct FeedbackEvent {
+        std::array<float, kDims> item{};
+        std::array<float, kDims> context{};
+        bool hasContext = false;
+        float signal = 0.0f;
+    };
+    std::deque<FeedbackEvent> feedback_;
+    RadioWeights radioWeights_;
+    RadioReport radio_;
     std::int64_t learnedFrom_ = -1, learnedTo_ = -1;
     float learnedDelta_ = 0.0f;
     int banditContext_ = -1, banditArm_ = -1;

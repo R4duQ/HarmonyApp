@@ -4,6 +4,7 @@ import com.harmony.core.model.AuditCheckKind
 import com.harmony.core.model.AuditCheckResult
 import com.harmony.core.model.AuditStatus
 import com.harmony.core.model.BrainAuditReport
+import com.harmony.core.model.MixReport
 import com.harmony.core.model.ReasonTag
 import com.harmony.core.model.SessionEvent
 import com.harmony.core.model.TrackDecisionTrace
@@ -22,6 +23,7 @@ object SmartShuffleNative {
     internal const val TRACE_INTS = 3
     internal const val AUDIT_FLOATS = 5 * 2 + 7
     internal const val AUDIT_INTS = 5 * 2 + 6
+    internal const val RADIO_REPORT_FLOATS = 14
 
     /** False when the library could not be loaded (unit tests on the JVM, a broken install). */
     val available: Boolean = runCatching { System.loadLibrary("harmonyshuffle") }.isSuccess
@@ -69,6 +71,18 @@ object SmartShuffleNative {
         seed: Long,
         out: LongArray,
     ): Int
+    @JvmStatic external fun nativeGenerateRadio(
+        handle: Long,
+        seedId: Long,
+        currentId: Long,
+        prefix: LongArray,
+        exclude: LongArray,
+        count: Int,
+        nowMs: Long,
+        seed: Long,
+        out: LongArray,
+    ): Int
+    @JvmStatic external fun nativeRadioReport(handle: Long, out: FloatArray)
     @JvmStatic external fun nativeJourneyStep(
         handle: Long,
         fromId: Long,
@@ -203,6 +217,47 @@ class NativeShuffleEngine : Closeable {
         val out = LongArray(count.coerceAtLeast(0))
         val written = SmartShuffleNative.nativeGenerateQueue(it, currentId, prefix, exclude, replacedTail, count, nowMs, seed, out)
         out.copyOf(written)
+    }
+
+    /**
+     * "Mix din piesa asta": [count] songs for the radio started from [seedId],
+     * after [currentId] and [prefix]; see SmartShuffleEngine::generateRadio.
+     * [lastTraces] and [lastAudit] describe them, [lastRadioReport] the stages.
+     */
+    fun generateRadio(
+        seedId: Long,
+        currentId: Long,
+        prefix: LongArray,
+        exclude: LongArray,
+        count: Int,
+        nowMs: Long,
+        seed: Long,
+    ): LongArray = withHandle {
+        val out = LongArray(count.coerceAtLeast(0))
+        val written = SmartShuffleNative.nativeGenerateRadio(it, seedId, currentId, prefix, exclude, count, nowMs, seed, out)
+        out.copyOf(written)
+    }
+
+    /** The stages of the last [generateRadio] batch. */
+    fun lastRadioReport(): MixReport = withHandle {
+        val v = FloatArray(SmartShuffleNative.RADIO_REPORT_FLOATS)
+        SmartShuffleNative.nativeRadioReport(it, v)
+        MixReport(
+            fromSeed = v[0].toInt(),
+            fromSession = v[1].toInt(),
+            fromHabits = v[2].toInt(),
+            fromRare = v[3].toInt(),
+            merged = v[4].toInt(),
+            gatedOut = v[5].toInt(),
+            newPlaced = v[6].toInt(),
+            newCap = v[7].toInt(),
+            filled = v[8].toInt(),
+            historyConfidence = v[9],
+            sessionConfidence = v[10],
+            seedMeasured = v[11] > 0.5f,
+            elapsedMs = v[12],
+            feedbackEvents = v[13].toInt(),
+        )
     }
 
     /** One Sonic Adventure step, or null. */

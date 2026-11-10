@@ -5,6 +5,7 @@ import com.harmony.core.model.AuditCheckResult
 import com.harmony.core.model.AuditStatus
 import com.harmony.core.model.BrainAuditReport
 import com.harmony.core.model.EqSettings
+import com.harmony.core.model.MixReport
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.QueueOrigin
 import com.harmony.core.model.ReasonTag
@@ -21,6 +22,7 @@ import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.QueueMoves
 import com.harmony.domain.playback.QueueShadow
+import com.harmony.domain.shuffle.brain.MixRequest
 import com.harmony.domain.shuffle.brain.QueuePlan
 import com.harmony.domain.shuffle.brain.QueueRequest
 import com.harmony.domain.shuffle.brain.ShuffleBrain
@@ -167,9 +169,17 @@ private class FakePlayback : PlaybackController {
     override fun setSleepTimer(durationMs: Long?, finishTrack: Boolean) {}
 }
 
-/** Picks the lowest free ids of its pool, and records what it was told. */
-private class FakeBrain(private val pool: LongRange, override val available: Boolean = true) : ShuffleBrain {
+/**
+ * Picks the lowest free ids of its pool, and records what it was told. With
+ * a [mixPool] it also mixes (from that pool); without one it has no mix.
+ */
+private class FakeBrain(
+    private val pool: LongRange,
+    override val available: Boolean = true,
+    private val mixPool: LongRange? = null,
+) : ShuffleBrain {
     val requests = mutableListOf<QueueRequest>()
+    val mixRequests = mutableListOf<MixRequest>()
     val outcomes = mutableListOf<Pair<Long, Float>>()
     val manual = mutableListOf<Long>()
     val started = mutableListOf<Long>()
@@ -200,6 +210,13 @@ private class FakeBrain(private val pool: LongRange, override val available: Boo
         requests += request
         val ids = pool.filter { it !in request.excludeIds && it !in request.prefixIds }.take(request.count)
         return QueuePlan(ids, ids.map { trace(it, ReasonTag.VIBE_MATCH, "90% Bass/Vibe Match") }, audit(requests.size))
+    }
+    override suspend fun mix(request: MixRequest): QueuePlan {
+        val from = mixPool ?: return QueuePlan.EMPTY
+        mixRequests += request
+        val ids = from.filter { it !in request.excludeIds && it !in request.prefixIds }.take(request.count)
+        val report = MixReport(80, 40, 3, 5, 100, 2, 1, 3, 0, 0.5f, 0.25f, true, 0.4f, mixRequests.size)
+        return QueuePlan(ids, ids.map { trace(it, ReasonTag.VIBE_MATCH, "Mix: 88% like the seed") }, audit(mixRequests.size), report)
     }
     override suspend fun journeyStep(fromId: Long, toId: Long, t: Float, previousId: Long, exclude: Set<Long>): QueuePlan {
         journeyCalls++
@@ -800,5 +817,118 @@ class SmartQueueManagerQueueTest {
         repeat(4) { p.skipAfter(0.9f); advanceUntilIdle() }
         assertTrue(brain.requests.size >= 2)
         assertTrue(brain.requests.all { it.currentSongId >= 0 })
+    }
+
+    // -- Mix din piesa asta -----------------------------------------------------------------
+
+    private val mixPool = (500L..599L)
+
+    @Test
+    fun aMixFromTheSongPlayingKeepsItsSeedForEveryBatch() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this, FakeBrain(pickPool, mixPool = mixPool))
+        p.setQueue((1L..10L).map(::song), 0, true)
+        advanceUntilIdle()
+        assertTrue(c.startMix())
+        advanceUntilIdle()
+        assertEquals(ShuffleMode.SMART, p.mode)
+        assertEquals(1L, c.mix.value?.seedSongId)
+        val q = ids(p)
+        assertEquals(1L, q[0])
+        assertEquals("a full rolling batch: $q", 1 + SmartQueueManager.QUEUE_TARGET, q.size)
+        assertTrue("the album's tail made way for the mix: $q", q.drop(1).all { it in mixPool })
+        assertTrue("the seed is a pick by hand (a positive signal)", 1L in brain.manual)
+        assertTrue("no Smart Shuffle batch", brain.requests.isEmpty())
+        // Listening on: the refills are mix batches, all from the same seed, after the song playing.
+        repeat(4) { p.skipAfter(0.95f); advanceUntilIdle() }
+        assertTrue("refilled", brain.mixRequests.size >= 2)
+        assertTrue("the seed stays the landmark", brain.mixRequests.all { it.seedSongId == 1L })
+        val after = brain.mixRequests.last().currentSongId
+        assertTrue("a later batch follows the song then playing, not the seed: $after", after != 1L && after in ids(p).take(p.idx + 1))
+        assertTrue("the batches are counted", (c.mix.value?.batches ?: 0) >= 2)
+        assertTrue("the stages are logged without titles", logged.any { it.startsWith("MIX seed=1 ") && "t1" !in it })
+    }
+
+    @Test
+    fun feedbackChangesOnlyTheNextBatches() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this, FakeBrain(pickPool, mixPool = mixPool))
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(); advanceUntilIdle()
+        p.skipAfter(0.95f); advanceUntilIdle()
+        val shown = ids(p)
+        val writes = p.writes.size
+        p.skipAfter(0.05f); settle()                    // a fast skip on a mix song
+        assertEquals("the songs already shown stay exactly as they are", shown, ids(p))
+        assertEquals("no queue write", writes, p.writes.size)
+        assertTrue("the brain heard the skip", brain.outcomes.last().second < 0.2f)
+        // The next refill is a new mix batch, built after the skip.
+        val before = brain.mixRequests.size
+        repeat(3) { p.skipAfter(0.95f); advanceUntilIdle() }
+        assertTrue("a later batch follows", brain.mixRequests.size > before)
+        assertEquals("appended after the songs already shown", shown.drop(0), ids(p).take(shown.size))
+    }
+
+    @Test
+    fun startingAMixKeepsTheProtectedHeadAndTheUsersSongs() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool))
+        p.setQueue(listOf(song(1)), 0, true)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()   // Smart Shuffle picks queued
+        p.addToQueue(song(60), QueueOrigin.MANUAL)            // the user's, at the end
+        advanceUntilIdle()
+        val next = ids(p)[1]
+        c.startMix(); advanceUntilIdle()
+        val q = ids(p)
+        assertEquals("the song playing stays", 1L, q[0])
+        assertEquals("the next one (loaded for gapless) stays", next, q[1])
+        assertTrue("the user's song stays: $q", 60L in q)
+        assertTrue("the other picks became mix picks: $q", q.drop(2).filter { it != 60L }.all { it in mixPool })
+    }
+
+    @Test
+    fun stoppingAMixStartedFromOffBringsTheListBack() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool))
+        p.setQueue((1L..10L).map(::song), 0, true)
+        advanceUntilIdle()
+        c.startMix(); advanceUntilIdle()
+        c.stopMix(); advanceUntilIdle()
+        assertNull(c.mix.value)
+        assertEquals(ShuffleMode.OFF, p.mode)
+        assertEquals("the album's running order is back", (1L..10L).toList(), ids(p))
+    }
+
+    @Test
+    fun stoppingAMixStartedInSmartShuffleKeepsSmartShuffle() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this, FakeBrain(pickPool, mixPool = mixPool))
+        p.setQueue(listOf(song(1)), 0, true)
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle()
+        c.startMix(); advanceUntilIdle()
+        val shown = ids(p)
+        c.stopMix(); advanceUntilIdle()
+        assertNull(c.mix.value)
+        assertEquals(ShuffleMode.SMART, p.mode)
+        assertEquals("nothing already queued moves", shown, ids(p))
+        val smartBefore = brain.requests.size
+        repeat(4) { p.skipAfter(0.95f); advanceUntilIdle() }
+        assertTrue("the next batches are Smart Shuffle's", brain.requests.size > smartBefore)
+    }
+
+    @Test
+    fun aNewListOrAnotherModeEndsTheMix() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool))
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(); advanceUntilIdle()
+        p.setQueue((20L..25L).map(::song), 0, true); advanceUntilIdle()
+        assertNull("a new list ends the mix", c.mix.value)
+        c.startMix(); advanceUntilIdle()
+        toggle(p, c, ShuffleMode.RANDOM); advanceUntilIdle()
+        assertNull("another shuffle mode ends it", c.mix.value)
+    }
+
+    @Test
+    fun withoutAMixTheQueueStillFills() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c, brain) = build(this)                       // a brain with no mix
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(); advanceUntilIdle()
+        assertTrue("Smart Shuffle's picks fill in", ids(p).drop(1).all { it in pickPool } && ids(p).size > 1)
+        assertTrue(brain.requests.isNotEmpty())
     }
 }

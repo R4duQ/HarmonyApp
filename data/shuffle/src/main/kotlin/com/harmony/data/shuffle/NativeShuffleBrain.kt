@@ -9,6 +9,7 @@ import com.harmony.core.dsp.SmartShuffleNative
 import com.harmony.core.model.SessionEvent
 import com.harmony.core.model.VectorQuality
 import com.harmony.domain.analysis.repository.AcousticVectorStore
+import com.harmony.domain.shuffle.brain.MixRequest
 import com.harmony.domain.shuffle.brain.QueuePlan
 import com.harmony.domain.shuffle.brain.QueueRequest
 import com.harmony.domain.shuffle.brain.ShuffleBrain
@@ -247,6 +248,22 @@ class NativeShuffleBrain @Inject constructor(
                 seed = request.seed,
             )
             QueuePlan(ids.toList(), e.lastTraces(), e.lastAudit())
+        }
+    }
+
+    override suspend fun mix(request: MixRequest): QueuePlan {
+        val e = engine ?: return QueuePlan.EMPTY
+        return withContext(dispatchers.default) {
+            val ids = e.generateRadio(
+                seedId = request.seedSongId,
+                currentId = request.currentSongId,
+                prefix = request.prefixIds.toLongArray(),
+                exclude = request.excludeIds.toLongArray(),
+                count = request.count,
+                nowMs = System.currentTimeMillis(),
+                seed = request.seed,
+            )
+            QueuePlan(ids.toList(), e.lastTraces(), e.lastAudit(), e.lastRadioReport())
         }
     }
 

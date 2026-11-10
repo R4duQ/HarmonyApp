@@ -1,6 +1,7 @@
 package com.harmony.domain.shuffle.brain
 
 import com.harmony.core.model.BrainAuditReport
+import com.harmony.core.model.MixReport
 import com.harmony.core.model.SessionEvent
 import com.harmony.core.model.TrackDecisionTrace
 import com.harmony.domain.shuffle.model.ShuffleConfig
@@ -44,6 +45,14 @@ interface ShuffleBrain {
     /** Builds the next songs; see [QueueRequest]. */
     suspend fun generate(request: QueueRequest): QueuePlan
 
+    /**
+     * "Mix din piesa asta": the next songs of the radio started from
+     * [MixRequest.seedSongId], from the local library only (see [MixRequest]).
+     * Engines without a mix return [QueuePlan.EMPTY]; the queue manager then
+     * falls back to Smart Shuffle's picks.
+     */
+    suspend fun mix(request: MixRequest): QueuePlan = QueuePlan.EMPTY
+
     /** One Sonic Adventure step from [fromId] toward [toId], at [t] (0..1) of the way. */
     suspend fun journeyStep(fromId: Long, toId: Long, t: Float, previousId: Long, exclude: Set<Long>): QueuePlan
 
@@ -68,10 +77,27 @@ data class QueueRequest(
     val seed: Long,
 )
 
+/**
+ * A batch of the mix: [count] songs to follow [currentSongId] and the queued
+ * [prefixIds], never one of [excludeIds]. The seed stays the landmark for
+ * every batch; the session's feedback (plays, fast skips, picks by hand)
+ * shapes the next one.
+ */
+data class MixRequest(
+    val seedSongId: Long,
+    val currentSongId: Long,
+    val prefixIds: List<Long>,
+    val excludeIds: Set<Long>,
+    val count: Int,
+    val seed: Long,
+)
+
 data class QueuePlan(
     val songIds: List<Long>,
     val traces: List<TrackDecisionTrace>,
     val audit: BrainAuditReport?,
+    /** For a mix batch: what each of its three stages did. */
+    val mix: MixReport? = null,
 ) {
     companion object {
         val EMPTY = QueuePlan(emptyList(), emptyList(), null)

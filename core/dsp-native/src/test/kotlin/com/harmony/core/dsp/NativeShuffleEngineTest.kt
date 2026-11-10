@@ -66,6 +66,25 @@ class NativeShuffleEngineTest {
     }
 
     @Test
+    fun aMixCrossesTheBridge() = NativeShuffleEngine().use { engine ->
+        library(engine)
+        engine.onTrackStarted(10)
+        engine.onManualSelect(10)
+        val mix = engine.generateRadio(seedId = 10, currentId = 10, prefix = longArrayOf(11), exclude = longArrayOf(12),
+            count = 6, nowMs = 1_000L, seed = 3)
+        assertEquals(6, mix.size)
+        assertTrue(mix.none { it == 10L || it == 11L || it == 12L })
+        assertEquals(mix.toList(), engine.lastTraces().map { it.trackId })
+        assertTrue(engine.lastTraces().all { it.primaryReasonTag.startsWith("Mix") })
+        val report = engine.lastRadioReport()
+        assertTrue(report.seedMeasured)
+        assertTrue(report.fromSeed > 0 && report.merged >= report.fromSeed)
+        assertEquals(0f, report.historyConfidence, 1e-6f)
+        assertEquals(1, report.feedbackEvents)
+        assertTrue(report.elapsedMs >= 0f)
+    }
+
+    @Test
     fun fastSkipIsAuditedAfterTheReRank() = NativeShuffleEngine().use { engine ->
         library(engine)
         engine.onTrackStarted(10)

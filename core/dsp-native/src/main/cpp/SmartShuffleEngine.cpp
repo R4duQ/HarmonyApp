@@ -50,6 +50,12 @@ constexpr float kMacroGroupWeight = 1.10f;
 constexpr float kDistinctCosine = 0.50f;
 constexpr float kSkipTailShare = 0.60f;
 constexpr float kNormTolerance = 0.001f;
+/** The mix's feedback memory: this many events (a long session's worth). */
+constexpr int kFeedbackMemory = 48;
+/** Played this far is a near-complete play: the strongest positive signal. */
+constexpr float kNearCompleteFraction = 0.9f;
+/** A song picked by hand, as feedback for the mix. */
+constexpr float kManualSignal = 0.8f;
 
 /** splitmix64: small, fast, and reproducible from one seed. */
 struct Rng {
@@ -630,6 +636,13 @@ SessionEvent SmartShuffleEngine::onPlaybackOutcome(std::int64_t id, float fracti
         }
     }
 
+    // The mix's feedback memory: a near-complete play is the strongest yes,
+    // a fast skip the strongest no; the middle says little.
+    if (row >= 0 && quality_[row] != VectorQuality::None) {
+        const float signal = f >= kNearCompleteFraction ? 1.0f : (played ? 0.5f : (fastSkip ? -1.0f : -0.25f));
+        rememberFeedback(row, signal);
+    }
+
     if (row < 0 || quality_[row] == VectorQuality::None) return SessionEvent::Neutral;
     const float* v = vec(row);
 
@@ -689,6 +702,7 @@ SessionEvent SmartShuffleEngine::onManualSelect(std::int64_t id) {
     pendingSkip_.active = false;
     if (row < 0 || quality_[row] == VectorQuality::None) return SessionEvent::None;
     const float* v = vec(row);
+    rememberFeedback(row, kManualSignal);
     if (hasSession_ && normalize(session_.data())) {
         for (int d = 0; d < kDims; ++d) session_[d] = 0.85f * v[d] + 0.15f * session_[d];
         if (!normalize(session_.data())) std::copy(v, v + kDims, session_.begin());
@@ -708,7 +722,25 @@ void SmartShuffleEngine::resetSession() {
     predecessor_.clear();
     pickedContext_.clear();
     pendingSkip_ = PendingSkip{};
+    feedback_.clear();
     exploreBoost_ = 1.0f;
+}
+
+void SmartShuffleEngine::rememberFeedback(int row, float signal) {
+    FeedbackEvent event;
+    std::copy(vec(row), vec(row) + kDims, event.item.begin());
+    // The context: the song this one followed in the session, when known.
+    const auto before = predecessor_.find(ids_[row]);
+    if (before != predecessor_.end()) {
+        const int b = rowOf(before->second);
+        if (b >= 0 && quality_[b] != VectorQuality::None) {
+            std::copy(vec(b), vec(b) + kDims, event.context.begin());
+            event.hasContext = true;
+        }
+    }
+    event.signal = signal;
+    feedback_.push_back(event);
+    while (static_cast<int>(feedback_.size()) > kFeedbackMemory) feedback_.pop_front();
 }
 
 bool SmartShuffleEngine::lastLearnedTransition(std::int64_t* from, std::int64_t* to, float* delta) const {
@@ -1169,6 +1201,491 @@ void SmartShuffleEngine::buildTraces(const ShuffleDiagnosticBrain::Draft& draft,
         t.primaryReasonTag = text;
         traces_.push_back(std::move(t));
     }
+}
+
+// ===========================================================================
+// Part 3b: Mix from this song ("Mix din piesa asta"), an on-device radio
+// ===========================================================================
+//
+// After YouTube Music's three stages (retrieval, ranking, filtering), with the
+// pieces a phone can run on its own library: the 24-D vectors stand in for
+// learned track embeddings, the local Markov habits for co-listening, and a
+// small attention over this session's feedback for the transformer that weighs
+// each action by how relevant its context is to the current one.
+
+namespace {
+
+/** Stage 1 list sizes (before the union). */
+constexpr int kRadioFromSeed = 80;
+constexpr int kRadioFromSession = 40;
+constexpr int kRadioFromHabits = 40;
+constexpr int kRadioFromRare = 24;
+/** Songs like the seed whose habits count, and how alike they must be. */
+constexpr int kRadioHabitNeighbours = 12;
+constexpr float kRadioNeighbourCosine = 0.5f;
+/** "Rarely heard": this many plays or fewer (finished or skipped). */
+constexpr int kRadioRarePlays = 2;
+/** A rarely heard song must sound at least this right to be a candidate. */
+constexpr float kRadioRareCosine = 0.40f;
+/** Long-term history this large (plays across the library) is fully trusted. */
+constexpr float kRadioTrustedPlays = 40.0f;
+/** Session feedback this long is fully trusted. */
+constexpr float kRadioTrustedEvents = 4.0f;
+/** Ordering: the cost of each unit of distance from the song before (a tie-break, not a filter). */
+constexpr float kStepCost = 0.05f;
+/** A co-listening score this high lets a song past the new-song gate. */
+constexpr float kHabitVouches = 0.3f;
+/** Width of the feedback likeness kernel exp((cos - 1) / width). */
+constexpr float kFeedbackKernel = 0.15f;
+/** Feedback mass that counts as much as "no opinion" (shrinks thin evidence toward 0). */
+constexpr float kFeedbackPrior = 0.25f;
+
+/** Rows of the [k] largest [key] among rows where [keep] holds, best first. */
+template <typename Key, typename Keep>
+std::vector<int> topRows(int n, int k, Key key, Keep keep) {
+    std::vector<int> rows;
+    rows.reserve(static_cast<size_t>(n));
+    for (int r = 0; r < n; ++r) {
+        if (keep(r)) rows.push_back(r);
+    }
+    const int take = std::min<int>(k, static_cast<int>(rows.size()));
+    std::partial_sort(rows.begin(), rows.begin() + take, rows.end(), [&](int a, int b) { return key(a) > key(b); });
+    rows.resize(static_cast<size_t>(take));
+    return rows;
+}
+
+enum RadioSource : std::uint8_t {
+    kFromSeed = 1,
+    kFromSession = 2,
+    kFromHabits = 4,
+    kFromRare = 8,
+};
+
+struct RadioCandidate {
+    int row = -1;
+    std::uint8_t sources = 0;
+    float relevance = 0.0f;   // 0..1, cosine with the seed/S_t blend (negative counts as 0)
+    float transition = 0.0f;  // 0..1
+    float habit = 0.0f;       // 0..1, part of transition
+    float preference = 0.0f;  // 0..1
+    float feedback = 0.0f;    // -1..1, this session's
+    float novelty = 0.0f;     // 0..1
+    float score = 0.0f;
+    bool isNew = false;       // never played nor skipped
+    bool gated = false;       // new, and below the relevance gate
+};
+
+}  // namespace
+
+int SmartShuffleEngine::generateRadio(std::int64_t seedId, std::int64_t currentId,
+                                      const std::int64_t* prefix, int prefixCount,
+                                      const std::int64_t* exclude, int excludeCount,
+                                      int count, std::int64_t nowMs, std::uint64_t seed,
+                                      std::int64_t* outIds) {
+    const auto start = std::chrono::steady_clock::now();
+    ++generation_;
+    audit_ = BrainAuditReport{};
+    audit_.generation = generation_;
+    radio_ = RadioReport{};
+    radio_.generation = generation_;
+    traces_.clear();
+    candidateByRow_.clear();
+    count = std::max(0, std::min(count, 64));
+    const RadioWeights& w = radioWeights_;
+
+    ShuffleDiagnosticBrain::Draft draft;
+    const int currentRow = rowOf(currentId);
+    if (currentRow >= 0) draft.prefixRows.push_back(currentRow);
+    for (int i = 0; prefix != nullptr && i < prefixCount; ++i) {
+        const int r = rowOf(prefix[i]);
+        if (r >= 0) draft.prefixRows.push_back(r);
+    }
+    brain_.preflight(audit_, currentRow);
+    auto finish = [&](int written) {
+        audit_.exploreBoost = exploreBoost_;
+        radio_.elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        audit_.elapsedMs = radio_.elapsedMs;
+        return written;
+    };
+    const int n = size();
+    if (n == 0 || count == 0 || outIds == nullptr) {
+        brain_.runBrainSelfAudit(draft, audit_, true);
+        return finish(0);
+    }
+
+    // What may not be picked: the queue, the excluded, what this session played
+    // (unless the library is too small to keep going without them).
+    std::vector<std::uint8_t> blocked(static_cast<size_t>(n), 0);
+    const int seedRow = rowOf(seedId);
+    for (int r : draft.prefixRows) blocked[r] = 1;
+    if (seedRow >= 0) blocked[seedRow] = 1;
+    std::vector<std::uint8_t> strict = blocked;
+    for (int i = 0; exclude != nullptr && i < excludeCount; ++i) {
+        const int r = rowOf(exclude[i]);
+        if (r >= 0) strict[r] = 1;
+    }
+    for (auto id : sessionPlayed_) {
+        const int r = rowOf(id);
+        if (r >= 0) strict[r] = 1;
+    }
+    int open = 0;
+    for (auto b : strict) open += b ? 0 : 1;
+    if (open >= count) blocked = strict;
+
+    // ---- Stage 1: candidates ------------------------------------------------
+    const bool seedMeasured = seedRow >= 0 && quality_[seedRow] != VectorQuality::None;
+    radio_.seedMeasured = seedMeasured;
+    const float* seedVec = seedMeasured ? vec(seedRow) : nullptr;
+    const float* sessionVec = hasSession_ ? session_.data() : nullptr;
+    const int anchorRow = draft.prefixRows.empty() ? seedRow : draft.prefixRows.back();
+    std::vector<float> toSeed(static_cast<size_t>(n), 0.0f);
+    std::vector<float> toSession(static_cast<size_t>(n), 0.0f);
+    float totalPlays = 0.0f;
+    for (int r = 0; r < n; ++r) {
+        totalPlays += static_cast<float>(completed_[r] + skipped_[r]);
+        if (quality_[r] == VectorQuality::None) continue;  // no acoustic evidence either way
+        const float trust = quality_[r] == VectorQuality::Fallback ? 0.85f : 1.0f;
+        if (seedVec != nullptr) toSeed[r] = trust * dot(seedVec, vec(r));
+        if (sessionVec != nullptr) toSession[r] = trust * dot(sessionVec, vec(r));
+    }
+    // Relevance: the seed stays the landmark; S_t (what the session has become) adds to it.
+    auto relevanceOf = [&](int r) {
+        float x;
+        if (seedVec != nullptr && sessionVec != nullptr) x = w.seedShare * toSeed[r] + (1.0f - w.seedShare) * toSession[r];
+        else if (seedVec != nullptr) x = toSeed[r];
+        else x = toSession[r];
+        return clamp01(x);
+    };
+    auto open1 = [&](int r) { return !blocked[r]; };
+    auto measured = [&](int r) { return !blocked[r] && quality_[r] != VectorQuality::None; };
+
+    std::vector<std::uint8_t> sources(static_cast<size_t>(n), 0);
+    auto mark = [&](const std::vector<int>& rows, std::uint8_t bit) {
+        for (int r : rows) sources[r] |= bit;
+        return static_cast<int>(rows.size());
+    };
+    if (seedVec != nullptr) {
+        radio_.fromSeed = mark(topRows(n, kRadioFromSeed, [&](int r) { return toSeed[r]; }, measured), kFromSeed);
+    }
+    if (sessionVec != nullptr) {
+        radio_.fromSession = mark(topRows(n, kRadioFromSession, [&](int r) { return toSession[r]; }, measured), kFromSession);
+    }
+
+    // Co-listening: what the listener played after songs like the seed (and
+    // after the song the batch follows). Noisy-OR over the sources, each
+    // weighted by how alike it is: 1 - prod(1 - w_n P(n -> c)).
+    std::vector<std::pair<int, float>> habitSources;
+    if (seedRow >= 0) habitSources.emplace_back(seedRow, 1.0f);
+    if (anchorRow >= 0 && anchorRow != seedRow) habitSources.emplace_back(anchorRow, 1.0f);
+    if (seedVec != nullptr) {
+        const auto near = topRows(n, kRadioHabitNeighbours + 1,
+                                  [&](int r) { return dot(seedVec, vec(r)); },
+                                  [&](int r) { return r != seedRow && quality_[r] != VectorQuality::None; });
+        for (int r : near) {
+            const float c = dot(seedVec, vec(r));
+            if (c >= kRadioNeighbourCosine && r != anchorRow) habitSources.emplace_back(r, c);
+        }
+    }
+    std::unordered_map<int, float> notHabit;  // row -> prod(1 - w P)
+    for (const auto& [from, weight] : habitSources) {
+        const auto out = transitions_.find(ids_[from]);
+        if (out == transitions_.end()) continue;
+        float maxWeight = 0.0f;
+        for (const auto& [id, x] : out->second) {
+            (void) id;
+            maxWeight = std::max(maxWeight, x);
+        }
+        if (maxWeight <= 0.0f) continue;
+        const auto total = transitionTotals_.find(ids_[from]);
+        const float t = total != transitionTotals_.end() ? total->second : 0.0f;
+        const float shrink = t / (t + 3.0f);
+        for (const auto& [to, x] : out->second) {
+            const int r = rowOf(to);
+            if (r < 0 || blocked[r]) continue;
+            const float p = clamp01(weight * clamp01(x / maxWeight * shrink));
+            auto& rest = notHabit.try_emplace(r, 1.0f).first->second;
+            rest *= 1.0f - p;
+        }
+    }
+    std::vector<float> habit(static_cast<size_t>(n), 0.0f);
+    for (const auto& [r, rest] : notHabit) habit[r] = clamp01(1.0f - rest);
+    {
+        std::vector<int> rows;
+        for (const auto& [r, rest] : notHabit) {
+            (void) rest;
+            rows.push_back(r);
+        }
+        const int take = std::min<int>(kRadioFromHabits, static_cast<int>(rows.size()));
+        std::partial_sort(rows.begin(), rows.begin() + take, rows.end(), [&](int a, int b) { return habit[a] > habit[b]; });
+        rows.resize(static_cast<size_t>(take));
+        radio_.fromHabits = mark(rows, kFromHabits);
+    }
+
+    // Rarely heard songs that sound right (Breaking the Loop: what the
+    // listener already plays would otherwise take every slot).
+    radio_.fromRare = mark(topRows(n, kRadioFromRare, relevanceOf, [&](int r) {
+        return measured(r) && completed_[r] + skipped_[r] <= kRadioRarePlays && relevanceOf(r) >= kRadioRareCosine;
+    }), kFromRare);
+
+    // A library with nothing measured and no habits (or a cold seed) still gets a mix.
+    std::vector<int> merged;
+    for (int r = 0; r < n; ++r) {
+        if (sources[r] != 0) merged.push_back(r);
+    }
+    if (static_cast<int>(merged.size()) < count) {
+        for (int r = 0; r < n && static_cast<int>(merged.size()) < std::max(count * 4, 16); ++r) {
+            if (open1(r) && sources[r] == 0) merged.push_back(r);
+        }
+    }
+    radio_.merged = static_cast<int>(merged.size());
+
+    // ---- Stage 2: contextual ranking ------------------------------------------
+    // How much to trust what was learned: little history means a mix by sound.
+    radio_.historyConfidence = clamp01(totalPlays / kRadioTrustedPlays);
+    radio_.sessionConfidence = clamp01(static_cast<float>(feedback_.size()) / kRadioTrustedEvents);
+    const float learned = std::max(radio_.historyConfidence, radio_.sessionConfidence);
+    const float wPreference = w.preference * learned;
+    const float wHabit = 0.6f * radio_.historyConfidence;  // of the transition head
+    const float wRelevance = w.relevance + (w.preference - wPreference);
+    const bool exploring = radio_.historyConfidence >= 0.25f;  // "new" means something only once there is history
+
+    // Attention over this session's feedback: newer events count more, and an
+    // event counts more when it happened after a song like the one this batch
+    // follows (the same context).
+    const float* contextNow = anchorRow >= 0 && quality_[anchorRow] != VectorQuality::None ? vec(anchorRow) : seedVec;
+    std::vector<float> attention(feedback_.size(), 0.0f);
+    {
+        float recency = 1.0f;
+        for (size_t k = feedback_.size(); k-- > 0;) {
+            const auto& e = feedback_[k];
+            float alike = 0.5f;
+            if (e.hasContext && contextNow != nullptr) alike = clamp01(dot(contextNow, e.context.data()));
+            attention[k] = recency * (0.35f + 0.65f * alike);
+            recency *= w.feedbackDecay;
+        }
+    }
+
+    std::vector<RadioCandidate> ranked;
+    ranked.reserve(merged.size());
+    for (int r : merged) {
+        RadioCandidate c;
+        c.row = r;
+        c.sources = sources[r];
+        const bool known = quality_[r] != VectorQuality::None;
+        const float acoustic = known ? relevanceOf(r) : 0.0f;
+        c.habit = habit[r];
+        // Co-listening as evidence of belonging: what the listener plays after
+        // songs like the seed belongs in its radio even when it sounds different.
+        c.relevance = std::max(acoustic, w.habitVouch * radio_.historyConfidence * c.habit);
+        const float smooth = known && contextNow != nullptr ? clamp01(dot(contextNow, vec(r))) : acoustic;
+        c.transition = clamp01((1.0f - wHabit) * smooth + wHabit * c.habit);
+
+        // Session feedback: sum of attention x likeness x signal, skips heavier.
+        float mass = 0.0f, sum = 0.0f;
+        if (known) {
+            for (size_t k = 0; k < feedback_.size(); ++k) {
+                // How much this event is about this song: a sharp kernel, so a
+                // near twin of a skipped song takes the penalty and a merely
+                // related one mostly does not (cos 1 -> 1, 0.7 -> 0.14, 0.5 -> 0.04).
+                const float like = std::exp((dot(vec(r), feedback_[k].item.data()) - 1.0f) / kFeedbackKernel);
+                const float m = attention[k] * like;
+                const float s = feedback_[k].signal;
+                sum += m * s * (s < 0.0f ? w.skipWeight : 1.0f);
+                mass += m;
+            }
+        }
+        c.feedback = std::max(-1.0f, std::min(1.0f, sum / (mass + kFeedbackPrior)));
+        // The long-term record: a Laplace completion rate, favourites a little higher.
+        const float comp = static_cast<float>(completed_[r]);
+        const float skip = static_cast<float>(skipped_[r]);
+        float longTerm = (comp + 1.0f) / (comp + 1.5f * skip + 2.0f);
+        if (favorite_[r]) longTerm = std::min(1.0f, longTerm + 0.15f);
+        const float sessionShare = mass / (mass + kFeedbackPrior);
+        c.preference = clamp01(sessionShare * (0.5f + 0.5f * c.feedback) + (1.0f - sessionShare) * longTerm);
+
+        c.isNew = completed_[r] + skipped_[r] == 0;
+        c.novelty = 1.0f / std::sqrt(1.0f + comp + skip);
+        // New to the listener: in only above the gate, unless their own habits vouch for it.
+        c.gated = exploring && c.isNew && (!known || acoustic < w.newSongGate) && c.habit < kHabitVouches;
+        const float noveltyHead = exploring && !c.gated ? c.novelty : 0.0f;
+
+        const float trust = known ? 1.0f : 0.5f;
+        c.score = (wRelevance * c.relevance + w.transition * c.transition + wPreference * c.preference +
+                   w.novelty * noveltyHead) *
+                  trust * cooldownOf(r, nowMs) * std::exp(w.skipPenalty * std::min(0.0f, c.feedback));
+        if (!std::isfinite(c.score)) c.score = 0.0f;
+        ranked.push_back(c);
+
+        Candidate t;  // what the traces and the brain read
+        t.row = r;
+        t.score = c.score;
+        // Relevance the listener's habit vouched for counts as habit (so the
+        // brain's Check 5 keeps a habitual jump, as it does for Smart Shuffle).
+        t.vibe = wRelevance * acoustic;
+        t.markov = w.transition * c.transition + wRelevance * (c.relevance - acoustic);
+        t.affinity = wPreference * c.preference;
+        t.explore = w.novelty * noveltyHead;
+        t.cooldown = cooldownOf(r, nowMs);
+        t.cosine = c.relevance;
+        candidateByRow_[r] = t;
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const RadioCandidate& a, const RadioCandidate& b) { return a.score > b.score; });
+
+    // ---- Stage 3: filtering and order ----------------------------------------
+    std::vector<int> passing, gated;
+    for (const auto& c : ranked) (c.gated ? gated : passing).push_back(c.row);
+    radio_.gatedOut = static_cast<int>(gated.size());
+    std::unordered_map<int, const RadioCandidate*> byRow;
+    for (const auto& c : ranked) byRow[c.row] = &c;
+
+    // Weighted sampling of the pool, so one seed does not give the same mix every time.
+    std::vector<Candidate> pool;
+    const int poolSize = std::min<int>(static_cast<int>(passing.size()), std::max(count * 4, 16));
+    for (int i = 0; i < poolSize; ++i) pool.push_back(candidateByRow_[passing[i]]);
+    const Weights saved = weights_;
+    weights_.temperature = w.temperature;
+    std::vector<int> order = reservoirSample(pool, count, seed);
+    weights_ = saved;
+    for (size_t i = static_cast<size_t>(poolSize); i < passing.size(); ++i) order.push_back(passing[i]);
+
+    auto artistKey = [this](int row) -> std::int64_t {
+        return artist_[row] >= 0 ? artist_[row] : -static_cast<std::int64_t>(row) - 2;
+    };
+    std::unordered_map<std::int64_t, int> lastPosition;
+    std::unordered_map<std::int64_t, int> artistUses;
+    for (int i = 0; i < static_cast<int>(draft.prefixRows.size()); ++i) lastPosition[artistKey(draft.prefixRows[i])] = i;
+    const int spacing = std::max(1, weights_.minArtistSpacing);
+    // The exploration cap: a quarter of the batch, or more when the songs that
+    // sound most like the seed are mostly unheard (a seed the listener chose in
+    // a part of the library they have not explored is no reason for a mix of
+    // their old favourites).
+    float nearNew = 0.0f;
+    {
+        std::vector<const RadioCandidate*> near;
+        for (const auto& c : ranked) near.push_back(&c);
+        const size_t k = std::min(near.size(), static_cast<size_t>(2 * count));
+        std::partial_sort(near.begin(), near.begin() + static_cast<long>(k), near.end(),
+                          [](const RadioCandidate* a, const RadioCandidate* b) { return a->relevance > b->relevance; });
+        int fresh = 0;
+        for (size_t i = 0; i < k; ++i) fresh += near[i]->isNew ? 1 : 0;
+        nearNew = k > 0 ? static_cast<float>(fresh) / static_cast<float>(k) : 0.0f;
+    }
+    const float newShare = std::max(w.newSongShare, nearNew);
+    const int newCap = std::max(1, static_cast<int>(std::lround(newShare * static_cast<float>(count))));
+    radio_.newCap = newCap;
+    int newPlaced = 0;
+    bool lastWasNew = false;
+    int previous = draft.prefixRows.empty() ? -1 : draft.prefixRows.back();
+    std::vector<std::uint8_t> used(static_cast<size_t>(n), 0);
+    auto place = [&](int r) {
+        const int position = static_cast<int>(draft.prefixRows.size() + draft.placedRows.size());
+        draft.placedRows.push_back(r);
+        used[r] = 1;
+        lastPosition[artistKey(r)] = position;
+        ++artistUses[artistKey(r)];
+        const bool isNew = exploring && byRow[r]->isNew;
+        newPlaced += isNew ? 1 : 0;
+        lastWasNew = isNew;
+        previous = r;
+    };
+    // Strict first (spacing and the exploration cap), then each is relaxed.
+    for (int pass = 0; pass < 3 && static_cast<int>(draft.placedRows.size()) < count; ++pass) {
+        for (int slot = static_cast<int>(draft.placedRows.size()); slot < count;) {
+            const int position = static_cast<int>(draft.prefixRows.size() + draft.placedRows.size());
+            int best = -1;
+            float bestValue = -std::numeric_limits<float>::max();
+            int looked = 0;
+            for (size_t i = 0; i < order.size() && looked < 3; ++i) {
+                const int r = order[i];
+                if (used[r]) continue;
+                const auto last = lastPosition.find(artistKey(r));
+                if (pass < 2 && last != lastPosition.end() && position - last->second < spacing) continue;
+                const bool isNew = exploring && byRow[r]->isNew;
+                if (pass < 1 && isNew && (newPlaced >= newCap || (lastWasNew && newShare < 0.5f))) continue;
+                // Of the next three that fit: the score (fit after the batch's
+                // anchor is already in it), a light preference for a smooth
+                // step from the song before, and for an artist new to the batch.
+                const auto uses = artistUses.find(artistKey(r));
+                const float value = byRow[r]->score - kStepCost * (previous >= 0 ? distance(vec(previous), vec(r)) : 0.0f) -
+                                    w.artistRepeatCost * static_cast<float>(uses != artistUses.end() ? uses->second : 0);
+                ++looked;
+                if (value > bestValue) {
+                    bestValue = value;
+                    best = r;
+                }
+            }
+            if (best < 0) break;
+            place(best);
+            slot = static_cast<int>(draft.placedRows.size());
+        }
+    }
+    // A tiny library: the gated songs, best first, rather than an empty slot.
+    for (int r : gated) {
+        if (static_cast<int>(draft.placedRows.size()) >= count) break;
+        if (used[r]) continue;
+        place(r);
+        ++radio_.filled;
+    }
+    radio_.newPlaced = newPlaced;
+
+    for (int r : order) {
+        if (!used[r]) draft.reserveRows.push_back(r);
+    }
+    for (int r : passing) {
+        if (!used[r] && byRow[r]->isNew && draft.freshRows.size() < 16) draft.freshRows.push_back(r);
+    }
+    // The same safety net as Smart Shuffle (integrity, clumping, jerk), but no
+    // exploration boost: the brain repairs only from the mix's own candidates.
+    brain_.runBrainSelfAudit(draft, audit_, true);
+
+    // Traces.
+    for (size_t j = 0; j < draft.placedRows.size(); ++j) {
+        const int r = draft.placedRows[j];
+        const auto known = candidateByRow_.find(r);
+        const Candidate c = known != candidateByRow_.end() ? known->second : Candidate{};
+        const auto rc = byRow.find(r);
+        TrackDecisionTrace t;
+        t.trackId = ids_[r];
+        t.rawScore = c.score;
+        const float total = std::max(kEps, c.vibe + c.markov + c.affinity + c.explore);
+        t.vibeSimilarityPct = 100.0f * c.vibe / total;
+        t.markovHabitPct = 100.0f * c.markov / total;
+        t.userAffinityPct = 100.0f * c.affinity / total;
+        t.explorationBonusPct = 100.0f * c.explore / total;
+        t.recencyPenaltyMultiplier = c.cooldown;
+        t.cosineSimilarity = seedVec != nullptr ? toSeed[r] : c.cosine;
+        t.zone = zone_[r];
+        t.quality = quality_[r];
+        const int before = j == 0 ? (draft.prefixRows.empty() ? -1 : draft.prefixRows.back()) : draft.placedRows[j - 1];
+        t.transitionSmoothnessScore = before >= 0 ? clamp01(1.0f - 0.5f * distance(vec(before), vec(r))) : 1.0f;
+        const int like = static_cast<int>(std::lround(100.0f * clamp01(t.cosineSimilarity)));
+        char text[96];
+        if (quality_[r] == VectorQuality::None) {
+            t.reason = ReasonTag::ColdStart;
+            std::snprintf(text, sizeof(text), "Mix: not measured yet");
+        } else if (rc != byRow.end() && rc->second->habit >= kHabitVouches) {
+            t.reason = ReasonTag::MarkovFavorite;
+            std::snprintf(text, sizeof(text), "Mix: often played after songs like these");
+        } else if (rc != byRow.end() && rc->second->gated) {
+            t.reason = ReasonTag::BanditGem;
+            std::snprintf(text, sizeof(text), "Mix: filling in, %d%% like the seed", like);
+        } else if (rc != byRow.end() && exploring && rc->second->isNew) {
+            t.reason = ReasonTag::BanditGem;
+            std::snprintf(text, sizeof(text), "Mix: new to you, %d%% like the seed", like);
+        } else if (rc != byRow.end() && rc->second->feedback > 0.2f && feedback_.size() >= 2) {
+            t.reason = ReasonTag::ProvenFavorite;
+            std::snprintf(text, sizeof(text), "Mix: close to what you liked this session");
+        } else {
+            t.reason = ReasonTag::VibeMatch;
+            std::snprintf(text, sizeof(text), "Mix: %d%% like the seed", like);
+        }
+        t.primaryReasonTag = text;
+        traces_.push_back(std::move(t));
+    }
+    pendingSkip_.active = false;
+    const int written = static_cast<int>(draft.placedRows.size());
+    for (int i = 0; i < written; ++i) outIds[i] = ids_[draft.placedRows[i]];
+    return finish(written);
 }
 
 // ===========================================================================

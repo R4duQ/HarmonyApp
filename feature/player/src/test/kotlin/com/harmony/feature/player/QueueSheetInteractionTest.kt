@@ -8,8 +8,13 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import com.harmony.core.model.MixState
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.Song
 import com.harmony.domain.playback.QueueMoves
@@ -269,5 +274,37 @@ class QueueSheetInteractionTest {
         assertEquals(listOf(2, 3, 4, 1), player.upcomingTags())
         drag("B", 3)
         assertEquals(listOf(3, 4, 1, 2), player.upcomingTags())
+    }
+
+    @Test
+    fun theMixBarStartsAndStopsAMix() {
+        val player = FakePlayer(listOf("A", "B", "C"))
+        var mix by mutableStateOf<MixState?>(null)
+        var starts = 0
+        var stops = 0
+        rule.setContent {
+            QueueSheetContent(
+                player.state, onPlay = {}, onRemove = {}, onMove = player::move,
+                mix = mix, mixAvailable = true,
+                onStartMix = { starts++; mix = MixState(player.state.currentSong!!.id, "A", "Artist", 0L) },
+                onStopMix = { stops++; mix = null },
+            )
+        }
+        rule.onNodeWithText("Mix from this song").assertIsDisplayed()
+        rule.onNodeWithText("Start").performClick()
+        rule.waitForIdle()
+        assertEquals(1, starts)
+        rule.onNodeWithText("Mix from A").assertIsDisplayed()
+        rule.onNodeWithText("Stop mix").performClick()
+        rule.waitForIdle()
+        assertEquals(1, stops)
+        rule.onNodeWithText("Mix from this song").assertIsDisplayed()
+    }
+
+    @Test
+    fun noMixBarWithoutTheEngine() {
+        val player = FakePlayer(listOf("A", "B"))
+        rule.setContent { QueueSheetContent(player.state, onPlay = {}, onRemove = {}, onMove = player::move) }
+        assertEquals(0, rule.onAllNodesWithText("Mix from this song").fetchSemanticsNodes().size)
     }
 }

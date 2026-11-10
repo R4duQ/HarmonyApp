@@ -255,6 +255,21 @@ class PlayerViewModel @Inject constructor(
 
     fun onCancelJourney() = queueManager.cancelJourney()
 
+    // -- Mix din piesa asta ----------------------------------------------------
+
+    /** The running mix (a radio from one song, local library only), or null. */
+    val mix: StateFlow<com.harmony.core.model.MixState?> = queueManager.mix
+
+    val mixAvailable: Boolean get() = queueManager.mixAvailable
+
+    /** "Mix from this song": a radio from the song playing. */
+    fun onStartMix() {
+        queueManager.startMix()
+    }
+
+    /** "Stop mix": back to the shuffle mode from before the mix. */
+    fun onStopMix() = queueManager.stopMix()
+
     // -- Queue --------------------------------------------------------------
     /** A tap on a queued song: seekTo(index, 0), the queue unchanged. */
     fun onQueueItemClick(index: Int) = queueManager.playQueueItem(index)

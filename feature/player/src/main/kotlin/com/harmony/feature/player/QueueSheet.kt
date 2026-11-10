@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -44,6 +45,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -53,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.harmony.core.model.MixState
 import com.harmony.core.model.PlayerState
 import com.harmony.core.ui.component.Artwork
 import com.harmony.core.ui.component.formatDuration
@@ -110,11 +113,16 @@ import com.harmony.core.ui.component.formatDuration
 @Composable
 fun QueueSheet(viewModel: PlayerViewModel) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
+    val mix by viewModel.mix.collectAsStateWithLifecycle()
     QueueSheetContent(
         state = state,
         onPlay = viewModel::onQueueItemClick,
         onRemove = viewModel::onRemoveQueueItem,
         onMove = { from, to, songId, onDone -> viewModel.onMoveQueueItem(from, to, songId, onDone) },
+        mix = mix,
+        mixAvailable = viewModel.mixAvailable,
+        onStartMix = viewModel::onStartMix,
+        onStopMix = viewModel::onStopMix,
     )
 }
 
@@ -129,6 +137,10 @@ internal fun QueueSheetContent(
     onPlay: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onMove: (from: Int, to: Int, songId: Long, onDone: (Boolean) -> Unit) -> Unit,
+    mix: MixState? = null,
+    mixAvailable: Boolean = false,
+    onStartMix: () -> Unit = {},
+    onStopMix: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val palette = playerPalette()
@@ -223,6 +235,12 @@ internal fun QueueSheetContent(
                 artworkUri = nowPlaying.artworkUri,
                 palette = palette,
             )
+        }
+
+        // A computer's song (a negative id) has no vector here: no mix from it.
+        val canMix = mixAvailable && nowPlaying != null && nowPlaying.id >= 0
+        if (mix != null || canMix) {
+            MixBar(mix = mix, palette = palette, onStart = onStartMix, onStop = onStopMix)
         }
 
         if (upcoming.isEmpty()) {
@@ -459,6 +477,68 @@ private fun NowPlayingCard(
                 modifier = Modifier.padding(start = 1.dp),
             )
         }
+    }
+}
+
+/**
+ * "Mix from this song" / "Stop mix": a radio from the song playing, made
+ * from the local library only (it works offline). While it runs, the bar
+ * names the seed song the mix keeps returning to.
+ */
+@Composable
+private fun MixBar(
+    mix: MixState?,
+    palette: PlayerPalette,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (mix != null) palette.accent.copy(alpha = 0.14f) else palette.control)
+            .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Radio, contentDescription = null, tint = palette.accent, modifier = Modifier.size(18.dp))
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(start = 10.dp),
+        ) {
+            Text(
+                if (mix != null) "Mix from ${mix.seedTitle}" else "Mix from this song",
+                fontSize = 14.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (mix != null) "From your library · learns from skips" else "A radio from your library, offline",
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                color = palette.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            if (mix != null) "Stop mix" else "Start",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = palette.accent,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = if (mix != null) "Stop mix" else "Mix from this song",
+                    onClick = if (mix != null) onStop else onStart,
+                )
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }
 

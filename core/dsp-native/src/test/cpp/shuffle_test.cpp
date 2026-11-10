@@ -624,6 +624,444 @@ void fastOnALargeLibrary() {
     CHECK(ms < 25.0, "%.2f ms per queue", ms);
 }
 
+// ---------------------------------------------------------------------------
+// Mix din piesa asta (generateRadio)
+// ---------------------------------------------------------------------------
+
+/**
+ * Six sonic families, each in two styles (A: a slow pulse, B: a busy one,
+ * the same bands), an artist every four songs. Ids: 200000 +
+ * family * 1000 + style * 100 + i.
+ */
+struct StyledLibrary {
+    Library lib;
+    std::vector<int> style;
+};
+
+StyledLibrary makeStyledLibrary(int families = 6, int perStyle = 20, unsigned seed = 7) {
+    StyledLibrary out;
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> jitter(0.9f, 1.1f);
+    int artist = 0;
+    for (int f = 0; f < families; ++f) {
+        for (int s = 0; s < 2; ++s) {
+            for (int i = 0; i < perStyle; ++i) {
+                if (i % 4 == 0) ++artist;
+                out.lib.ids.push_back(200000 + f * 1000 + s * 100 + i);
+                out.lib.family.push_back(f);
+                out.style.push_back(s);
+                out.lib.artists.push_back(artist);
+                out.lib.quality.push_back(static_cast<std::uint8_t>(VectorQuality::Real));
+                for (int k = 0; k < kBands; ++k) {
+                    const float centre = static_cast<float>(f * 9) / std::max(1, families - 1);
+                    out.lib.raw.push_back(jitter(rng) * std::exp(-0.5f * (k - centre) * (k - centre) / 2.0f));
+                }
+                for (int k = 0; k < kBands; ++k) out.lib.raw.push_back(jitter(rng) * 0.3f);
+                // The styles differ in pulse only: about 0.70 cosine within a style, 0.57 across.
+                const float macro[4] = {0.3f + 0.1f * (f % 3), 0.5f, 0.4f, s == 0 ? 0.2f : 0.8f};
+                for (float m : macro) out.lib.raw.push_back(jitter(rng) * m);
+            }
+        }
+    }
+    return out;
+}
+
+int indexOf(const Library& lib, std::int64_t id) {
+    return static_cast<int>(std::find(lib.ids.begin(), lib.ids.end(), id) - lib.ids.begin());
+}
+
+/**
+ * The shared test history: a listener who knows family 0-2 well (style A
+ * mostly), has a few favourites, and habitually plays song X (family 4) after
+ * songs of family 2.
+ */
+void loadHistory(SmartShuffleEngine& engine, const StyledLibrary& s, std::int64_t habitTarget) {
+    const Library& lib = s.lib;
+    const int n = static_cast<int>(lib.ids.size());
+    std::vector<std::int32_t> completed(n, 0), skipped(n, 0);
+    std::vector<std::int64_t> last(n, 0);
+    std::vector<std::uint8_t> favorite(n, 0);
+    for (int i = 0; i < n; ++i) {
+        const int local = static_cast<int>(lib.ids[i] % 100);
+        if (lib.family[i] <= 2 && s.style[i] == 0 && local < 12) {
+            completed[i] = 3 + local % 5;
+            last[i] = kNow - 86400000LL * (5 + local);
+        }
+        if (lib.family[i] <= 2 && s.style[i] == 1 && local < 4) {
+            completed[i] = 1;
+            skipped[i] = 2;
+            last[i] = kNow - 86400000LL * 20;
+        }
+        if (local == 1 && s.style[i] == 0) favorite[i] = 1;
+        if (lib.ids[i] == habitTarget) {
+            completed[i] = 6;
+            last[i] = kNow - 86400000LL * 3;
+        }
+    }
+    engine.setTrackStats(completed.data(), skipped.data(), last.data(), favorite.data(), n);
+    std::vector<std::int64_t> from, to;
+    std::vector<float> weight;
+    for (int i = 0; i < n; ++i) {
+        if (lib.family[i] == 2 && s.style[i] == 0 && lib.ids[i] % 100 < 10) {
+            from.push_back(lib.ids[i]);
+            to.push_back(habitTarget);
+            weight.push_back(4.0f);
+        }
+    }
+    engine.addTransitions(from.data(), to.data(), weight.data(), static_cast<int>(from.size()));
+}
+
+std::vector<std::int64_t> radio(SmartShuffleEngine& engine, std::int64_t seed, std::int64_t current, int count,
+                                const std::vector<std::int64_t>& prefix = {},
+                                const std::vector<std::int64_t>& exclude = {}, std::uint64_t rngSeed = 1) {
+    std::vector<std::int64_t> out(std::max(1, count));
+    out.resize(engine.generateRadio(seed, current, prefix.data(), static_cast<int>(prefix.size()), exclude.data(),
+                                    static_cast<int>(exclude.size()), count, kNow, rngSeed, out.data()));
+    return out;
+}
+
+/** The smallest number of songs between two by the same artist (count + 1 when none repeat). */
+int minArtistGap(const Library& lib, const std::vector<std::int64_t>& ids) {
+    int gap = static_cast<int>(ids.size()) + 1;
+    for (size_t a = 0; a < ids.size(); ++a) {
+        for (size_t b = a + 1; b < ids.size(); ++b) {
+            if (lib.artists[indexOf(lib, ids[a])] == lib.artists[indexOf(lib, ids[b])]) {
+                gap = std::min(gap, static_cast<int>(b - a));
+            }
+        }
+    }
+    return gap;
+}
+
+void radioStaysOnTheSeed() {
+    const StyledLibrary s = makeStyledLibrary();
+    SmartShuffleEngine engine;
+    load(engine, s.lib);
+    const std::int64_t seed = 202005;  // family 2, style A
+    engine.onTrackStarted(seed);
+    engine.onManualSelect(seed);
+    const std::vector<std::int64_t> queued = {202017};
+    const auto mix = radio(engine, seed, seed, 10, queued, {202008});
+    CHECK(mix.size() == 10, "a full batch: %zu", mix.size());
+    int family = 0;
+    for (auto id : mix) {
+        family += s.lib.family[indexOf(s.lib, id)] == 2 ? 1 : 0;
+        CHECK(id != seed && id != 202017 && id != 202008, "never the seed, the queue or the excluded");
+    }
+    CHECK(family >= 8, "sounds like the seed: %d of 10 from its family", family);
+    CHECK(std::set<std::int64_t>(mix.begin(), mix.end()).size() == mix.size(), "no duplicates");
+    std::vector<std::int64_t> withQueue = {seed, 202017};
+    withQueue.insert(withQueue.end(), mix.begin(), mix.end());
+    CHECK(minArtistGap(s.lib, withQueue) >= 3, "artists spaced: gap %d", minArtistGap(s.lib, withQueue));
+    CHECK(engine.lastRadio().fromSeed > 0 && engine.lastRadio().merged >= engine.lastRadio().fromSeed, "stage 1 ran");
+    CHECK(engine.lastRadio().historyConfidence == 0.0f, "no history: a mix by sound");
+    CHECK(engine.lastTraces().size() == mix.size(), "every song explained");
+    CHECK(engine.lastAudit().healthy(), "audit healthy: %s", problems(engine.lastAudit()).c_str());
+}
+
+void radioWorksOnTinyAndUnmeasuredLibraries() {
+    // Airplane mode is the only mode the engine has: it never touches a network.
+    SmartShuffleEngine empty;
+    std::int64_t out[4];
+    CHECK(empty.generateRadio(1, 1, nullptr, 0, nullptr, 0, 4, kNow, 1, out) == 0, "empty library: nothing");
+
+    const Library three = makeLibrary(1, 3, 1);
+    SmartShuffleEngine tiny;
+    load(tiny, three);
+    tiny.onTrackStarted(three.ids[0]);
+    const auto mix = radio(tiny, three.ids[0], three.ids[0], 10);
+    CHECK(mix.size() == 2, "three songs: the other two (%zu)", mix.size());
+
+    // Nothing measured at all: every song is NONE.
+    Library unmeasured = makeLibrary(2, 10, 2);
+    std::fill(unmeasured.quality.begin(), unmeasured.quality.end(), static_cast<std::uint8_t>(VectorQuality::None));
+    SmartShuffleEngine cold;
+    load(cold, unmeasured);
+    cold.onTrackStarted(unmeasured.ids[0]);
+    const auto coldMix = radio(cold, unmeasured.ids[0], unmeasured.ids[0], 6);
+    CHECK(coldMix.size() == 6, "unmeasured library still mixes: %zu", coldMix.size());
+    bool explained = !cold.lastTraces().empty();
+    for (const auto& t : cold.lastTraces()) explained = explained && t.reason == ReasonTag::ColdStart;
+    CHECK(explained, "and says the songs are not measured yet");
+
+    // Half measured, half approximated from the older analysis (FALLBACK): both mix.
+    Library mixed = makeLibrary(3, 20, 4);
+    for (size_t i = 0; i < mixed.quality.size(); i += 2) mixed.quality[i] = static_cast<std::uint8_t>(VectorQuality::Fallback);
+    SmartShuffleEngine half;
+    load(half, mixed);
+    half.onTrackStarted(mixed.ids[2]);
+    const auto halfMix = radio(half, mixed.ids[2], mixed.ids[2], 8);
+    int fallback = 0, sameFamily = 0;
+    for (auto id : halfMix) {
+        const int i = indexOf(mixed, id);
+        fallback += mixed.quality[i] == static_cast<std::uint8_t>(VectorQuality::Fallback) ? 1 : 0;
+        sameFamily += mixed.family[i] == 0 ? 1 : 0;
+    }
+    CHECK(halfMix.size() == 8 && sameFamily >= 6, "approximate vectors still find the family: %d of 8", sameFamily);
+    CHECK(fallback >= 1, "approximated songs take part: %d", fallback);
+
+    // A seed with no vector at all: the session and the habits carry the mix.
+    SmartShuffleEngine noSeed;
+    Library seedless = makeLibrary(2, 15, 3);
+    seedless.quality[0] = static_cast<std::uint8_t>(VectorQuality::None);
+    load(noSeed, seedless);
+    noSeed.onTrackStarted(seedless.ids[1]);
+    const auto seedlessMix = radio(noSeed, seedless.ids[0], seedless.ids[1], 5);
+    CHECK(seedlessMix.size() == 5, "an unmeasured seed still mixes: %zu", seedlessMix.size());
+    CHECK(!noSeed.lastRadio().seedMeasured, "and reports it");
+}
+
+/** Plays [batch] after [previous]: songs of [family]/[style] are fast-skipped, the rest finished. */
+std::int64_t listen(SmartShuffleEngine& engine, const StyledLibrary& s, const std::vector<std::int64_t>& batch,
+                    int family, int style, std::vector<std::int64_t>& played) {
+    std::int64_t last = -1;
+    for (auto id : batch) {
+        const int i = indexOf(s.lib, id);
+        engine.onTrackStarted(id);
+        const bool disliked = s.lib.family[i] == family && s.style[i] == style;
+        engine.onPlaybackOutcome(id, disliked ? 0.05f : 0.95f, kNow, true);
+        played.push_back(id);
+        last = id;
+    }
+    return last;
+}
+
+int countStyle(const StyledLibrary& s, const std::vector<std::int64_t>& ids, int family, int style) {
+    int c = 0;
+    for (auto id : ids) {
+        const int i = indexOf(s.lib, id);
+        c += s.lib.family[i] == family && s.style[i] == style ? 1 : 0;
+    }
+    return c;
+}
+
+void radioLearnsFromFastSkips() {
+    const StyledLibrary s = makeStyledLibrary();
+    SmartShuffleEngine engine;
+    load(engine, s.lib);
+    const std::int64_t seed = 203010;  // family 3, style A
+    engine.onTrackStarted(seed);
+    engine.onManualSelect(seed);
+    // Steer the first batch to contain style B: skip memory starts empty.
+    std::vector<std::int64_t> played = {seed};
+    int before = 0, after = 0;
+    for (int round = 0; round < 3; ++round) {
+        const auto first = radio(engine, seed, played.back(), 10, {}, played, 11 + round);
+        before += countStyle(s, first, 3, 1);
+        listen(engine, s, first, 3, 1, played);
+        const auto next = radio(engine, seed, played.back(), 10, {}, played, 21 + round);
+        after += countStyle(s, next, 3, 1);
+        listen(engine, s, next, 3, 1, played);
+    }
+    CHECK(engine.feedbackCount() > 0, "feedback remembered");
+    CHECK(after < before || before == 0, "fast skips push the skipped style out: %d before, %d after", before, after);
+}
+
+void radioSkipCountsMoreInASimilarContext() {
+    // The same three fast skips (style B of family 1, each right after a song
+    // of family 4) keep style B out more when the batch also follows a
+    // family 4 song than when it follows a family 5 one.
+    const StyledLibrary s = makeStyledLibrary();
+    auto styleB = [&](std::int64_t anchor) {
+        int b = 0;
+        for (std::uint64_t r = 1; r <= 8; ++r) {
+            SmartShuffleEngine engine;
+            load(engine, s.lib);
+            const std::int64_t seed = 201002;
+            engine.onTrackStarted(seed);
+            engine.onManualSelect(seed);
+            for (int k = 0; k < 3; ++k) {
+                engine.onTrackStarted(204000 + k);
+                engine.onPlaybackOutcome(204000 + k, 0.95f, kNow, false);
+                engine.onTrackStarted(201100 + k);
+                engine.onPlaybackOutcome(201100 + k, 0.05f, kNow, false);
+            }
+            b += countStyle(s, radio(engine, seed, anchor, 30, {}, {}, r), 1, 1);
+        }
+        return b;
+    };
+    const int sameContext = styleB(204010);   // follows family 4, as the skips did
+    const int otherContext = styleB(205010);  // follows family 5
+    CHECK(sameContext < otherContext, "skips weigh more in their own context: %d vs %d style-B songs over 8 batches of 30",
+          sameContext, otherContext);
+}
+
+void radioGatesSongsNewToTheListener() {
+    // A listener who knows family 2 well: all of it played except four songs
+    // of each style, plus other families never played.
+    const StyledLibrary s = makeStyledLibrary();
+    const int n = static_cast<int>(s.lib.ids.size());
+    std::vector<std::int32_t> completed(n, 0), skipped(n, 0);
+    std::vector<std::int64_t> last(n, 0);
+    std::vector<std::uint8_t> favorite(n, 0);
+    for (int i = 0; i < n; ++i) {
+        if (s.lib.family[i] == 2 && s.lib.ids[i] % 100 < 16) {
+            completed[i] = 4;
+            last[i] = kNow - 86400000LL * 10;
+        }
+    }
+    SmartShuffleEngine engine;
+    load(engine, s.lib);
+    engine.setTrackStats(completed.data(), skipped.data(), last.data(), favorite.data(), n);
+    const std::int64_t seed = 202003;
+    engine.onTrackStarted(seed);
+    engine.onManualSelect(seed);
+    int newSongs = 0;
+    for (std::uint64_t r = 1; r <= 5; ++r) {
+        radio(engine, seed, seed, 12, {}, {}, r);
+        const auto& report = engine.lastRadio();
+        CHECK(report.historyConfidence > 0.5f, "a listener with history (%.2f)", report.historyConfidence);
+        CHECK(report.newCap >= 3 && report.newCap <= 4, "familiar ground: about a quarter of 12 may be new (%d)", report.newCap);
+        CHECK(report.newPlaced <= report.newCap, "at most the cap: %d of %d", report.newPlaced, report.newCap);
+        newSongs += report.newPlaced;
+        for (const auto& t : engine.lastTraces()) {
+            const int i = indexOf(s.lib, t.trackId);
+            if (completed[i] == 0) {
+                CHECK(s.lib.family[i] == 2, "a new song placed sounds right (family %d, %.2f)", s.lib.family[i],
+                      t.cosineSimilarity);
+            }
+        }
+        CHECK(report.filled == 0, "no fill needed on a library this size");
+    }
+    CHECK(newSongs >= 1, "but new songs do get in: %d over five batches", newSongs);
+
+    // A seed in a family never played: its neighbourhood is all new, so the mix may be too.
+    const std::int64_t unexplored = 205004;
+    engine.onManualSelect(unexplored);
+    const auto mix = radio(engine, unexplored, unexplored, 12, {}, {}, 9);
+    int family = 0;
+    for (auto id : mix) family += s.lib.family[indexOf(s.lib, id)] == 5 ? 1 : 0;
+    CHECK(engine.lastRadio().newCap >= 9, "an unexplored seed lifts the cap (%d)", engine.lastRadio().newCap);
+    CHECK(family >= 10, "and the mix stays on it, not on old favourites: %d of 12", family);
+}
+
+void radioFollowsLocalHabits() {
+    const StyledLibrary s = makeStyledLibrary();
+    SmartShuffleEngine engine;
+    load(engine, s.lib);
+    const std::int64_t habitTarget = 204015;  // family 4: sounds nothing like the seed
+    loadHistory(engine, s, habitTarget);
+    const std::int64_t seed = 202011;          // family 2, not itself a source of the habit
+    engine.onTrackStarted(seed);
+    engine.onManualSelect(seed);
+    int found = 0;
+    for (std::uint64_t r = 1; r <= 5; ++r) {
+        const auto mix = radio(engine, seed, seed, 10, {}, {}, r);
+        CHECK(engine.lastRadio().fromHabits > 0, "co-listening retrieval found songs");
+        found += std::find(mix.begin(), mix.end(), habitTarget) != mix.end() ? 1 : 0;
+    }
+    CHECK(found >= 3, "what follows songs like the seed joins the mix: %d of 5 batches", found);
+}
+
+/**
+ * The comparison the feature is judged by: Smart Shuffle (generateQueue) and
+ * the mix (generateRadio) on the same library, history, seeds and simulated
+ * listener (who fast-skips the busy style of the seed's family and finishes
+ * everything else). Prints the table; checks the mix is at least as relevant.
+ */
+void radioComparedWithSmartShuffle() {
+    const StyledLibrary s = makeStyledLibrary();
+    const std::int64_t habitTarget = 204015;
+    struct Totals {
+        double relevance5 = 0, family5 = 0, artists = 0, gap = 0, skippedBefore = 0, skippedAfter = 0, family2 = 0,
+               familySongs2 = 0;
+        int habitHits = 0, runs = 0;
+        double ms = 0;
+    } smart, mix;
+    for (int family = 0; family < 6; ++family) {
+        for (int variant = 0; variant < 3; ++variant) {
+            const std::int64_t seed = 200000 + family * 1000 + 5 + variant;
+            for (int engineKind = 0; engineKind < 2; ++engineKind) {
+                SmartShuffleEngine engine;
+                load(engine, s.lib);
+                loadHistory(engine, s, habitTarget);
+                engine.onTrackStarted(seed);
+                engine.onManualSelect(seed);
+                const std::uint64_t rng = 100 + static_cast<std::uint64_t>(family * 10 + variant);
+                std::vector<std::int64_t> played = {seed};
+                auto batch = [&](std::int64_t current, std::uint64_t r) {
+                    std::vector<std::int64_t> out(10);
+                    const auto t0 = std::chrono::steady_clock::now();
+                    int written;
+                    if (engineKind == 0) {
+                        written = engine.generateQueue(current, nullptr, 0, played.data(), static_cast<int>(played.size()),
+                                                       nullptr, 0, 10, kNow, r, out.data());
+                    } else {
+                        written = engine.generateRadio(seed, current, nullptr, 0, played.data(),
+                                                       static_cast<int>(played.size()), 10, kNow, r, out.data());
+                    }
+                    (engineKind == 0 ? smart : mix).ms +=
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                    out.resize(static_cast<size_t>(written));
+                    return out;
+                };
+                Totals& t = engineKind == 0 ? smart : mix;
+                const auto first = batch(seed, rng);
+                float seedVec[kDims];
+                engine.vectorOf(seed, seedVec);
+                for (size_t i = 0; i < std::min<size_t>(5, first.size()); ++i) {
+                    t.relevance5 += dotWith(seedVec, engine, first[i]) / 5.0;
+                    t.family5 += (s.lib.family[indexOf(s.lib, first[i])] == family ? 1.0 : 0.0) / 5.0;
+                }
+                std::set<int> artists;
+                for (auto id : first) artists.insert(s.lib.artists[indexOf(s.lib, id)]);
+                t.artists += static_cast<double>(artists.size());
+                std::vector<std::int64_t> withSeed = {seed};
+                withSeed.insert(withSeed.end(), first.begin(), first.end());
+                t.gap += std::min(minArtistGap(s.lib, withSeed), 11);
+                t.habitHits += std::find(first.begin(), first.end(), habitTarget) != first.end() ? 1 : 0;
+                t.skippedBefore += countStyle(s, first, family, 1);
+                const std::int64_t last = listen(engine, s, first, family, 1, played);
+                const auto second = batch(last, rng + 1);
+                t.skippedAfter += countStyle(s, second, family, 1);
+                for (auto id : second) {
+                    const bool same = s.lib.family[indexOf(s.lib, id)] == family;
+                    t.family2 += same ? 0.1 : 0.0;
+                    t.familySongs2 += same ? 1.0 : 0.0;
+                }
+                ++t.runs;
+            }
+        }
+    }
+    auto row = [](const char* name, const Totals& t) {
+        const double n = t.runs;
+        std::printf("| %-13s | %5.2f | %4.0f%% | %4.1f | %4.1f | %4.1f -> %4.1f | %4.0f%% | %4.0f%% | %d/%d | %5.2f |\n", name,
+                    t.relevance5 / n, 100.0 * t.family5 / n, t.artists / n, t.gap / n, t.skippedBefore / n,
+                    t.skippedAfter / n, 100.0 * t.skippedAfter / std::max(1.0, t.familySongs2), 100.0 * t.family2 / n,
+                    t.habitHits, t.runs, t.ms / (2.0 * n));
+    };
+    std::printf("\nMix vs Smart Shuffle: 18 seeds (6 families x 3), same library (240 songs), history and listener\n");
+    std::printf("cos@5: mean cosine of the first 5 with the seed; fam@5: share of the first 5 from its family;\n");
+    std::printf("art.: distinct artists in 10; gap: closest repeat of an artist; skipped: songs of the style the\n");
+    std::printf("listener fast-skips, batch 1 -> batch 2; of fam: that style's share of the family's songs in batch 2;\n");
+    std::printf("fam 2nd: share of batch 2 still from the seed's family; habit: the habitual follower in batch 1\n");
+    std::printf("| engine        | cos@5 | fam@5 | art. | gap  | skipped 1st -> 2nd | of fam | fam 2nd | habit | ms    |\n");
+    std::printf("|---------------|-------|-------|------|------|--------------------|--------|---------|-------|-------|\n");
+    row("Smart Shuffle", smart);
+    row("Mix", mix);
+    std::printf("\n");
+    CHECK(mix.relevance5 >= smart.relevance5, "the mix is at least as close to the seed (%.2f vs %.2f)",
+          mix.relevance5 / mix.runs, smart.relevance5 / smart.runs);
+    CHECK(mix.gap / mix.runs >= 3.0, "the mix spaces artists (%.1f)", mix.gap / mix.runs);
+    CHECK(mix.skippedAfter < mix.skippedBefore || mix.skippedBefore == 0, "the mix answers the skips (%.1f -> %.1f)",
+          mix.skippedBefore / mix.runs, mix.skippedAfter / mix.runs);
+}
+
+void radioFastOnALargeLibrary() {
+    const Library lib = makeLibrary(20, 1000, 8);  // 20,000 songs
+    SmartShuffleEngine engine;
+    load(engine, lib);
+    engine.onTrackStarted(lib.ids[0]);
+    engine.onManualSelect(lib.ids[0]);
+    radio(engine, lib.ids[0], lib.ids[0], 10);  // warm up (Check 4's first full pass)
+    constexpr int kRuns = 20;
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < kRuns; ++i) radio(engine, lib.ids[0], lib.ids[0], 10, {}, {}, i);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / kRuns;
+    std::printf("20k-song mix batch of 10 with full audit: %.2f ms\n", ms);
+    CHECK(ms < 25.0, "%.2f ms per mix batch", ms);
+}
+
 void selfTestPasses() {
     bool passed = false;
     const std::string report = runSyntheticBrainSimulation(&passed);
@@ -653,6 +1091,14 @@ int main() {
     smallAndEmptyLibraries();
     steeringBiasesTheQueue();
     fastOnALargeLibrary();
+    radioStaysOnTheSeed();
+    radioWorksOnTinyAndUnmeasuredLibraries();
+    radioLearnsFromFastSkips();
+    radioSkipCountsMoreInASimilarContext();
+    radioGatesSongsNewToTheListener();
+    radioFollowsLocalHabits();
+    radioComparedWithSmartShuffle();
+    radioFastOnALargeLibrary();
     selfTestPasses();
     if (failures == 0) {
         std::printf("All SmartShuffleEngine tests passed\n");
