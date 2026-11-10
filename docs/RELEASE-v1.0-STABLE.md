@@ -1,8 +1,21 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **157**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 156), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **158**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 157), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 158 — Mix from this song
+
+- **A radio from any song, offline.** In the queue on Now Playing, **Mix from this song**
+  starts a mix from the song playing, made only from your own library, so it works in
+  airplane mode. The song you started from stays the mix's landmark; **Stop mix** goes back
+  to how the queue played before.
+- **It listens to you.** Songs you finish make the next batch lean their way; a quick skip
+  pushes songs that sound like it out of the next batch, more so in the same context. The
+  songs already in the queue and the ones you added never move.
+- **New songs, but only good fits.** Songs you have never played come in only when they
+  sound close enough to the mix, and never crowd out the ones you know; songs you often
+  play after similar ones come along too.
 
 ## Build 157 — Mornye 5.3.1
 
