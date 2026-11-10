@@ -81,6 +81,100 @@ how they sound.
   wrapper), like everything else in the app. That keeps gapless playback, Android
   Auto and Harmony Connect working.
 
+## Mix din piesa asta (a radio from one song)
+
+The queue sheet in Now Playing has **Mix from this song** and, while a mix
+runs, **Stop mix**. A mix is a radio started from the song playing, made from
+the local library only: nothing in it touches a network, so it works the
+same in airplane mode. `SmartShuffleEngine::generateRadio` builds each batch;
+`SmartQueueManager.startMix/stopMix` runs it as a variant of Smart Shuffle.
+
+### What it borrows from YouTube Music
+
+Google's posts describe YouTube Music's recommender as three stages
+(retrieval, ranking, filtering), with a transformer in the ranking stage that
+weighs each past action (a skip, a full play, a pick) by how relevant its
+context is to the current one: a skip while working out counts for little at
+home. A later study ("Breaking the Loop") found that what the listener already
+plays crowds out what they have not heard, and compared ways to make room for
+novelty. Harmony cannot run a transformer trained on millions of listeners, so
+each idea is mapped onto what a phone has: the 24-D vectors instead of learned
+track embeddings, the local Markov habits instead of co-listening across
+users, and a small attention over this session's feedback.
+
+| Stage | YouTube Music | Harmony's mix |
+|---|---|---|
+| 1. Candidates | Several retrieval sources merged | Up to 80 closest to the seed, 40 closest to S_t, 40 from habits (what was played after the seed, after the song the batch follows, and after the 12 songs that sound most like the seed; noisy-OR `1 − Π(1 − w·P)`), 24 rarely heard songs (≤ 2 plays) that sound right (cosine ≥ 0.40). Union, duplicates removed. |
+| 2. Ranking | Transformer over the action sequence and the current context | `RadioWeights` (below). Session feedback goes through an attention: an event counts `0.85^age × (0.35 + 0.65 × cos(context then, context now))`, times a sharp likeness kernel `exp((cos − 1)/0.15)`, a fast skip 1.5 times a full play. |
+| 3. Filtering | Business rules, diversity | Queue, excluded and session-played songs out; the same artist at least 3 songs apart; songs new to the listener only above an acoustic gate, and no more of them than a quarter of the batch (or the share of new songs among the seed's own closest matches, when that is higher). |
+
+### The score (Harmony's starting weights)
+
+These weights are Harmony's choices, not YouTube Music's (which publishes
+none). Each head is 0..1.
+
+```
+relevance  = max(cos(0.7·seed + 0.3·S_t, v),  0.8 × historyConfidence × habit)
+transition = (1 − 0.6·h)·cos(song before, v) + 0.6·h·habit           h = historyConfidence
+preference = s·(0.5 + 0.5·feedback) + (1 − s)·(c + 1)/(c + 1.5·k + 2)  s = session evidence for v
+novelty    = 1/√(1 + plays), only once there is history, never below the gate
+
+score = (w_rel·relevance + 0.20·transition + w_pref·preference + 0.10·novelty)
+        × cooldown × exp(1.2 · min(0, feedback))
+w_pref = 0.20 × max(historyConfidence, sessionConfidence);  w_rel = 0.50 + (0.20 − w_pref)
+```
+
+- **Little history means a mix by sound.** `historyConfidence` reaches 1 at
+  40 plays across the library, `sessionConfidence` at 4 feedback events; the
+  preference weight they leave unused goes to relevance.
+- **Feedback.** A near-complete play (≥ 90%) is +1, past half +0.5, a pick by
+  hand (the seed included) +0.8, 20–50% −0.25, a fast skip (< 20%) −1. Only
+  the session's last 48 events are kept; `resetSession` forgets them.
+- **The seed stays the landmark.** It carries 70% of relevance in every
+  batch, however far S_t drifts.
+- **Songs without a 24-D vector** use the cold-start approximation from the
+  older analysis (`FALLBACK`, trusted at 0.85). Songs with nothing measured
+  (`NONE`) take part only through habits or as the last fill, and say so.
+- The Diagnostic Brain audits each batch as it audits Smart Shuffle's
+  (integrity, clumping, jerk), repairing only from the mix's own candidates;
+  a habitual jump is kept, as for Smart Shuffle.
+
+### In the queue
+
+- **Start:** Smart Shuffle turns on if it was off (the list's own songs still
+  to come make way, as when Smart Shuffle starts), the session restarts on the
+  seed, and the free picks after the protected head (the song playing, the
+  next one, the Play next run) become the mix's first batch. The user's
+  entries stay where they are.
+- **While it runs:** the rolling top-up is Smart Shuffle's (fewer than 10
+  ahead: append up to 12). Feedback never rewrites what is already shown; it
+  shapes the next batch.
+- **Stop:** back to the mode from before. From Smart Shuffle, what is queued
+  stays and the next batches are Smart Shuffle's; from off, the original
+  running order comes back. A new list, another shuffle mode or a journey
+  also ends the mix.
+- Logcat (`SHUFFLE_BRAIN`) gets one `MIX` line per batch: ids, stage counts,
+  confidences and timing, no titles.
+
+### Measured against Smart Shuffle (host test `radioComparedWithSmartShuffle`)
+
+240 synthetic songs (six sonic families in two rhythm styles, cosine ≈ 0.70
+within a style, 0.57 across), one shared history (families 0–2 well played, a
+habitual follower after family 2), 18 seeds, the same simulated listener
+(fast-skips the busy style of the seed's family, finishes the rest), batches
+of 10:
+
+| engine | cos@5 | fam@5 | artists | closest repeat | skipped style, batch 1 → 2 | its share of the family in batch 2 | batch 2 still on the seed's family | habit found |
+|---|---|---|---|---|---|---|---|---|
+| Smart Shuffle | 0.72 | 97% | 7.5 | 3.8 | 2.5 → 0.7 | 21% | 32% | 2/18 |
+| Mix | 0.75 | 98% | 7.7 | 3.9 | 2.7 → 0.8 | 12% | 72% | 5/18 |
+
+Smart Shuffle answers the skips mostly by leaving the seed's family; the mix
+stays on it and keeps fewer of the skipped style among those songs. A 20,000
+song library builds a mix batch of 10 in about 1.1 ms on a desktop core.
+These are synthetic families: whether the mix *sounds* better has to be
+judged by listening (see the device checklist in the pull request).
+
 ## Running the tests
 
 ```sh

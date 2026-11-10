@@ -31,6 +31,8 @@ constexpr const char* kBridgeClass = "com/harmony/core/dsp/SmartShuffleNative";
 constexpr int kTraceFloats = 8;
 /** Per trace: zone, quality, reason. */
 constexpr int kTraceInts = 3;
+/** See nativeRadioReport. */
+constexpr int kRadioReportFloats = 14;
 /** Per check (metric, threshold), then avgSim, artistH, zoneH, ||S||, real%, boost, ms. */
 constexpr int kAuditFloats = kAuditChecks * 2 + 7;
 /** Per check (status, corrections), then generation, afterSkip, nonFinite, real, fallback, placeholder. */
@@ -337,6 +339,56 @@ jint nativeGenerateQueue(JNIEnv* env, jclass, jlong h, jlong currentId, jlongArr
     return written;
 }
 
+/** "Mix din piesa asta": a batch of the radio started from [seedId]; see SmartShuffleEngine::generateRadio. */
+jint nativeGenerateRadio(JNIEnv* env, jclass, jlong h, jlong seedId, jlong currentId, jlongArray prefix,
+                         jlongArray exclude, jint count, jlong nowMs, jlong seed, jlongArray out) {
+    std::vector<jlong> p;
+    std::vector<jlong> e;
+    if (!readArray(env, prefix, p) || !readArray(env, exclude, e)) return 0;
+    if (out == nullptr || env->GetArrayLength(out) < count) {
+        throwIllegalArgument(env, "output array smaller than count");
+        return 0;
+    }
+    std::vector<std::int64_t> p64(p.begin(), p.end());
+    std::vector<std::int64_t> e64(e.begin(), e.end());
+    std::vector<std::int64_t> result(static_cast<size_t>(std::max(0, count)));
+    int written;
+    {
+        Handle* handle = handleOf(h);
+        std::lock_guard<std::mutex> guard(handle->lock);
+        written = handle->engine.generateRadio(seedId, currentId, p64.data(), static_cast<int>(p64.size()), e64.data(),
+                                               static_cast<int>(e64.size()), count, nowMs,
+                                               static_cast<std::uint64_t>(seed), result.data());
+    }
+    std::vector<jlong> asJava(result.begin(), result.begin() + written);
+    writeArray(env, out, asJava.data(), written);
+    return written;
+}
+
+/**
+ * The last mix batch's stages (kRadioReportFloats): fromSeed, fromSession,
+ * fromHabits, fromRare, merged, gatedOut, newPlaced, newCap, filled,
+ * historyConfidence, sessionConfidence, seedMeasured (0/1), elapsedMs,
+ * feedback events.
+ */
+void nativeRadioReport(JNIEnv* env, jclass, jlong h, jfloatArray out) {
+    float values[kRadioReportFloats];
+    {
+        Handle* handle = handleOf(h);
+        std::lock_guard<std::mutex> guard(handle->lock);
+        const RadioReport& r = handle->engine.lastRadio();
+        const float v[kRadioReportFloats] = {
+            static_cast<float>(r.fromSeed),   static_cast<float>(r.fromSession), static_cast<float>(r.fromHabits),
+            static_cast<float>(r.fromRare),   static_cast<float>(r.merged),      static_cast<float>(r.gatedOut),
+            static_cast<float>(r.newPlaced),  static_cast<float>(r.newCap),      static_cast<float>(r.filled),
+            r.historyConfidence,              r.sessionConfidence,               r.seedMeasured ? 1.0f : 0.0f,
+            static_cast<float>(r.elapsedMs),  static_cast<float>(handle->engine.feedbackCount()),
+        };
+        std::copy_n(v, kRadioReportFloats, values);
+    }
+    writeArray(env, out, values, kRadioReportFloats);
+}
+
 jlong nativeJourneyStep(JNIEnv* env, jclass, jlong h, jlong fromId, jlong toId, jfloat t, jlong previousId,
                         jlongArray exclude, jlong nowMs, jlong seed) {
     std::vector<jlong> e;
@@ -486,6 +538,8 @@ const JNINativeMethod kMethods[] = {
     HARMONY_JNI_METHOD(nativeLastLearnedTransition, "(J[J)F"),
     HARMONY_JNI_METHOD(nativeLastBanditUpdate, "(J[F)Z"),
     HARMONY_JNI_METHOD(nativeGenerateQueue, "(JJ[J[J[JIJJ[J)I"),
+    HARMONY_JNI_METHOD(nativeGenerateRadio, "(JJJ[J[JIJJ[J)I"),
+    HARMONY_JNI_METHOD(nativeRadioReport, "(J[F)V"),
     HARMONY_JNI_METHOD(nativeJourneyStep, "(JJJFJ[JJJ)J"),
     HARMONY_JNI_METHOD(nativeTraceCount, "(J)I"),
     HARMONY_JNI_METHOD(nativeTraces, "(J[J[F[I)[Ljava/lang/String;"),

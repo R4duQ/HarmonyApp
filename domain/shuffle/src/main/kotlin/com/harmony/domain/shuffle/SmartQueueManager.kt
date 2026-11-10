@@ -1,5 +1,6 @@
 package com.harmony.domain.shuffle
 
+import com.harmony.core.model.MixState
 import com.harmony.core.model.MoodFilter
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.QueueEntryInfo
@@ -13,6 +14,7 @@ import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.library.repository.PlaybackHistoryRepository
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
+import com.harmony.domain.shuffle.brain.MixRequest
 import com.harmony.domain.shuffle.brain.QueuePlan
 import com.harmony.domain.shuffle.brain.QueueRequest
 import com.harmony.domain.shuffle.brain.ShuffleBrain
@@ -80,6 +82,16 @@ import kotlin.random.Random
  * ([isMutatingQueue]) those changes are not acted on; once it ends, the
  * latest state is looked at once.
  *
+ * **Mix din piesa asta** ([startMix], [stopMix]). A radio from the song
+ * playing, built from the local library only (it works in airplane mode).
+ * It runs as Smart Shuffle with one difference: every batch comes from the
+ * brain's mix ([ShuffleBrain.mix]), which keeps the seed song as the
+ * session's landmark. Everything else is Smart Shuffle's: the rolling
+ * top-up ([REFILL_BELOW], [QUEUE_TARGET]), the protected head, the user's
+ * entries kept where they are, feedback that changes only the batches still
+ * to come. Starting a new list, choosing another shuffle mode or a journey
+ * ends the mix.
+ *
  * **Telemetry.** [telemetry] carries S_t, the last audit and the reason for
  * every upcoming pick, for ShuffleBrainDebugOverlay; each queue update is
  * also written to Logcat as a table (tag SHUFFLE_BRAIN).
@@ -101,6 +113,17 @@ class SmartQueueManager @Inject constructor(
     /** Which mood the current journey is heading toward, if any: UI only, for chip highlighting. */
     private val _journeyMood = MutableStateFlow<MoodFilter?>(null)
     val journeyMood: StateFlow<MoodFilter?> = _journeyMood
+
+    private val _mix = MutableStateFlow<MixState?>(null)
+
+    /** The running "Mix din piesa asta", or null. */
+    val mix: StateFlow<MixState?> = _mix.asStateFlow()
+
+    /** Whether a mix can be started (the native engine is loaded). */
+    val mixAvailable: Boolean get() = brain.available
+
+    /** The shuffle mode before the mix started: [stopMix] goes back to it. */
+    private var modeBeforeMix: ShuffleMode? = null
 
     private val _telemetry = MutableStateFlow(ShuffleBrainTelemetry(engineAvailable = brain.available))
 
@@ -450,9 +473,10 @@ class SmartQueueManager @Inject constructor(
         val previous = lastGeneration
         lastGeneration = signal.generation
         if (previous == null || previous == signal.generation) return
-        // The picks belonged to the old queue.
+        // The picks belonged to the old queue, and so did a mix.
         generated.clear()
         reRankJob?.cancel()
+        endMix()
         val state = playback.playerState.value
         when (state.shuffleMode) {
             ShuffleMode.OFF -> preShuffleQueue = null
@@ -520,6 +544,8 @@ class SmartQueueManager @Inject constructor(
         }
         val wasSmart = previous == ShuffleMode.SMART || previous == ShuffleMode.JOURNEY
         val isSmart = mode == ShuffleMode.SMART || mode == ShuffleMode.JOURNEY
+        // A mix lives in Smart Shuffle: any other mode ends it.
+        if (mode != ShuffleMode.SMART) endMix()
         if (wasSmart && !isSmart) {
             // The session ends with Smart Shuffle; habits stay.
             reRankJob?.cancel()
@@ -745,6 +771,77 @@ class SmartQueueManager @Inject constructor(
     /** Regenerate only the generated Smart Shuffle tail (the Regenerate button). */
     fun regenerateSmartQueue() = refreshUpcomingQueue()
 
+    // -- Mix din piesa asta ----------------------------------------------------------------
+
+    /**
+     * Starts a mix from the song playing: Smart Shuffle turns on if it is off
+     * (the list's own songs still to come make way, as when Smart Shuffle
+     * starts), a fresh session anchors on the seed (a pick by hand: a positive
+     * signal), and the free picks after the protected head are replaced by the
+     * mix's first batch. The song playing, the next one and the user's
+     * entries stay where they are. Starting again on another song moves the
+     * mix to it. Returns false when there is nothing to start from.
+     */
+    fun startMix(): Boolean {
+        val scope = managerScope ?: return false
+        val state = playback.playerState.value
+        val seed = state.currentSong?.takeIf { inLibrary(it.id) } ?: return false
+        if (_journey.value != null) finishJourney(revertToSmart = false)
+        if (_mix.value == null) modeBeforeMix = state.shuffleMode
+        _mix.value = MixState(
+            seedSongId = seed.id,
+            seedTitle = seed.title,
+            seedArtist = seed.artist,
+            startedAtMillis = System.currentTimeMillis(),
+        )
+        reRankJob?.cancel()
+        // As in activate: the guard goes up before the mode changes, so the
+        // top-up can't append to the old queue in between.
+        mutationDepth++
+        val switching = state.shuffleMode != ShuffleMode.SMART
+        if (switching) playback.setShuffleMode(ShuffleMode.SMART)
+        if (preShuffleQueue == null) preShuffleQueue = state.queue
+        val runs = if (switching) state.freeListRuns() else emptyList()
+        scope.launch {
+            try {
+                mutex.withLock {
+                    runCatching {
+                        brain.resetSession()
+                        brain.onTrackStarted(seed.id)
+                        brain.onManualSelect(seed.id)
+                    }
+                    if (runs.isNotEmpty()) mutateQueue { removeRuns(runs) }
+                }
+                publish(lastEvent = SessionEvent.MANUAL_ANCHOR)
+                reRankTail()
+            } finally {
+                mutationDepth--
+                if (mutationDepth == 0) react(playback.playerState.value.toSignal())
+            }
+        }
+        return true
+    }
+
+    /**
+     * "Oprește mixul": the mix ends and the shuffle mode from before it comes
+     * back. From Smart Shuffle, the songs already queued stay and the next
+     * batches are Smart Shuffle's; from off (or random), the original running
+     * order comes back after the song playing, the user's entries kept, as
+     * when Smart Shuffle is switched off.
+     */
+    fun stopMix() {
+        if (_mix.value == null) return
+        val previous = modeBeforeMix ?: ShuffleMode.SMART
+        endMix()
+        val restore = if (previous == ShuffleMode.JOURNEY) ShuffleMode.SMART else previous
+        if (restore != playback.playerState.value.shuffleMode) chooseShuffleMode(restore)
+    }
+
+    private fun endMix() {
+        _mix.value = null
+        modeBeforeMix = null
+    }
+
     // -- Journey (Sonic Adventure) ------------------------------------------------------
 
     /**
@@ -762,6 +859,7 @@ class SmartQueueManager @Inject constructor(
         )
         _journeyMood.value = mood
         journeyAnchorSongId = current.id
+        endMix()
         activate(ShuffleMode.JOURNEY)
         return true
     }
@@ -856,7 +954,43 @@ class SmartQueueManager @Inject constructor(
         // A computer's song playing has no vector: the batch follows the last library song
         // queued before it instead, or the random picks below fill in when there is none.
         val anchor = current.id.takeIf(::inLibrary) ?: prefixIds.lastOrNull(::inLibrary)
-        val plan = if (brain.available && anchor != null) {
+        val mixState = _mix.value
+        val mixPlan = if (mixState != null && brain.available && anchor != null) {
+            runCatching {
+                brain.prepare()
+                brain.mix(
+                    MixRequest(
+                        seedSongId = mixState.seedSongId,
+                        currentSongId = anchor!!,
+                        prefixIds = prefixIds.filter(::inLibrary),
+                        excludeIds = exclude,
+                        count = need,
+                        seed = random.nextLong(),
+                    ),
+                )
+            }.getOrDefault(QueuePlan.EMPTY).takeIf { it.songIds.isNotEmpty() }
+        } else {
+            null
+        }
+        if (mixPlan != null && mixState != null) {
+            _mix.value = _mix.value?.takeIf { it.seedSongId == mixState.seedSongId }
+                ?.copy(batches = mixState.batches + 1, lastReport = mixPlan.mix)
+            mixPlan.mix?.let { r ->
+                // Ids and timings only: no titles in the log.
+                brainLog.write(
+                    listOf(
+                        "MIX seed=${mixState.seedSongId} batch=${mixState.batches + 1} songs=${mixPlan.songIds.size} " +
+                            "candidates seed=${r.fromSeed} session=${r.fromSession} habits=${r.fromHabits} rare=${r.fromRare} " +
+                            "merged=${r.merged} gated=${r.gatedOut} new=${r.newPlaced}/${r.newCap} filled=${r.filled} " +
+                            "history=${"%.2f".format(r.historyConfidence)} session=${"%.2f".format(r.sessionConfidence)} " +
+                            "feedback=${r.feedbackEvents} ms=${"%.2f".format(r.elapsedMs)}",
+                    ),
+                )
+            }
+        }
+        val plan = if (mixPlan != null) {
+            mixPlan
+        } else if (brain.available && anchor != null) {
             runCatching {
                 brain.prepare()
                 brain.generate(

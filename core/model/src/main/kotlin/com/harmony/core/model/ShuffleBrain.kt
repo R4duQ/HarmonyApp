@@ -169,3 +169,40 @@ data class QueuedDecision(
     /** How closely the song matched the session's vibe, 0..100 (the cosine, mapped). */
     val vibeMatchPct: Int get() = Math.round(50f * (trace.cosineSimilarity + 1f)).coerceIn(0, 100)
 }
+
+/**
+ * "Mix din piesa asta": a radio from one song, built from the local library
+ * only. [seedSongId] stays the session's landmark until the mix is stopped.
+ */
+data class MixState(
+    val seedSongId: Long,
+    val seedTitle: String,
+    val seedArtist: String,
+    val startedAtMillis: Long,
+    /** Batches appended so far (each follows the feedback before it). */
+    val batches: Int = 0,
+    val lastReport: MixReport? = null,
+)
+
+/** What each stage of the last mix batch did (SmartShuffleEngine::RadioReport). */
+data class MixReport(
+    val fromSeed: Int,
+    val fromSession: Int,
+    val fromHabits: Int,
+    val fromRare: Int,
+    /** Candidates after the union, duplicates removed. */
+    val merged: Int,
+    /** Songs new to the listener turned away by the relevance gate. */
+    val gatedOut: Int,
+    val newPlaced: Int,
+    val newCap: Int,
+    /** Placed from outside the gate because nothing better was left. */
+    val filled: Int,
+    /** 0..1: how far the play record is trusted (little history: a mix by sound). */
+    val historyConfidence: Float,
+    /** 0..1: how far this session's feedback is trusted. */
+    val sessionConfidence: Float,
+    val seedMeasured: Boolean,
+    val elapsedMs: Float,
+    val feedbackEvents: Int,
+)
