@@ -1,8 +1,27 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **159**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 158), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **160**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 159), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 160 — Online mixes (experimental)
+
+- **"Mix from this song" can reach past your library.** With Settings › *Online mixes
+  (experimental)* on, the song playing is looked up on YouTube Music (no account), and its
+  radio suggests what comes next. A suggestion you already have plays from your library;
+  the others are downloaded as lossless FLAC through the download engine, checked, and
+  only then added to the queue.
+- **Three sources.** *Combined* (your library with about one online song in three),
+  *Online* (online first, your library filling in while songs are prepared) and *Offline*
+  (your library only; nothing is asked online). Off by default; downloads use Wi-Fi only
+  unless you allow mobile data.
+- **Careful matching.** Only songs are used, never videos, uploads or podcasts; live,
+  remix, sped-up, cover and karaoke versions are not mistaken for the original; when it
+  isn't sure, Harmony suggests nothing rather than the wrong song.
+- **Your queue stays yours.** Online songs only join at the end; what you queued, moved or
+  added twice stays where it is. The queue sheet shows each suggestion's state.
+- **Your downloads come first.** A download you start takes over at once from an online
+  mix preparing its next song.
 
 ## Build 159 — Steadier, safer downloads
 
