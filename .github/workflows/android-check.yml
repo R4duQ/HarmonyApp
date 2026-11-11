@@ -81,6 +81,17 @@ jobs:
             "ndk;${NDK_VERSION}" \
             "ndk;${MORNYE_NDK_VERSION}"
 
+      - name: Install host FFmpeg for Amazon finalizer tests
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y ffmpeg
+          fi
+          ffmpeg -version
+          echo "HARMONY_TEST_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+
       - name: Build pinned SpotiFLAC Go backend
         env:
           NDK_VERSION: ${{ env.NDK_VERSION }}
@@ -124,14 +135,7 @@ jobs:
           # ytmusicapi's own parsers still read the recorded answers as the committed outputs say.
           build/ytmusic-venv/bin/python -I scripts/ytmusic/expected_outputs.py domain/online/src/test/resources/ytmusic --check
 
-      - name: Install host FFmpeg for Amazon finalizer tests
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
       - name: Playback and download tests
-        env:
-          HARMONY_TEST_FFMPEG: /usr/bin/ffmpeg
         run: >-
           ./gradlew
           :playback:service:testReleaseUnitTest
