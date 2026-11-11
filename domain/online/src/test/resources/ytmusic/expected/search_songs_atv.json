@@ -1,0 +1,92 @@
+{
+ "ytmusicapi": "1.12.3",
+ "fixture": "derived/search_songs_atv.json",
+ "call": "search",
+ "results": [
+  {
+   "videoId": "aaaaaaaaa01",
+   "title": "Pe Drum",
+   "artists": [
+    "Subcarpați"
+   ],
+   "album": "Underground Folclor",
+   "albumId": "MPREb_derived01",
+   "duration_seconds": 222,
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isExplicit": false,
+   "isAvailable": true,
+   "year": null
+  },
+  {
+   "videoId": "aaaaaaaaa02",
+   "title": "Pe Drum (Live)",
+   "artists": [
+    "Subcarpați"
+   ],
+   "album": "Live la Arenele Romane",
+   "albumId": "MPREb_derived02",
+   "duration_seconds": 255,
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isExplicit": false,
+   "isAvailable": true,
+   "year": null
+  },
+  {
+   "videoId": "aaaaaaaaa03",
+   "title": "Pe Drum",
+   "artists": [
+    "Subcarpati",
+    "Surorile Osoianu"
+   ],
+   "album": "Pe Drum (Single)",
+   "albumId": "MPREb_derived03",
+   "duration_seconds": 223,
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isExplicit": false,
+   "isAvailable": true,
+   "year": null
+  },
+  {
+   "videoId": "aaaaaaaaa04",
+   "title": "Wonderwall",
+   "artists": [
+    "Oasis"
+   ],
+   "album": "(What's The Story) Morning Glory? (Remastered)",
+   "albumId": "MPREb_derived04",
+   "duration_seconds": 259,
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isExplicit": false,
+   "isAvailable": true,
+   "year": null
+  },
+  {
+   "videoId": "aaaaaaaaa05",
+   "title": "Drumul spre pace",
+   "artists": [
+    "SUBCARPAŢI"
+   ],
+   "album": "Satele noastre",
+   "albumId": "MPREb_derived05",
+   "duration_seconds": 238,
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isExplicit": true,
+   "isAvailable": true,
+   "year": null
+  },
+  {
+   "videoId": "aaaaaaaaa06",
+   "title": "Pe Drum (Sped Up)",
+   "artists": [
+    "Subcarpați"
+   ],
+   "album": null,
+   "albumId": null,
+   "duration_seconds": 171,
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isExplicit": false,
+   "isAvailable": false,
+   "year": null
+  }
+ ]
+}

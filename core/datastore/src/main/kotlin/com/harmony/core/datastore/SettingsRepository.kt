@@ -61,6 +61,16 @@ data class UserSettings(
     val userEqPresets: Map<String, List<Float>> = emptyMap(),
     /** Name of a SoulseekFormatPreference entry; kept as a String so :core:datastore stays feature-agnostic. */
     val soulseekFormatPreference: String = "FLAC_ONLY",
+    /**
+     * The feature flag of online mixes (YouTube Music + Mornye): off unless
+     * switched on. While off, "Mix din piesa asta" is the library's mix only
+     * and nothing is asked online.
+     */
+    val onlineMixEnabled: Boolean = false,
+    /** Name of a MixSource entry (OFFLINE, ONLINE, COMBINED); used only while [onlineMixEnabled]. */
+    val onlineMixSource: String = "COMBINED",
+    /** Whether online mixes may download over mobile data (metered networks); Wi-Fi only by default. */
+    val onlineMixOnMobileData: Boolean = false,
 )
 
 /**
@@ -95,6 +105,9 @@ class SettingsRepository @Inject constructor(
         val EQ_BIT_PERFECT_USB = booleanPreferencesKey("eq_bit_perfect_usb")
         val ENERGY = floatPreferencesKey("energy_slider") // -1 sentinel = off
         val SOULSEEK_FORMAT = stringPreferencesKey("soulseek_format_preference")
+        val ONLINE_MIX = booleanPreferencesKey("online_mix_enabled")
+        val ONLINE_MIX_SOURCE = stringPreferencesKey("online_mix_source")
+        val ONLINE_MIX_MOBILE = booleanPreferencesKey("online_mix_mobile_data")
         val SMART_SHUFFLE_STYLE = stringPreferencesKey("smart_shuffle_style_v2")
         val SMART_SHUFFLE_FAMILIARITY = floatPreferencesKey("smart_shuffle_familiarity_v2")
         val SMART_SHUFFLE_DISCOVERY = floatPreferencesKey("smart_shuffle_discovery_v2")
@@ -128,6 +141,9 @@ class SettingsRepository @Inject constructor(
             smartShuffleDiscovery = (p[Keys.SMART_SHUFFLE_DISCOVERY] ?: 0.45f).coerceIn(0f, 1f),
             smartShuffleVariety = (p[Keys.SMART_SHUFFLE_VARIETY] ?: 0.45f).coerceIn(0f, 1f),
             userEqPresets = decodePresets(p[Keys.EQ_USER_PRESETS]),
+            onlineMixEnabled = p[Keys.ONLINE_MIX] ?: false,
+            onlineMixSource = p[Keys.ONLINE_MIX_SOURCE] ?: "COMBINED",
+            onlineMixOnMobileData = p[Keys.ONLINE_MIX_MOBILE] ?: false,
         )
     }
 
@@ -190,6 +206,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setReplayGainMode(mode: ReplayGainMode) = edit { it[Keys.REPLAYGAIN] = mode.name }
     suspend fun setEnergySlider(value: Float?) = edit { it[Keys.ENERGY] = value ?: -1f }
     suspend fun setSoulseekFormatPreference(name: String) = edit { it[Keys.SOULSEEK_FORMAT] = name }
+    suspend fun setOnlineMixEnabled(on: Boolean) = edit { it[Keys.ONLINE_MIX] = on }
+    suspend fun setOnlineMixSource(name: String) = edit { it[Keys.ONLINE_MIX_SOURCE] = name }
+    suspend fun setOnlineMixOnMobileData(on: Boolean) = edit { it[Keys.ONLINE_MIX_MOBILE] = on }
     suspend fun setSmartShuffleStyle(style: String) = edit { it[Keys.SMART_SHUFFLE_STYLE] = style }
     suspend fun setSmartShuffleFamiliarity(value: Float) = edit {
         it[Keys.SMART_SHUFFLE_FAMILIARITY] = value.coerceIn(0f, 1f)

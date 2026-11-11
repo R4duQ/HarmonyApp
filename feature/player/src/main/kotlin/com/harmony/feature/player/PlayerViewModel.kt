@@ -262,6 +262,9 @@ class PlayerViewModel @Inject constructor(
 
     val mixAvailable: Boolean get() = queueManager.mixAvailable
 
+    /** The online side of the mix (when online mixes are on): the seed's status and each recommendation's stage. */
+    val onlineMix: StateFlow<com.harmony.domain.online.OnlineMixState> = queueManager.onlineMix
+
     /** "Mix from this song": a radio from the song playing. */
     fun onStartMix() {
         queueManager.startMix()

@@ -19,6 +19,7 @@ on:
       - 'gradle.properties'
       - 'vendor/**'
       - 'scripts/ci/**'
+      - 'scripts/ytmusic/**'
       - '.github/workflows/android-check.yml'
   workflow_dispatch:
 
@@ -112,6 +113,17 @@ jobs:
           ./build/shuffle-host/shuffle_test
           echo "HARMONY_SHUFFLE_HOST_LIB_DIR=$PWD/build/shuffle-host" >> "$GITHUB_ENV"
 
+      - name: YouTube Music conformance (ytmusicapi 1.12.3, pinned by hash)
+        run: |
+          set -euo pipefail
+          python3 -m venv build/ytmusic-venv
+          build/ytmusic-venv/bin/pip install --no-deps --require-hashes -r scripts/ytmusic/requirements.txt
+          # The derived fixtures are what the script makes from the real ones, nothing else.
+          build/ytmusic-venv/bin/python -I scripts/ytmusic/derive_fixtures.py domain/online/src/test/resources/ytmusic
+          git diff --exit-code -- domain/online/src/test/resources/ytmusic/derived
+          # ytmusicapi's own parsers still read the recorded answers as the committed outputs say.
+          build/ytmusic-venv/bin/python -I scripts/ytmusic/expected_outputs.py domain/online/src/test/resources/ytmusic --check
+
       - name: Install host FFmpeg for Amazon finalizer tests
         run: |
           sudo apt-get update
@@ -131,6 +143,7 @@ jobs:
           :core:dsp-native:testReleaseUnitTest
           :domain:playback:test
           :domain:shuffle:test
+          :domain:online:test
           :feature:player:testDebugUnitTest
           :data:shuffle:testReleaseUnitTest
           :feature:home:testReleaseUnitTest
@@ -150,6 +163,7 @@ jobs:
             core/remote/build/reports/tests/
             domain/playback/build/reports/tests/
             domain/shuffle/build/reports/tests/
+            domain/online/build/reports/tests/
             feature/player/build/reports/tests/
             data/shuffle/build/reports/tests/
             feature/home/build/reports/tests/

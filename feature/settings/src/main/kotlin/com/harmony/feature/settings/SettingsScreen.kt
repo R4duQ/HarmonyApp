@@ -116,6 +116,18 @@ class SettingsViewModel @Inject constructor(
     fun setDynamicColors(on: Boolean) = launch { settings.setDynamicColors(on) }
     fun setChargingOnly(on: Boolean) = launch { settings.setChargingOnlyAnalysis(on) }
     fun setExperimentalParallelDownloads(on: Boolean) = launch { settings.setExperimentalParallelDownloads(on) }
+    fun setOnlineMixEnabled(on: Boolean) = launch { settings.setOnlineMixEnabled(on) }
+    fun setOnlineMixOnMobileData(on: Boolean) = launch { settings.setOnlineMixOnMobileData(on) }
+
+    /** Combined → Online → Offline → Combined. */
+    fun cycleOnlineMixSource(current: String) = launch {
+        val next = when (current) {
+            "COMBINED" -> "ONLINE"
+            "ONLINE" -> "OFFLINE"
+            else -> "COMBINED"
+        }
+        settings.setOnlineMixSource(next)
+    }
     fun setKeepPlayingAfterSwipe(on: Boolean) = launch { settings.setKeepPlayingAfterSwipe(on) }
     fun setCrossfade(seconds: Int) = launch { settings.setCrossfadeSeconds(seconds) }
     fun setReplayGain(mode: ReplayGainMode) = launch { settings.setReplayGainMode(mode) }
@@ -457,6 +469,42 @@ fun SettingsScreen(
                 EditorialSwitch(state.experimentalParallelDownloads, viewModel::setExperimentalParallelDownloads, palette)
             },
         )
+
+        EditorialSettingRow(
+            title = "Online mixes (experimental)",
+            subtitle = "\"Mix from this song\" can add songs YouTube Music recommends, played from your " +
+                "library when you have them, otherwise prepared as lossless FLAC through the download engine. " +
+                "No account. Off by default",
+            palette = palette,
+            trailing = {
+                EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)
+            },
+        )
+
+        if (state.onlineMixEnabled) {
+            EditorialSettingRow(
+                title = "Mix source: " + when (state.onlineMixSource) {
+                    "ONLINE" -> "Online"
+                    "OFFLINE" -> "Offline"
+                    else -> "Combined"
+                },
+                subtitle = when (state.onlineMixSource) {
+                    "ONLINE" -> "Recommendations from YouTube Music; your library fills in while they are prepared"
+                    "OFFLINE" -> "Your library only. Nothing is asked online"
+                    else -> "Your library's mix with about one online song in three"
+                } + ". Tap to change",
+                palette = palette,
+                onClick = { viewModel.cycleOnlineMixSource(state.onlineMixSource) },
+            )
+            EditorialSettingRow(
+                title = "Prepare online songs on mobile data",
+                subtitle = "Off: online songs are downloaded over Wi-Fi only",
+                palette = palette,
+                trailing = {
+                    EditorialSwitch(state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData, palette)
+                },
+            )
+        }
 
         EditorialSettingRow(
             title = "Edit tags",

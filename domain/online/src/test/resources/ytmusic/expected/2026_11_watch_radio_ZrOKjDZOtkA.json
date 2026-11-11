@@ -1,0 +1,127 @@
+{
+ "ytmusicapi": "1.12.3",
+ "fixture": "real/2026_11_watch_radio_ZrOKjDZOtkA.json",
+ "call": "watch",
+ "results": [
+  {
+   "videoId": "ZrOKjDZOtkA",
+   "title": "Wonderwall (Remastered)",
+   "length": "4:19",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Oasis - Topic"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "0wPhbmeNSOs",
+   "title": "Adele - Lovesong (Lyric Video)",
+   "length": "5:20",
+   "videoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE",
+   "artists": [
+    "21"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "dLl4PZtxia8",
+   "title": "Eagles - Hotel California (Official Audio)",
+   "length": "6:32",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Eagles"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "7jCbb5_rlA4",
+   "title": "Mac Miller - Cinderella (Lyrics) ft. Ty Dolla $ign",
+   "length": "5:30",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "SLOWED"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "W_khM4pEsQo",
+   "title": "Ellie Goulding - Love Me Like You Do (Lyrics) | One Direction,",
+   "length": "8:01",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Skyfall Rhythms"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "SMat4cZv7xw",
+   "title": "Akon - Smack That (Lyrics) ft. Eminem",
+   "length": "3:34",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Coffee Lyrics7"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "0wPhbmeNSOs",
+   "title": "Adele - Lovesong (Lyric Video)",
+   "length": "5:20",
+   "videoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE",
+   "artists": [
+    "21"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "dLl4PZtxia8",
+   "title": "Eagles - Hotel California (Official Audio)",
+   "length": "6:32",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Eagles"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "7jCbb5_rlA4",
+   "title": "Mac Miller - Cinderella (Lyrics) ft. Ty Dolla $ign",
+   "length": "5:30",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "SLOWED"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "W_khM4pEsQo",
+   "title": "Ellie Goulding - Love Me Like You Do (Lyrics) | One Direction,",
+   "length": "8:01",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Skyfall Rhythms"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  }
+ ]
+}

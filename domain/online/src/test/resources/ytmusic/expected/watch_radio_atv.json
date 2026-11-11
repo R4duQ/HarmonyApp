@@ -1,0 +1,81 @@
+{
+ "ytmusicapi": "1.12.3",
+ "fixture": "derived/watch_radio_atv.json",
+ "call": "watch",
+ "results": [
+  {
+   "videoId": "bbbbbbbbb01",
+   "title": "Pe Drum",
+   "length": "3:42",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "artists": [
+    "Subcarpați"
+   ],
+   "album": "Underground Folclor",
+   "albumId": "MPREb_derived01",
+   "year": "2016"
+  },
+  {
+   "videoId": "bbbbbbbbb02",
+   "title": "Scrisoare din trecut",
+   "length": "4:01",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "artists": [
+    "Subcarpați"
+   ],
+   "album": "Aripi de lumină",
+   "albumId": "MPREb_derived06",
+   "year": "2018"
+  },
+  {
+   "videoId": "bbbbbbbbb03",
+   "title": "da-i volum!",
+   "length": "2:58",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "artists": [
+    "raku"
+   ],
+   "album": "da-i volum!",
+   "albumId": "MPREb_derived07",
+   "year": "2021"
+  },
+  {
+   "videoId": "bbbbbbbbb04",
+   "title": "Flori Ilegale",
+   "length": "3:35",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "artists": [
+    "Guess Who"
+   ],
+   "album": "Tot ce am",
+   "albumId": "MPREb_derived08",
+   "year": "2019"
+  },
+  {
+   "videoId": "bbbbbbbbb05",
+   "title": "Azi",
+   "length": "3:20",
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "artists": [
+    "Deliric",
+    "Silent Strike",
+    "EMAA"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "bbbbbbbbb07",
+   "title": "Povești despre noroc și ghinion",
+   "length": "3:12",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "artists": [
+    "Chimie"
+   ],
+   "album": "Chimie",
+   "albumId": "MPREb_derived10",
+   "year": "2017"
+  }
+ ]
+}

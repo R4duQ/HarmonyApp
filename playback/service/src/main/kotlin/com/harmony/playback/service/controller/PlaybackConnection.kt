@@ -20,6 +20,7 @@ import com.harmony.core.model.Song
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.QueueRestoration
 import com.harmony.domain.playback.QueueShadow
+import com.harmony.domain.playback.OnlineSongs
 import com.harmony.domain.playback.RemoteSongs
 import com.harmony.domain.library.repository.ListeningClock
 import com.harmony.playback.service.PlaybackService
@@ -463,14 +464,23 @@ class PlaybackConnection @Inject constructor(
     private fun syncState() {
         val c = controller ?: return
         val ids = (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
-        // A computer's songs aren't in the library: their entries say what they are.
+        // A computer's songs and online recommendations aren't in the library: their entries say what they are.
         ids.forEachIndexed { i, id ->
             if (id !in songCache && RemoteSongs.isRemoteKey(id)) {
                 val md = c.getMediaItemAt(i).mediaMetadata
                 songCache[id] = RemoteSongs.song(id, md.title?.toString() ?: "", md.artist?.toString() ?: "", md.albumTitle?.toString() ?: "", md.durationMs ?: 0L)
             }
+            if (id !in songCache && OnlineSongs.isOnlineKey(id)) {
+                val videoId = OnlineSongs.videoIdOf(id)
+                if (videoId != null) {
+                    val md = c.getMediaItemAt(i).mediaMetadata
+                    // The prepared file is where the online cache keeps it (a rebuilt queue has no other address).
+                    val uri = "file://" + OnlineSongs.fileFor(context.cacheDir, videoId).path
+                    songCache[id] = OnlineSongs.song(videoId, uri, md.title?.toString() ?: "", md.artist?.toString() ?: "", md.albumTitle?.toString() ?: "", md.durationMs ?: 0L)
+                }
+            }
         }
-        resolveMissing(ids.filterNot(RemoteSongs::isRemoteKey))
+        resolveMissing(ids.filterNot { RemoteSongs.isRemoteKey(it) || OnlineSongs.isOnlineKey(it) })
         val queue = ids.mapNotNull(songCache::get)
         val known = shadow.align(ids)
         // Beside [queue], so without the songs it can't show yet.
@@ -808,8 +818,8 @@ class PlaybackConnection @Inject constructor(
         return controller?.takeIf { it.isConnected }
     }
 
-    /** The player's media id of [song]: its library id, or for a computer's song its content key. */
-    private fun mediaIdFor(song: Song): String = RemoteSongs.keyOf(song.uri) ?: song.id.toString()
+    /** The player's media id of [song]: its library id, or for a computer's song or an online one its key. */
+    private fun mediaIdFor(song: Song): String = RemoteSongs.keyOf(song.uri) ?: OnlineSongs.keyOf(song.uri) ?: song.id.toString()
 
     /** The media id of the song whose id is [songId] (a computer's song is known by its key). */
     private fun mediaIdOf(songId: Long): String =

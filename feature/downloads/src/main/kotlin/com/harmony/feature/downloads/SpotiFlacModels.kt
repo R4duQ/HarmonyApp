@@ -8,6 +8,8 @@ enum class SpotiFlacRequestOwner {
     PLAYLIST_TRANSFER,
     ALBUM_DOWNLOAD,
     DISCOVERY_DOWNLOAD,
+    /** An online mix preparing its next recommendation, in the background; it gives way to the user's downloads. */
+    ONLINE_MIX,
 }
 
 

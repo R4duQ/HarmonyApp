@@ -235,6 +235,13 @@ class SpotiFlacDownloadEngine @Inject constructor(
         onProgress: (SpotiFlacTransferProgress) -> Unit,
     ): SpotiFlacDownloadedFile {
         val albumWork = requestOwner in ALBUM_OWNERS
+        if (requestOwner == SpotiFlacRequestOwner.ONLINE_MIX) {
+            // In the background: only when the engine is free, and a download the user starts takes it over.
+            return DownloadEngineGate.runInBackground {
+                adoptProviderUpdate()
+                downloadExclusive(track, outputFormat, requestOwner, onProgress)
+            }
+        }
         return DownloadEngineGate.run(albumWork, parallel = if (albumWork) parallelDownloads else 1) {
             adoptProviderUpdate()
             downloadExclusive(track, outputFormat, requestOwner, onProgress)
@@ -518,7 +525,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
      * has (see [StagingLeases]), not while it may still be writing them.
      */
     fun cancelCurrentDownload() {
-        activeTransfers.values.filter { it.owner !in ALBUM_OWNERS }.forEach { transfer ->
+        activeTransfers.values.filter { it.owner !in ALBUM_OWNERS && it.owner != SpotiFlacRequestOwner.ONLINE_MIX }.forEach { transfer ->
             transfer.cancelledByUser = true
             nativeControlExecutor.execute { runCatching { backend.cancelDownload(transfer.itemId) } }
         }

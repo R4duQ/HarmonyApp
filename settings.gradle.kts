@@ -45,6 +45,8 @@ include(":domain:similarity")
 include(":data:similarity")
 include(":data:shuffle")
 include(":domain:shuffle")
+// Online recommendations (YouTube Music identification and radio), pure Kotlin.
+include(":domain:online")
 include(":domain:swipe")
 include(":core:datastore")
 include(":core:ui")
