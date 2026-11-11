@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_SOURCE_SHA: '67d0ed11f43b3d74ca8781c82c254aa3dd5691b6'
+  APP_SOURCE_SHA: '66957ed23c5e0f2380e042b2df6f7a5626921124'
   JAVA_VERSION: '17'
   GO_VERSION: '1.26.6'
   ANDROID_API_LEVEL: '35'
@@ -107,21 +107,28 @@ jobs:
       - name: Require passing CI and merged source
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_CI_RUN: '43055842768'
+          EXPECTED_CI_RUN: '43059671031'
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 120); do
-            pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/75")
+          api() {
+            for pause in 1 2 4 8 16; do
+              if gh api "$@"; then return 0; fi
+              sleep "$pause"
+            done
+            return 1
+          }
+          for attempt in $(seq 1 360); do
+            if ! pr=$(api "repos/$GITHUB_REPOSITORY/pulls/75"); then sleep 10; continue; fi
             test "$(jq -r '.head.sha' <<< "$pr")" = "$APP_SOURCE_SHA"
-            verdict=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EXPECTED_CI_RUN" --jq '.conclusion // ""')
+            if ! verdict=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$EXPECTED_CI_RUN" --jq '.conclusion // ""'); then sleep 10; continue; fi
             if [[ -n "$verdict" && "$verdict" != "success" ]]; then
               echo "Required Android check did not pass: $verdict"
               exit 1
             fi
             if [[ "$verdict" == "success" && "$(jq -r '.merged' <<< "$pr")" == "true" ]]; then
               merge_sha=$(jq -r '.merge_commit_sha' <<< "$pr")
-              merged_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$merge_sha" --jq '.tree.sha')
+              if ! merged_tree=$(api "repos/$GITHUB_REPOSITORY/git/commits/$merge_sha" --jq '.tree.sha'); then sleep 10; continue; fi
               test "$merged_tree" = "$(git rev-parse 'HEAD^{tree}')"
               echo "Approved merged source $merge_sha has the tested tree $merged_tree"
               exit 0
