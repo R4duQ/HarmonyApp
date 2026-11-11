@@ -81,16 +81,18 @@ jobs:
             "ndk;${NDK_VERSION}" \
             "ndk;${MORNYE_NDK_VERSION}"
 
-      - name: Install host FFmpeg for Amazon finalizer tests
+      - name: Install pinned host FFmpeg for Amazon finalizer tests
         timeout-minutes: 5
         run: |
           set -euo pipefail
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
-            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y ffmpeg
-          fi
-          ffmpeg -version
-          echo "HARMONY_TEST_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+          # The Linux wheel carries a static FFmpeg binary. Its hash is published by PyPI:
+          # https://pypi.org/project/imageio-ffmpeg/0.6.0/#files
+          python3 -m venv "$RUNNER_TEMP/host-ffmpeg"
+          echo "imageio-ffmpeg==0.6.0 --hash=sha256:c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282" > "$RUNNER_TEMP/host-ffmpeg.txt"
+          "$RUNNER_TEMP/host-ffmpeg/bin/pip" install --only-binary=:all: --no-deps --require-hashes --retries 3 --timeout 20 -r "$RUNNER_TEMP/host-ffmpeg.txt"
+          FFMPEG=$("$RUNNER_TEMP/host-ffmpeg/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')
+          "$FFMPEG" -version
+          echo "HARMONY_TEST_FFMPEG=$FFMPEG" >> "$GITHUB_ENV"
 
       - name: Build pinned SpotiFLAC Go backend
         env:
