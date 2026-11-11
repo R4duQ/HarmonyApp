@@ -38,6 +38,8 @@ dependencies {
     // the track appears without a manual rescan.
     implementation(projects.domain.library)
     implementation(projects.domain.playback)
+    // Online mixes: the preparer behind CandidatePreparer.
+    implementation(projects.domain.online)
     // "Send to phone": the transfer protocol shared with the Windows app.
     implementation(projects.core.remote)
     implementation(projects.core.model)

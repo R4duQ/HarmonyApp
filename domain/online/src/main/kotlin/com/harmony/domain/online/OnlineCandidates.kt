@@ -1,16 +1,6 @@
 package com.harmony.domain.online
 
-/** Which sources "Mix din piesa asta" draws from. */
-enum class MixSource {
-    /** The library and its 24-D mix only. No request leaves the phone. */
-    OFFLINE,
-
-    /** Songs found through YouTube Music and prepared through Mornye (the library's copy when it has one). */
-    ONLINE,
-
-    /** Both: the library's mix with online songs among it; a recording the library has plays from there. */
-    COMBINED,
-}
+import com.harmony.core.model.MixSource
 
 /**
  * One running mix, as the queue manager started it. Results of a request

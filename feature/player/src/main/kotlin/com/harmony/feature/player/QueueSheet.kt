@@ -55,7 +55,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.harmony.core.model.MixSource
 import com.harmony.core.model.MixState
+import com.harmony.domain.online.CandidateStage
+import com.harmony.domain.online.CatalogFailure
+import com.harmony.domain.online.MatchVerdict
+import com.harmony.domain.online.OnlineCandidate
+import com.harmony.domain.online.OnlineMixState
+import com.harmony.domain.online.SeedStatus
 import com.harmony.core.model.PlayerState
 import com.harmony.core.ui.component.Artwork
 import com.harmony.core.ui.component.formatDuration
@@ -114,7 +121,9 @@ import com.harmony.core.ui.component.formatDuration
 fun QueueSheet(viewModel: PlayerViewModel) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     val mix by viewModel.mix.collectAsStateWithLifecycle()
+    val online by viewModel.onlineMix.collectAsStateWithLifecycle()
     QueueSheetContent(
+        online = online,
         state = state,
         onPlay = viewModel::onQueueItemClick,
         onRemove = viewModel::onRemoveQueueItem,
@@ -141,6 +150,7 @@ internal fun QueueSheetContent(
     mixAvailable: Boolean = false,
     onStartMix: () -> Unit = {},
     onStopMix: () -> Unit = {},
+    online: OnlineMixState = OnlineMixState(),
 ) {
     val listState = rememberLazyListState()
     val palette = playerPalette()
@@ -241,6 +251,9 @@ internal fun QueueSheetContent(
         val canMix = mixAvailable && nowPlaying != null && nowPlaying.id >= 0
         if (mix != null || canMix) {
             MixBar(mix = mix, palette = palette, onStart = onStartMix, onStop = onStopMix)
+        }
+        if (mix != null && mix.source != MixSource.OFFLINE) {
+            OnlineMixPanel(online, palette)
         }
 
         if (upcoming.isEmpty()) {
@@ -517,7 +530,12 @@ private fun MixBar(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (mix != null) "From your library · learns from skips" else "A radio from your library, offline",
+                when {
+                    mix == null -> "A radio from your library"
+                    mix.source == MixSource.ONLINE -> "YouTube Music recommendations · learns from skips"
+                    mix.source == MixSource.COMBINED -> "Your library + YouTube Music · learns from skips"
+                    else -> "From your library · learns from skips"
+                },
                 fontSize = 11.5.sp,
                 lineHeight = 15.sp,
                 color = palette.muted,
@@ -540,6 +558,79 @@ private fun MixBar(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
+}
+
+/**
+ * The online side of a running mix: whether the song playing was found on
+ * YouTube Music, then each recommendation and where it stands (in the
+ * library, being prepared, ready, or why not). A recommendation joins the
+ * queue only once it is ready.
+ */
+@Composable
+private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette) {
+    val seedLine = when (val seed = online.seed) {
+        SeedStatus.Idle, SeedStatus.Identifying -> "Finding this song on YouTube Music…"
+        is SeedStatus.Identified -> "Found on YouTube Music"
+        is SeedStatus.NotIdentified -> when (seed.verdict) {
+            MatchVerdict.AMBIGUOUS -> "Several recordings match on YouTube Music: none chosen"
+            MatchVerdict.UNCERTAIN -> "Not sure which YouTube Music song this is: none chosen"
+            else -> if (seed.songsSeen == 0) "No songs on YouTube Music from this network" else "Not found on YouTube Music"
+        } + " · your library plays on"
+        is SeedStatus.Failed -> "YouTube Music: " + when (val f = seed.failure) {
+            CatalogFailure.Offline -> "no connection"
+            CatalogFailure.Timeout -> "no answer in time"
+            is CatalogFailure.RateLimited -> "asked to wait"
+            is CatalogFailure.Http -> "error ${f.status}"
+            is CatalogFailure.SchemaChanged -> "answer not understood (needs an update)"
+            CatalogFailure.Disabled -> "off"
+        } + " · your library plays on"
+    }
+    val shown = online.candidates.filter { it.stage != CandidateStage.QUEUED }.take(5)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(palette.control)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(seedLine, fontSize = 11.5.sp, lineHeight = 15.sp, color = palette.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        shown.forEach { c ->
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    c.track.title + " · " + c.track.artist,
+                    fontSize = 12.5.sp,
+                    lineHeight = 16.sp,
+                    color = palette.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    stageLabel(c),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = if (c.ready) palette.accent else palette.muted,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun stageLabel(c: OnlineCandidate): String = when (c.stage) {
+    CandidateStage.FOUND -> "Waiting"
+    CandidateStage.IN_LIBRARY -> "In your library"
+    CandidateStage.PREPARING -> "Preparing" + (c.progress?.let { " ${(it * 100).toInt()}%" } ?: "…")
+    CandidateStage.READY -> "Ready" + (c.detail?.let { " · $it" } ?: "")
+    CandidateStage.QUEUED -> "In the queue"
+    CandidateStage.NOT_AVAILABLE -> "Not available lossless"
+    CandidateStage.NOT_VERIFIED -> "Not verified" + (c.detail?.let { " · $it" } ?: "")
+    CandidateStage.RETRY_LATER -> if (c.retryAtMillis != null) "Retrying soon" else "Gave up"
+    CandidateStage.REJECTED_AUDIO -> "Rejected" + (c.detail?.let { " · $it" } ?: "")
+    CandidateStage.HELD -> "Waiting" + (c.detail?.let { " · $it" } ?: "")
+    CandidateStage.DROPPED -> "Skipped artist"
 }
 
 @Composable

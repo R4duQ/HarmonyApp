@@ -83,7 +83,7 @@ class HomeViewModelTest {
 
     private fun vm(): HomeViewModel {
         val brain = fake<ShuffleBrain> { name, _ -> if (name == "getAvailable") false else error("unexpected $name") }
-        val queueManager = SmartQueueManager(playback, brain, library, historyRepo, ShuffleBrainLog.NONE)
+        val queueManager = SmartQueueManager(playback, brain, library, historyRepo, ShuffleBrainLog.NONE, com.harmony.domain.online.OnlineMixFeed.NONE)
         return HomeViewModel(library, playlistRepo, historyRepo, playback, StartSmartMixUseCase(playback, library, queueManager))
     }
 

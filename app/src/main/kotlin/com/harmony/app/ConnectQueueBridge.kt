@@ -13,6 +13,7 @@ import com.harmony.core.remote.queue.QueueMirror
 import com.harmony.core.remote.queue.QueuePlayer
 import com.harmony.core.remote.queue.QueueReplica
 import com.harmony.domain.playback.PlaybackController
+import com.harmony.domain.playback.OnlineSongs
 import com.harmony.domain.playback.RemoteSongs
 import com.harmony.playback.service.connect.RemoteMedia
 import com.harmony.domain.shuffle.SmartQueueManager
@@ -129,9 +130,16 @@ class ConnectQueueBridge @Inject constructor(
         }
     }
 
-    /** The song id in a content key made by [items] ("dev:<device>:<song id>"), or of a computer's song. */
-    private fun songOf(mediaKey: String): Long =
-        if (RemoteSongs.isRemoteKey(mediaKey)) RemoteSongs.idFor(mediaKey) else mediaKey.substringAfterLast(':').toLongOrNull() ?: Long.MIN_VALUE
+    /**
+     * The song id in a content key made by [items] ("dev:<device>:<song id>",
+     * "dev:<device>:ytm:<video id>" for an online recommendation), or of a
+     * computer's song.
+     */
+    private fun songOf(mediaKey: String): Long = when {
+        RemoteSongs.isRemoteKey(mediaKey) -> RemoteSongs.idFor(mediaKey)
+        ":${OnlineSongs.KEY_PREFIX}" in mediaKey -> OnlineSongs.idFor(OnlineSongs.KEY_PREFIX + mediaKey.substringAfterLast(':'))
+        else -> mediaKey.substringAfterLast(':').toLongOrNull() ?: Long.MIN_VALUE
+    }
 
     /**
      * The phone's queue as the mirror sees it: each entry with the player's own
@@ -156,12 +164,15 @@ class ConnectQueueBridge @Inject constructor(
                 else -> Origin.LIST
             }
             val remote = RemoteSongs.keyOf(song.uri)
+            // An online recommendation is the phone's, named by its player media id
+            // ("ytm:<video id>"), as ConnectSession names what the phone plays.
+            val phoneId = OnlineSongs.keyOf(song.uri) ?: song.id.toString()
             MirrorItem(
                 // A computer's song as that computer named it; the phone's own by device and id.
                 MediaRef(
-                    contentKey = remote ?: "dev:$device:${song.id}",
+                    contentKey = remote ?: "dev:$device:$phoneId",
                     home = remote?.let(RemoteSongs::homeOf) ?: device,
-                    localId = remote?.let(RemoteSongs::localIdOf) ?: song.id.toString(),
+                    localId = remote?.let(RemoteSongs::localIdOf) ?: phoneId,
                     title = song.title,
                     artist = song.artist,
                     album = song.album,

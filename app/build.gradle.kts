@@ -176,6 +176,7 @@ dependencies {
     implementation(projects.data.shuffle)
     implementation(projects.domain.similarity)
     implementation(projects.domain.shuffle)
+    implementation(projects.domain.online)
     implementation(projects.sync.analysisWorker)
     implementation(projects.core.database)
     implementation(projects.core.media)

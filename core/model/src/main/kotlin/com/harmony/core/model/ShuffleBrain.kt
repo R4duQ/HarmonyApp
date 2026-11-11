@@ -170,15 +170,32 @@ data class QueuedDecision(
     val vibeMatchPct: Int get() = Math.round(50f * (trace.cosineSimilarity + 1f)).coerceIn(0, 100)
 }
 
+/** Which sources "Mix din piesa asta" draws from. */
+enum class MixSource {
+    /** The library and its 24-D mix only. No request leaves the phone. */
+    OFFLINE,
+
+    /** Songs found through YouTube Music and prepared through Mornye (the library's copy when it has one). */
+    ONLINE,
+
+    /** Both: the library's mix with online songs among it; a recording the library has plays from there. */
+    COMBINED,
+}
+
 /**
- * "Mix din piesa asta": a radio from one song, built from the local library
- * only. [seedSongId] stays the session's landmark until the mix is stopped.
+ * "Mix din piesa asta": a radio from one song. [seedSongId] stays the
+ * session's landmark until the mix is stopped. With [source] OFFLINE (the
+ * default, and the only one while online mixes are switched off) it is
+ * built from the local library only.
  */
 data class MixState(
     val seedSongId: Long,
     val seedTitle: String,
     val seedArtist: String,
     val startedAtMillis: Long,
+    val source: MixSource = MixSource.OFFLINE,
+    /** Which start of a mix this is: results of an earlier one carry another number and are ignored. */
+    val generation: Long = 0,
     /** Batches appended so far (each follows the feedback before it). */
     val batches: Int = 0,
     val lastReport: MixReport? = null,

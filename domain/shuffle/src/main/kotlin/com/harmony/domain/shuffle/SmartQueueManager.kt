@@ -1,5 +1,6 @@
 package com.harmony.domain.shuffle
 
+import com.harmony.core.model.MixSource
 import com.harmony.core.model.MixState
 import com.harmony.core.model.MoodFilter
 import com.harmony.core.model.PlayerState
@@ -10,8 +11,15 @@ import com.harmony.core.model.SessionEvent
 import com.harmony.core.model.ShuffleBrainTelemetry
 import com.harmony.core.model.ShuffleMode
 import com.harmony.core.model.Song
+import com.harmony.domain.library.discovery.TrackIdentity
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.library.repository.PlaybackHistoryRepository
+import com.harmony.domain.online.MixSessionKey
+import com.harmony.domain.online.OnlineMixFeed
+import com.harmony.domain.online.OnlineMixState
+import com.harmony.domain.online.ReadyPick
+import com.harmony.domain.online.SeedTrack
+import com.harmony.domain.playback.OnlineSongs
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.shuffle.brain.MixRequest
@@ -92,6 +100,18 @@ import kotlin.random.Random
  * to come. Starting a new list, choosing another shuffle mode or a journey
  * ends the mix.
  *
+ * **Online mixes** ([preferredMixSource] ONLINE or COMBINED, off by
+ * default). The mix also asks [online] for recommendations from YouTube
+ * Music, each played from the library when it has the recording or from a
+ * file prepared through Mornye. They only ever join the queue as new
+ * automatic entries at its end (never moving, replacing or removing
+ * anything), and only those of the mix running: each start of a mix has its
+ * own [MixSessionKey], and picks of another one are never taken. While an
+ * online mix runs the lookahead is shorter ([ONLINE_QUEUE_TARGET]), so a
+ * prepared recommendation is heard within a few songs. COMBINED: about one
+ * song in three is online. ONLINE: online songs first, the library's mix
+ * filling what is not ready yet, so playback never waits on the network.
+ *
  * **Telemetry.** [telemetry] carries S_t, the last audit and the reason for
  * every upcoming pick, for ShuffleBrainDebugOverlay; each queue update is
  * also written to Logcat as a table (tag SHUFFLE_BRAIN).
@@ -103,6 +123,7 @@ class SmartQueueManager @Inject constructor(
     private val library: LibraryRepository,
     private val history: PlaybackHistoryRepository,
     private val brainLog: ShuffleBrainLog,
+    private val online: OnlineMixFeed,
 ) {
     private val _config = MutableStateFlow(ShuffleConfig())
     val config: StateFlow<ShuffleConfig> = _config
@@ -119,11 +140,26 @@ class SmartQueueManager @Inject constructor(
     /** The running "Mix din piesa asta", or null. */
     val mix: StateFlow<MixState?> = _mix.asStateFlow()
 
+    /** The online side of the running mix: the seed's identification and each recommendation's stage. */
+    val onlineMix: StateFlow<OnlineMixState> get() = online.state
+
     /** Whether a mix can be started (the native engine is loaded). */
     val mixAvailable: Boolean get() = brain.available
 
     /** The shuffle mode before the mix started: [stopMix] goes back to it. */
     private var modeBeforeMix: ShuffleMode? = null
+
+    /**
+     * Where a mix started now draws from (Settings: OFFLINE unless online
+     * mixes are switched on). A mix already running keeps its own source.
+     */
+    @Volatile var preferredMixSource: MixSource = MixSource.OFFLINE
+
+    /** Counts the starts of a mix, so each has its own [MixSessionKey]. */
+    private var mixGeneration = 0L
+
+    /** The online picks in the queue: song id → YouTube video id (for the skip feedback). */
+    private val onlinePicks = HashMap<Long, String>()
 
     private val _telemetry = MutableStateFlow(ShuffleBrainTelemetry(engineAvailable = brain.available))
 
@@ -297,6 +333,10 @@ class SmartQueueManager @Inject constructor(
             // A Bluetooth/notification shuffle button: the same as the app's own.
             playback.externalShuffleRequests.collect { toggleShuffle() }
         }
+        scope.launch {
+            // An online pick became ready: it joins the end of the queue (see onOnlineReady).
+            online.readyChanged.collect { onOnlineReady(it) }
+        }
     }
 
     /** Everything a change of the player's state can call for, in order. */
@@ -374,6 +414,9 @@ class SmartQueueManager @Inject constructor(
      */
     private suspend fun onPlayOutcome(outcome: PlayOutcome) {
         if (outcome.movedBackward) return
+        val mix = _mix.value
+        val videoId = onlinePicks[outcome.songId]
+        if (mix != null && videoId != null && outcome.fraction < FAST_SKIP_FRACTION) online.onFastSkip(sessionKey(mix), videoId)
         val event = mutex.withLock {
             runCatching {
                 brain.onPlaybackOutcome(
@@ -422,7 +465,7 @@ class SmartQueueManager @Inject constructor(
         if (replaced.isEmpty()) return@withLock
         val kept = tail.filterNot(freePick).map { state.queue[it] }
         val prefixIds = state.queue.subList(index + 1, from).map { it.id } + kept.map { it.id }
-        val need = (QUEUE_TARGET - prefixIds.size).coerceAtLeast(0)
+        val need = (queueTarget() - prefixIds.size).coerceAtLeast(0)
         val exclude = buildExcludeSet(state.queue.subList(0, from).map { it.id } + kept.map { it.id }).toMutableSet()
         val (picks, plan) = pickSongs(current, prefixIds, need, exclude, replacedTail = emptyList())
         replaced.forEach(generated::remove)
@@ -782,18 +825,24 @@ class SmartQueueManager @Inject constructor(
      * entries stay where they are. Starting again on another song moves the
      * mix to it. Returns false when there is nothing to start from.
      */
-    fun startMix(): Boolean {
+    fun startMix(source: MixSource = preferredMixSource): Boolean {
         val scope = managerScope ?: return false
         val state = playback.playerState.value
         val seed = state.currentSong?.takeIf { inLibrary(it.id) } ?: return false
         if (_journey.value != null) finishJourney(revertToSmart = false)
         if (_mix.value == null) modeBeforeMix = state.shuffleMode
-        _mix.value = MixState(
+        val mixState = MixState(
             seedSongId = seed.id,
             seedTitle = seed.title,
             seedArtist = seed.artist,
             startedAtMillis = System.currentTimeMillis(),
+            source = source,
+            generation = ++mixGeneration,
         )
+        _mix.value = mixState
+        onlinePicks.clear()
+        // The online side starts from the same seed; with OFFLINE it makes no request at all.
+        online.start(sessionKey(mixState), source, SeedTrack(seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs), ::avoidKeys)
         reRankJob?.cancel()
         // As in activate: the guard goes up before the mode changes, so the
         // top-up can't append to the old queue in between.
@@ -838,8 +887,91 @@ class SmartQueueManager @Inject constructor(
     }
 
     private fun endMix() {
+        if (_mix.value != null) online.stop()
         _mix.value = null
         modeBeforeMix = null
+        onlinePicks.clear()
+    }
+
+    private fun sessionKey(mix: MixState) = MixSessionKey(mix.seedSongId, mix.startedAtMillis, mix.generation)
+
+    /** True while a mix with online songs runs. */
+    private fun onlineMixRunning(): Boolean = _mix.value?.source.let { it != null && it != MixSource.OFFLINE }
+
+    private fun queueTarget() = if (onlineMixRunning()) ONLINE_QUEUE_TARGET else QUEUE_TARGET
+
+    /**
+     * What must not come again automatically, as recordings (so a library
+     * song and its online copy count as one): the queue as it is and the
+     * recent plays. The user's own duplicates stay in the queue; nothing
+     * automatic is added on top of them.
+     */
+    private suspend fun avoidKeys(): Set<String> {
+        val queue = playback.playerState.value.queue
+        val recent = runCatching { library.songsByIds(history.recentSongIds(_config.value.recentWindowMillis).toList()) }.getOrDefault(emptyList())
+        return (queue + recent).mapTo(HashSet()) { TrackIdentity.of(it.title, it.artist, it.durationMs).key }
+    }
+
+    /**
+     * Online picks of [mix] ready now, up to [max], as the queue's songs: the
+     * library's song when it has the recording, the prepared file otherwise.
+     * A pick already in [exclude] (queued, recent) is not added again.
+     */
+    private suspend fun takeOnlinePicks(mix: MixState, max: Int, prefixIds: List<Long>, exclude: MutableSet<Long>): List<Song> {
+        if (mix.source == MixSource.OFFLINE || max <= 0) return emptyList()
+        val out = mutableListOf<Song>()
+        // A pick dropped as a repeat leaves its place to the next one ready (a few rounds at most).
+        var rounds = 0
+        while (out.size < max && rounds++ < MAX_ONLINE_ROUNDS) {
+            val picks = online.take(sessionKey(mix), max - out.size)
+            if (picks.isEmpty()) break
+            out += readySongs(picks, prefixIds, exclude)
+        }
+        return out
+    }
+
+    private suspend fun readySongs(picks: List<ReadyPick>, prefixIds: List<Long>, exclude: MutableSet<Long>): List<Song> {
+        val out = mutableListOf<Song>()
+        for (pick in picks) {
+            val song = when (pick) {
+                is ReadyPick.Local -> library.songById(pick.songId)
+                is ReadyPick.Prepared -> pick.candidate.track.let { t ->
+                    OnlineSongs.song(t.videoId, "file://" + pick.audio.path, t.title, t.artist, t.album.orEmpty(),
+                        pick.audio.durationMs, pick.audio.sampleRateHz, pick.audio.bitDepth)
+                }
+            } ?: continue
+            if (song.id in exclude || song.id in prefixIds) continue
+            exclude += song.id
+            onlinePicks[song.id] = pick.candidate.videoId
+            out += song
+        }
+        return out
+    }
+
+    /**
+     * An online pick of the running mix became ready. It joins the end of
+     * the queue at once when the queue is not already [ONLINE_EXTRA] past
+     * its target; otherwise it waits for the next top-up. Never for another
+     * mix's session, never outside Smart Shuffle, never while this manager
+     * is writing the queue.
+     */
+    private suspend fun onOnlineReady(key: MixSessionKey) {
+        val mix = _mix.value ?: return
+        if (sessionKey(mix) != key || isMutatingQueue) return
+        mutex.withLock {
+            val state = playback.playerState.value
+            val current = _mix.value ?: return
+            if (sessionKey(current) != key || state.shuffleMode != ShuffleMode.SMART || state.currentSong == null) return
+            val ahead = state.queue.size - state.queueIndex - 1
+            if (ahead >= queueTarget() + ONLINE_EXTRA) return
+            val exclude = buildExcludeSet(state.queue.map { it.id }).toMutableSet()
+            val songs = takeOnlinePicks(current, 1, state.queue.drop(state.queueIndex + 1).map { it.id }, exclude)
+            if (songs.isEmpty()) return
+            songs.forEach { generated.add(it.id) }
+            mutateQueue { playback.addToQueueAll(songs, QueueOrigin.AUTO) }
+            publish(lastEvent = null)
+            brainLog.write(listOf("MIX online seed=${current.seedSongId} appended=${songs.size} ahead=${ahead + songs.size}"))
+        }
     }
 
     // -- Journey (Sonic Adventure) ------------------------------------------------------
@@ -908,7 +1040,11 @@ class SmartQueueManager @Inject constructor(
 
     /** Appends picks at the very end when fewer than [REFILL_BELOW] are left ahead. Never reorders. */
     private suspend fun maybeTopUp(mode: ShuffleMode, queueIndex: Int, queueSize: Int) {
-        val refillBelow = if (mode == ShuffleMode.JOURNEY) JOURNEY_LOOKAHEAD else REFILL_BELOW
+        val refillBelow = when {
+            mode == ShuffleMode.JOURNEY -> JOURNEY_LOOKAHEAD
+            onlineMixRunning() -> ONLINE_REFILL_BELOW
+            else -> REFILL_BELOW
+        }
         if (queueSize - queueIndex - 1 >= refillBelow) return
         mutex.withLock {
             // Re-check under the lock; state (the mode included) may have moved while waiting.
@@ -928,7 +1064,7 @@ class SmartQueueManager @Inject constructor(
 
     /** One brain batch topping the queue up to [QUEUE_TARGET], appended at the end. */
     private suspend fun fillSmart(current: Song, prefix: List<Long>, ahead: Int, exclude: MutableSet<Long>) {
-        val need = QUEUE_TARGET - ahead
+        val need = queueTarget() - ahead
         if (need <= 0) return
         val (songs, plan) = pickSongs(current, prefix, need, exclude, replacedTail = emptyList())
         if (songs.isEmpty()) return
@@ -944,6 +1080,37 @@ class SmartQueueManager @Inject constructor(
      * Records why each was picked and remembers them as session picks.
      */
     private suspend fun pickSongs(
+        current: Song,
+        prefixIds: List<Long>,
+        need: Int,
+        exclude: MutableSet<Long>,
+        replacedTail: List<Long>,
+    ): Pair<List<Song>, QueuePlan> {
+        if (need <= 0) return emptyList<Song>() to QueuePlan.EMPTY
+        val mix = _mix.value
+        if (mix == null || mix.source == MixSource.OFFLINE) return pickLocal(current, prefixIds, need, exclude, replacedTail)
+        // Online picks ready now; the library's mix fills the rest, so playback never waits.
+        val onlineMax = if (mix.source == MixSource.ONLINE) need else maxOf(1, need / 3)
+        val fromOnline = takeOnlinePicks(mix, onlineMax, prefixIds, exclude)
+        val (local, plan) = pickLocal(current, prefixIds, need - fromOnline.size, exclude, replacedTail)
+        val merged = if (mix.source == MixSource.ONLINE) fromOnline + local else interleave(local, fromOnline)
+        return merged.take(need) to plan
+    }
+
+    /** COMBINED: one library song, then an online one every third place, the rest in order. */
+    private fun interleave(local: List<Song>, fromOnline: List<Song>): List<Song> {
+        val out = mutableListOf<Song>()
+        val l = local.iterator()
+        val o = fromOnline.iterator()
+        while (l.hasNext() || o.hasNext()) {
+            val slot = out.size
+            if (o.hasNext() && (slot % 3 == 1 || !l.hasNext())) out += o.next() else if (l.hasNext()) out += l.next() else out += o.next()
+        }
+        return out
+    }
+
+    /** Up to [need] songs from the library: the brain's, then random ones. */
+    private suspend fun pickLocal(
         current: Song,
         prefixIds: List<Long>,
         need: Int,
@@ -1137,6 +1304,21 @@ class SmartQueueManager @Inject constructor(
          */
         const val QUEUE_TARGET = 12
         const val REFILL_BELOW = 10
+
+        /**
+         * While an online mix runs: a shorter lookahead, so an online song
+         * prepared now is heard within a few songs instead of a dozen.
+         */
+        const val ONLINE_QUEUE_TARGET = 5
+        const val ONLINE_REFILL_BELOW = 4
+
+        /** How far past its target the queue may grow for an online pick that just became ready. */
+        const val ONLINE_EXTRA = 2
+
+        private const val MAX_ONLINE_ROUNDS = 3
+
+        /** Heard under this share: a fast skip (the brain's rule, Smart Shuffle's too). */
+        const val FAST_SKIP_FRACTION = 0.2f
 
         /** A journey is queued a step at a time, so it can end the moment the user leaves it. */
         const val JOURNEY_LOOKAHEAD = 4

@@ -18,6 +18,24 @@ import com.harmony.core.model.TrackDecisionTrace
 import com.harmony.core.model.VectorQuality
 import com.harmony.domain.library.repository.LibraryRepository
 import com.harmony.domain.library.repository.PlaybackHistoryRepository
+import com.harmony.core.model.MixSource
+import com.harmony.domain.online.Availability
+import com.harmony.domain.online.CandidatePreparer
+import com.harmony.domain.online.CandidateStage
+import com.harmony.domain.online.CatalogKind
+import com.harmony.domain.online.CatalogResult
+import com.harmony.domain.online.CatalogTrack
+import com.harmony.domain.online.LocalCopies
+import com.harmony.domain.online.MixSessionKey
+import com.harmony.domain.online.OnlineCandidate
+import com.harmony.domain.online.OnlineCatalog
+import com.harmony.domain.online.OnlineMixCoordinator
+import com.harmony.domain.online.OnlineMixFeed
+import com.harmony.domain.online.OnlineMixState
+import com.harmony.domain.online.PreparedAudio
+import com.harmony.domain.online.ReadyPick
+import com.harmony.domain.online.SeedTrack
+import com.harmony.domain.playback.OnlineSongs
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
 import com.harmony.domain.playback.QueueMoves
@@ -257,7 +275,7 @@ class SmartQueueManagerQueueTest {
     private val randomPool = (300L..399L)
     private val logged = mutableListOf<String>()
 
-    private fun build(scope: TestScope, brain: FakeBrain = FakeBrain(pickPool)): Triple<FakePlayback, SmartQueueManager, FakeBrain> {
+    private fun build(scope: TestScope, brain: FakeBrain = FakeBrain(pickPool), online: OnlineMixFeed = OnlineMixFeed.NONE): Triple<FakePlayback, SmartQueueManager, FakeBrain> {
         val playback = FakePlayback()
         val library = fake<LibraryRepository> { name, a ->
             when (name) {
@@ -270,7 +288,7 @@ class SmartQueueManagerQueueTest {
         val history = fake<PlaybackHistoryRepository> { name, _ ->
             when (name) { "recentSongIds" -> emptyList<Long>(); else -> error("unexpected $name") }
         }
-        val manager = SmartQueueManager(playback, brain, library, history, ShuffleBrainLog { logged += it })
+        val manager = SmartQueueManager(playback, brain, library, history, ShuffleBrainLog { logged += it }, online)
         manager.start(scope.backgroundScope)
         return Triple(playback, manager, brain)
     }
@@ -654,7 +672,7 @@ class SmartQueueManagerQueueTest {
             }
         }
         val history = fake<PlaybackHistoryRepository> { _, _ -> emptyList<Long>() }
-        val manager = SmartQueueManager(playback, brain, library, history, ShuffleBrainLog { })
+        val manager = SmartQueueManager(playback, brain, library, history, ShuffleBrainLog { }, OnlineMixFeed.NONE)
         manager.start(backgroundScope)
         playback.setQueue((1L..5L).map(::song), 0, true)
         requests.emit(Unit); advanceUntilIdle()
@@ -930,5 +948,184 @@ class SmartQueueManagerQueueTest {
         c.startMix(); advanceUntilIdle()
         assertTrue("Smart Shuffle's picks fill in", ids(p).drop(1).all { it in pickPool } && ids(p).size > 1)
         assertTrue(brain.requests.isNotEmpty())
+    }
+
+    // -- Online mixes (YouTube Music + Mornye) ---------------------------------------------
+
+    private fun prepared(videoId: String, artist: String = "Net Artist"): ReadyPick.Prepared {
+        val audio = PreparedAudio("/cache/online-mix/$videoId.flac", "FLAC", 16, 44_100, 200_000, 1, "tidal")
+        val track = CatalogTrack(videoId, "Online $videoId", listOf(artist), "Album", null, 200_000, CatalogKind.SONG, null, true)
+        return ReadyPick.Prepared(OnlineCandidate(track, "x|$videoId|", 80, emptyList(), CandidateStage.READY, Availability.CONFIRMED, audio = audio), audio)
+    }
+
+    private fun local(songId: Long) = ReadyPick.Local(prepared("loc${songId.toString().padStart(8, '0')}").candidate, songId)
+
+    private fun onlineId(videoId: String) = OnlineSongs.idFor(OnlineSongs.keyFor(videoId))
+
+    /** The user's entries still to come: (entry id, song id), in order. */
+    private fun protectedAhead(p: FakePlayback) = p.playerState.value.let { s ->
+        s.entries.zip(s.queue).drop(s.queueIndex + 1).filter { it.first.isProtected }.map { it.first.entryId to it.second.id }
+    }
+
+    @Test
+    fun anOfflineMixMakesNoOnlineRequest() = runTest(UnconfinedTestDispatcher()) {
+        var requests = 0
+        val catalog = object : OnlineCatalog {
+            override suspend fun searchSongs(query: String, limit: Int): CatalogResult<List<CatalogTrack>> { requests++; return CatalogResult.Ok(emptyList()) }
+            override suspend fun radio(videoId: String, limit: Int): CatalogResult<List<CatalogTrack>> { requests++; return CatalogResult.Ok(emptyList()) }
+        }
+        val feed = OnlineMixCoordinator(catalog, CandidatePreparer { _, _ -> error("never") }, LocalCopies.NONE, backgroundScope)
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue((1L..10L).map(::song), 0, true)
+        assertEquals("online mixes are off unless chosen", MixSource.OFFLINE, c.preferredMixSource)
+        c.startMix(); advanceUntilIdle()
+        repeat(5) { p.skipAfter(0.95f); advanceUntilIdle() }
+        c.startMix(MixSource.OFFLINE); settle()
+        assertEquals(0, requests)
+        assertEquals("the library's mix as before", 1 + SmartQueueManager.QUEUE_TARGET, ids(p).size - p.idx)
+    }
+
+    @Test
+    fun aReadyRecommendationJoinsTheEndWithinTheShortLookahead() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        assertEquals(MixSource.COMBINED, feed.starts.single().second)
+        assertEquals("a shorter lookahead while online", 1 + SmartQueueManager.ONLINE_QUEUE_TARGET, ids(p).size)
+        val shown = ids(p)
+        feed.offer(prepared("vidAAAAAAA1")); advanceUntilIdle()
+        assertEquals("nothing already queued moved", shown, ids(p).take(shown.size))
+        assertEquals(onlineId("vidAAAAAAA1"), ids(p).last())
+        assertEquals("an automatic entry", QueueOrigin.AUTO, p.playerState.value.entries.last().origin)
+        val song = p.q.last()
+        assertEquals("file:///cache/online-mix/vidAAAAAAA1.flac", song.uri)
+        assertTrue(c.isPick(song.id))
+    }
+
+    @Test
+    fun theUsersEntriesKeepTheirIdentityAndOrderThroughEverything() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue((1L..8L).map(::song), 0, true)
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        p.addNext(song(900)); advanceUntilIdle()                          // Play next
+        p.addToQueue(song(901), QueueOrigin.MANUAL); advanceUntilIdle()   // the same song added twice, on purpose
+        p.addToQueue(song(901), QueueOrigin.MANUAL); advanceUntilIdle()
+        var mine = protectedAhead(p)
+        assertEquals(listOf(900L, 901L, 901L), mine.map { it.second })
+
+        fun check(step: String) {
+            val now = protectedAhead(p)
+            assertEquals("after $step: the user's entries, same ids, same order", mine.filter { e -> now.any { it.first == e.first } }, now)
+            assertEquals("after $step: both of the user's duplicates are there", 2, p.q.drop(p.idx + 1).count { it.id == 901L })
+            mine = now
+        }
+
+        feed.offer(prepared("vidAAAAAAA1")); advanceUntilIdle(); check("an online pick")
+        // The user moves an entry (one of the duplicates, to the very end): it is pinned where they put it.
+        val firstDup = p.playerState.value.entries.indexOfFirst { it.entryId == mine[1].first }
+        assertTrue(p.moveQueueItem(firstDup, p.q.size - 1, 901L)); advanceUntilIdle()
+        mine = protectedAhead(p)
+        feed.offer(prepared("vidBBBBBBB2")); advanceUntilIdle(); check("a reorder and another pick")
+        // Refills while listening (the first songs are the user's: they play and leave the list).
+        p.skipAfter(0.95f); advanceUntilIdle(); check("a refill")
+        // Shuffle switched off and on again.
+        toggle(p, c, ShuffleMode.OFF); advanceUntilIdle(); check("shuffle off")
+        toggle(p, c, ShuffleMode.SMART); advanceUntilIdle(); check("shuffle on")
+        // A mix again, then the mode changed under it.
+        c.startMix(MixSource.ONLINE); advanceUntilIdle(); check("an online mix")
+        toggle(p, c, ShuffleMode.RANDOM); advanceUntilIdle(); check("random")
+        assertTrue(feed.stops >= 2)
+    }
+
+    @Test
+    fun aLateRecommendationOfAnEndedOrReplacedMixIsDropped() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        val first = feed.current!!
+        // The same song again: a new start, a new key.
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        val second = feed.current!!
+        assertTrue(first != second)
+        feed.offer(prepared("vidLATE0001"), key = first); advanceUntilIdle()
+        assertFalse("an answer for the earlier start", onlineId("vidLATE0001") in ids(p))
+        // The user ends the mix by starting another list; an answer still arrives.
+        p.setQueue((20L..25L).map(::song), 0, true); advanceUntilIdle()
+        assertNull(c.mix.value)
+        feed.offer(prepared("vidLATE0002"), key = second); advanceUntilIdle()
+        repeat(3) { p.skipAfter(0.95f); advanceUntilIdle() }
+        assertFalse("an answer for a mix that ended", onlineId("vidLATE0002") in ids(p))
+        feed.offer(prepared("vidLATE0003"), key = second); toggle(p, c, ShuffleMode.SMART); settle()
+        assertFalse(onlineId("vidLATE0003") in ids(p))
+    }
+
+    @Test
+    fun noAutomaticRepeatOfWhatIsQueued() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        p.addToQueue(song(901), QueueOrigin.MANUAL)
+        p.addToQueue(song(901), QueueOrigin.MANUAL); advanceUntilIdle()
+        feed.offer(local(901)); advanceUntilIdle()                 // the library's copy of a song already queued
+        feed.offer(prepared("vidAAAAAAA1")); advanceUntilIdle()
+        feed.offer(prepared("vidAAAAAAA1")); advanceUntilIdle()    // the same recording offered twice
+        repeat(4) { p.skipAfter(0.95f); advanceUntilIdle() }
+        assertEquals("only the user's two", 2, p.q.count { it.id == 901L })
+        assertEquals(1, p.q.count { it.id == onlineId("vidAAAAAAA1") })
+    }
+
+    @Test
+    fun aFastSkipOfAnOnlineSongIsToldAndOnlineModeNeverRunsDry() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(MixSource.ONLINE); advanceUntilIdle()
+        // Nothing online is ready yet: the library's mix keeps the queue going.
+        assertTrue(ids(p).drop(1).all { it in mixPool })
+        assertEquals(1 + SmartQueueManager.ONLINE_QUEUE_TARGET, ids(p).size)
+        feed.offer(prepared("vidSKIP0001")); advanceUntilIdle()
+        val at = ids(p).indexOf(onlineId("vidSKIP0001"))
+        assertTrue(at > 0)
+        while (p.idx < at) { p.skipAfter(0.95f); advanceUntilIdle() }
+        p.skipAfter(0.05f); advanceUntilIdle()
+        assertEquals(listOf("vidSKIP0001"), feed.skips)
+    }
+}
+
+/** An online side the test feeds by hand: picks are offered for a session key and announced. */
+private class FakeFeed : OnlineMixFeed {
+    override val state = MutableStateFlow(OnlineMixState())
+    private val ready = MutableSharedFlow<MixSessionKey>(extraBufferCapacity = 16)
+    override val readyChanged: Flow<MixSessionKey> = ready
+    val starts = mutableListOf<Pair<MixSessionKey, MixSource>>()
+    var stops = 0
+    var current: MixSessionKey? = null
+    val skips = mutableListOf<String>()
+    private val waiting = mutableListOf<Pair<MixSessionKey, ReadyPick>>()
+
+    override fun start(session: MixSessionKey, source: MixSource, seed: SeedTrack, avoid: suspend () -> Set<String>) {
+        stop()
+        starts += session to source
+        current = session.takeIf { source != MixSource.OFFLINE }
+    }
+    override fun stop() { stops++; current = null }
+    override fun take(session: MixSessionKey, max: Int): List<ReadyPick> {
+        if (session != current) return emptyList()
+        val mine = waiting.filter { it.first == session }.take(max)
+        waiting.removeAll(mine)
+        return mine.map { it.second }
+    }
+    override fun onFastSkip(session: MixSessionKey, videoId: String) { if (session == current) skips += videoId }
+    override fun setPlaybackBusy(busy: Boolean) = Unit
+
+    /** [pick] is ready for [key] (the current session by default). */
+    fun offer(pick: ReadyPick, key: MixSessionKey? = current) {
+        val k = key ?: return
+        waiting += k to pick
+        ready.tryEmit(k)
     }
 }
