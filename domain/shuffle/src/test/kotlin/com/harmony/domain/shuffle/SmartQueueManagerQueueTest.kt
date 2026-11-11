@@ -1079,6 +1079,30 @@ class SmartQueueManagerQueueTest {
     }
 
     @Test
+    fun aPreparedCopyOfARecordingManuallyQueuedWhilePreparingIsDropped() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        val librarySong = song(901)
+        p.addToQueue(librarySong, QueueOrigin.MANUAL)
+        p.addToQueue(librarySong, QueueOrigin.MANUAL)
+        advanceUntilIdle()
+        val mine = protectedAhead(p)
+        val ready = prepared("vidDUP00001")
+        val sameRecording = ready.candidate.copy(track = ready.candidate.track.copy(
+            title = librarySong.title,
+            artists = listOf(librarySong.artist),
+            durationMs = librarySong.durationMs,
+        ))
+        feed.offer(ready.copy(candidate = sameRecording))
+        advanceUntilIdle()
+        assertEquals("the user's two entries retain their identity and order", mine, protectedAhead(p))
+        assertEquals(2, p.q.count { it.id == librarySong.id })
+        assertFalse("the prepared copy has a different id but the same recording", onlineId("vidDUP00001") in ids(p))
+    }
+
+    @Test
     fun aFastSkipOfAnOnlineSongIsToldAndOnlineModeNeverRunsDry() = runTest(UnconfinedTestDispatcher()) {
         val feed = FakeFeed()
         val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)

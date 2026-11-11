@@ -150,6 +150,9 @@ jobs:
           --no-daemon
           --stacktrace
 
+      - name: Online mix local-library regression
+        run: ./gradlew :app:testStableDebugUnitTest --tests 'com.harmony.app.LibraryLocalCopiesTest' --no-daemon --stacktrace
+
       - name: Upload test report
         if: failure()
         uses: actions/upload-artifact@v4

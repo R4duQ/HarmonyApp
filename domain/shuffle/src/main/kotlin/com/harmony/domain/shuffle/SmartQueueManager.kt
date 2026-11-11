@@ -932,6 +932,7 @@ class SmartQueueManager @Inject constructor(
 
     private suspend fun readySongs(picks: List<ReadyPick>, prefixIds: List<Long>, exclude: MutableSet<Long>): List<Song> {
         val out = mutableListOf<Song>()
+        val recordingKeys = avoidKeys().toMutableSet()
         for (pick in picks) {
             val song = when (pick) {
                 is ReadyPick.Local -> library.songById(pick.songId)
@@ -941,6 +942,8 @@ class SmartQueueManager @Inject constructor(
                 }
             } ?: continue
             if (song.id in exclude || song.id in prefixIds) continue
+            val identity = TrackIdentity.of(song.title, song.artist, song.durationMs).key
+            if (!recordingKeys.add(identity)) continue
             exclude += song.id
             onlinePicks[song.id] = pick.candidate.videoId
             out += song
