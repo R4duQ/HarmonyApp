@@ -19,6 +19,7 @@ on:
       - 'gradle.properties'
       - 'vendor/**'
       - 'scripts/ci/**'
+      - 'scripts/ytmusic/**'
       - '.github/workflows/android-check.yml'
   workflow_dispatch:
 
