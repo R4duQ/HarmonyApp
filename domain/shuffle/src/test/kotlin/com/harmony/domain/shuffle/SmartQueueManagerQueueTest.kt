@@ -1088,6 +1088,9 @@ class SmartQueueManagerQueueTest {
         p.addToQueue(librarySong, QueueOrigin.MANUAL)
         p.addToQueue(librarySong, QueueOrigin.MANUAL)
         advanceUntilIdle()
+        // Keep admission below the online lookahead cap so the test reaches deduplication.
+        p.skipAfter(0.95f); advanceUntilIdle()
+        assertTrue(p.q.size - p.idx - 1 < SmartQueueManager.ONLINE_QUEUE_TARGET + SmartQueueManager.ONLINE_EXTRA)
         val mine = protectedAhead(p)
         val ready = prepared("vidDUP00001")
         val sameRecording = ready.candidate.copy(track = ready.candidate.track.copy(
