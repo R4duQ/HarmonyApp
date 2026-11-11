@@ -1,0 +1,1443 @@
+{
+ "version": 1,
+ "created": "2026-11-11",
+ "about": "Seed (the file playing) and catalog results (as YtmParsers returns them); expect = the videoId of the same recording, or null when none is. 'constructed' cases are written by hand; 'live-2026-11-11' cases are items captured from real answers.",
+ "thresholds": {
+  "maxFalseAccepts": 0,
+  "minRecall": 0.85,
+  "fixed": "before SongMatcher was tuned"
+ },
+ "cases": [
+  {
+   "id": "exact-album-remastered-label",
+   "source": "constructed",
+   "tags": [
+    "exact"
+   ],
+   "seed": {
+    "title": "Wonderwall",
+    "artist": "Oasis",
+    "album": "(What's the Story) Morning Glory?",
+    "durationMs": 258800,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000001",
+     "title": "Wonderwall",
+     "artists": [
+      "Oasis"
+     ],
+     "album": "(What's The Story) Morning Glory? (Remastered)",
+     "durationMs": 259000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000001",
+   "why": "Same recording; the album's bracketed edition note is ignored."
+  },
+  {
+   "id": "ro-diacritics-missing-in-catalog",
+   "source": "constructed",
+   "tags": [
+    "romanian",
+    "diacritics"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": "Underground Folclor",
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000002",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpati"
+     ],
+     "album": "Underground Folclor",
+     "durationMs": 222000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000002",
+   "why": "Comma-below ț vs plain t."
+  },
+  {
+   "id": "ro-cedilla-vs-comma",
+   "source": "constructed",
+   "tags": [
+    "romanian",
+    "diacritics"
+   ],
+   "seed": {
+    "title": "Drumul spre pace",
+    "artist": "SUBCARPAŢI",
+    "album": null,
+    "durationMs": 238000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000003",
+     "title": "Drumul spre pace",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": "Satele noastre",
+     "durationMs": 237500,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000003",
+   "why": "Ţ (cedilla) in the file, ț (comma) in the catalog."
+  },
+  {
+   "id": "ro-a-breve-i-circumflex",
+   "source": "constructed",
+   "tags": [
+    "romanian",
+    "diacritics"
+   ],
+   "seed": {
+    "title": "Perfect fără tine",
+    "artist": "Vama",
+    "album": null,
+    "durationMs": 201000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000004",
+     "title": "Perfect Fara Tine",
+     "artists": [
+      "Vama"
+     ],
+     "album": "Better",
+     "durationMs": 202000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000004",
+   "why": "ă, case."
+  },
+  {
+   "id": "ro-s-comma-capital",
+   "source": "constructed",
+   "tags": [
+    "romanian",
+    "diacritics"
+   ],
+   "seed": {
+    "title": "Nu te mai saturi de noi",
+    "artist": "ȘUIE PAPARUDE",
+    "album": null,
+    "durationMs": 186000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000005",
+     "title": "Nu Te Mai Sături De Noi",
+     "artists": [
+      "Șuie Paparude"
+     ],
+     "album": "Șuie Paparude",
+     "durationMs": 186000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000005",
+   "why": "Ș capital, ă only in the catalog."
+  },
+  {
+   "id": "ro-hyphen",
+   "source": "constructed",
+   "tags": [
+    "romanian"
+   ],
+   "seed": {
+    "title": "Frati-miu vinde droguri",
+    "artist": "Oscar",
+    "album": null,
+    "durationMs": 175000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000006",
+     "title": "Frati Miu Vinde Droguri",
+     "artists": [
+      "OSCAR"
+     ],
+     "album": null,
+     "durationMs": 174000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000006",
+   "why": "Hyphen vs space."
+  },
+  {
+   "id": "feat-in-title-and-credits",
+   "source": "constructed",
+   "tags": [
+    "credits"
+   ],
+   "seed": {
+    "title": "Azi (feat. EMAA)",
+    "artist": "Deliric & Silent Strike",
+    "album": null,
+    "durationMs": 200000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000007",
+     "title": "Azi",
+     "artists": [
+      "Deliric",
+      "Silent Strike",
+      "EMAA"
+     ],
+     "album": "Azi",
+     "durationMs": 201000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000007",
+   "why": "feat. in the file title, a credit in the catalog."
+  },
+  {
+   "id": "feat-in-seed-artist",
+   "source": "constructed",
+   "tags": [
+    "credits"
+   ],
+   "seed": {
+    "title": "Levitating",
+    "artist": "Dua Lipa feat. DaBaby",
+    "album": "Future Nostalgia",
+    "durationMs": 203000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000008",
+     "title": "Levitating (feat. DaBaby)",
+     "artists": [
+      "Dua Lipa",
+      "DaBaby"
+     ],
+     "album": "Future Nostalgia (The Moonlight Edition)",
+     "durationMs": 203000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000008",
+   "why": ""
+  },
+  {
+   "id": "close-duration-no-album",
+   "source": "constructed",
+   "tags": [
+    "duration"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000009",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": null,
+     "durationMs": 225000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000009",
+   "why": "3 s apart, album unknown: 70 points."
+  },
+  {
+   "id": "same-recording-listed-twice",
+   "source": "constructed",
+   "tags": [
+    "duplicates"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000010",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": "Underground Folclor",
+     "durationMs": 222000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    },
+    {
+     "videoId": "ATV00000011",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpati",
+      "Surorile Osoianu"
+     ],
+     "album": "Pe Drum (Single)",
+     "durationMs": 223000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000010",
+   "why": "Album and single of one take: not a choice between recordings."
+  },
+  {
+   "id": "explicit-and-clean-seed-unknown",
+   "source": "constructed",
+   "tags": [
+    "edition"
+   ],
+   "seed": {
+    "title": "Smack That",
+    "artist": "Akon",
+    "album": null,
+    "durationMs": 212000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000012",
+     "title": "Smack That",
+     "artists": [
+      "Akon",
+      "Eminem"
+     ],
+     "album": "Konvicted",
+     "durationMs": 212000,
+     "kind": "SONG",
+     "explicit": true,
+     "playable": true
+    },
+    {
+     "videoId": "ATV00000013",
+     "title": "Smack That",
+     "artists": [
+      "Akon",
+      "Eminem"
+     ],
+     "album": "Konvicted (Clean)",
+     "durationMs": 212000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000012",
+   "why": "Both editions of one take; the file does not say which: the first is used and the edition stays unknown."
+  },
+  {
+   "id": "explicit-known-picks-explicit",
+   "source": "constructed",
+   "tags": [
+    "edition"
+   ],
+   "seed": {
+    "title": "Smack That",
+    "artist": "Akon",
+    "album": null,
+    "durationMs": 212000,
+    "explicit": true
+   },
+   "results": [
+    {
+     "videoId": "ATV00000014",
+     "title": "Smack That",
+     "artists": [
+      "Akon",
+      "Eminem"
+     ],
+     "album": "Konvicted (Clean)",
+     "durationMs": 212000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    },
+    {
+     "videoId": "ATV00000015",
+     "title": "Smack That",
+     "artists": [
+      "Akon",
+      "Eminem"
+     ],
+     "album": "Konvicted",
+     "durationMs": 212000,
+     "kind": "SONG",
+     "explicit": true,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000015",
+   "why": ""
+  },
+  {
+   "id": "video-before-song",
+   "source": "constructed",
+   "tags": [
+    "types"
+   ],
+   "seed": {
+    "title": "Wonderwall",
+    "artist": "Oasis",
+    "album": null,
+    "durationMs": 259000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "OMV00000016",
+     "title": "Wonderwall",
+     "artists": [
+      "Oasis"
+     ],
+     "album": null,
+     "durationMs": 280000,
+     "kind": "OFFICIAL_VIDEO",
+     "explicit": null,
+     "playable": true
+    },
+    {
+     "videoId": "ATV00000016",
+     "title": "Wonderwall",
+     "artists": [
+      "Oasis"
+     ],
+     "album": "(What's The Story) Morning Glory?",
+     "durationMs": 259000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000016",
+   "why": "The video is skipped, the song kept."
+  },
+  {
+   "id": "lead-artist-among-credits",
+   "source": "constructed",
+   "tags": [
+    "credits"
+   ],
+   "seed": {
+    "title": "Up",
+    "artist": "INNA",
+    "album": null,
+    "durationMs": 180000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000017",
+     "title": "Up",
+     "artists": [
+      "INNA",
+      "Sean Paul"
+     ],
+     "album": "Up",
+     "durationMs": 181000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000017",
+   "why": ""
+  },
+  {
+   "id": "remaster-both-sides",
+   "source": "constructed",
+   "tags": [
+    "remaster"
+   ],
+   "seed": {
+    "title": "Bohemian Rhapsody - Remastered 2011",
+    "artist": "Queen",
+    "album": "A Night at the Opera",
+    "durationMs": 354000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000018",
+     "title": "Bohemian Rhapsody (Remastered 2011)",
+     "artists": [
+      "Queen"
+     ],
+     "album": "A Night At The Opera (2011 Remaster)",
+     "durationMs": 355000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000018",
+   "why": ""
+  },
+  {
+   "id": "remaster-one-side-same-album",
+   "source": "constructed",
+   "tags": [
+    "remaster"
+   ],
+   "seed": {
+    "title": "Bohemian Rhapsody",
+    "artist": "Queen",
+    "album": "A Night at the Opera",
+    "durationMs": 354000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000019",
+     "title": "Bohemian Rhapsody (Remastered 2011)",
+     "artists": [
+      "Queen"
+     ],
+     "album": "A Night At The Opera (2011 Remaster)",
+     "durationMs": 355000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000019",
+   "why": "A remaster of the same take, same album and length: accepted with a penalty."
+  },
+  {
+   "id": "curly-apostrophe",
+   "source": "constructed",
+   "tags": [
+    "punctuation"
+   ],
+   "seed": {
+    "title": "Don’t Stop Me Now",
+    "artist": "Queen",
+    "album": null,
+    "durationMs": 209000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000020",
+     "title": "Don't Stop Me Now",
+     "artists": [
+      "Queen"
+     ],
+     "album": "Jazz",
+     "durationMs": 209000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000020",
+   "why": ""
+  },
+  {
+   "id": "ampersand-band-name",
+   "source": "constructed",
+   "tags": [
+    "credits"
+   ],
+   "seed": {
+    "title": "The Sound of Silence",
+    "artist": "Simon & Garfunkel",
+    "album": null,
+    "durationMs": 185000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000021",
+     "title": "The Sound of Silence",
+     "artists": [
+      "Simon & Garfunkel"
+     ],
+     "album": "Sounds of Silence",
+     "durationMs": 185000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000021",
+   "why": ""
+  },
+  {
+   "id": "original-mix-label",
+   "source": "constructed",
+   "tags": [
+    "labels"
+   ],
+   "seed": {
+    "title": "Strobe (Original Mix)",
+    "artist": "deadmau5",
+    "album": null,
+    "durationMs": 637000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000022",
+     "title": "Strobe",
+     "artists": [
+      "deadmau5"
+     ],
+     "album": "For Lack of a Better Name",
+     "durationMs": 637000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000022",
+   "why": "\"Original Mix\" names the original."
+  },
+  {
+   "id": "year-in-title",
+   "source": "constructed",
+   "tags": [
+    "labels"
+   ],
+   "seed": {
+    "title": "Dragostea din tei (2004)",
+    "artist": "O-Zone",
+    "album": null,
+    "durationMs": 213000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000023",
+     "title": "Dragostea Din Tei",
+     "artists": [
+      "O-Zone"
+     ],
+     "album": "DiscO-Zone",
+     "durationMs": 213000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000023",
+   "why": ""
+  },
+  {
+   "id": "album-only-evidence",
+   "source": "constructed",
+   "tags": [
+    "thin-evidence"
+   ],
+   "seed": {
+    "title": "Folclor Nemuritor",
+    "artist": "Subcarpați",
+    "album": "Folclor Nemuritor",
+    "durationMs": null,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000024",
+     "title": "Folclor Nemuritor",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": "Folclor Nemuritor",
+     "durationMs": 284000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000024",
+   "why": "No duration in the file; the same album is enough."
+  },
+  {
+   "id": "thin-evidence-true-match",
+   "source": "constructed",
+   "tags": [
+    "thin-evidence",
+    "hard"
+   ],
+   "seed": {
+    "title": "Scrisoare din trecut",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": null,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000025",
+     "title": "Scrisoare din trecut",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": "Aripi de lumină",
+     "durationMs": 241000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000025",
+   "why": "Truly the same song, but nothing confirms it beyond the name: counted as a miss if not accepted (recall)."
+  },
+  {
+   "id": "thin-evidence-other-album",
+   "source": "constructed",
+   "tags": [
+    "thin-evidence",
+    "hard"
+   ],
+   "seed": {
+    "title": "da-i volum!",
+    "artist": "raku",
+    "album": "Single",
+    "durationMs": null,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000026",
+     "title": "da-i volum!",
+     "artists": [
+      "raku"
+     ],
+     "album": "da-i volum!",
+     "durationMs": 178000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": "ATV00000026",
+   "why": "Same song, album named differently in the file: a miss is expected and counted."
+  },
+  {
+   "id": "only-videos",
+   "source": "constructed",
+   "tags": [
+    "types"
+   ],
+   "seed": {
+    "title": "Wonderwall",
+    "artist": "Oasis",
+    "album": null,
+    "durationMs": 259000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "OMV00000101",
+     "title": "Wonderwall",
+     "artists": [
+      "Oasis"
+     ],
+     "album": null,
+     "durationMs": 280000,
+     "kind": "OFFICIAL_VIDEO",
+     "explicit": null,
+     "playable": true
+    },
+    {
+     "videoId": "UGC00000101",
+     "title": "Wonderwall (Remastered)",
+     "artists": [
+      "Oasis - Topic"
+     ],
+     "album": null,
+     "durationMs": 259000,
+     "kind": "USER_VIDEO",
+     "explicit": null,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "A video is never a song, whatever its length or title."
+  },
+  {
+   "id": "live-only",
+   "source": "constructed",
+   "tags": [
+    "versions",
+    "romanian"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000102",
+     "title": "Pe Drum (Live)",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": "Live la Arenele Romane",
+     "durationMs": 255000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "sped-up-only",
+   "source": "constructed",
+   "tags": [
+    "versions"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000103",
+     "title": "Pe Drum (Sped Up)",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": null,
+     "durationMs": 171000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "cover-other-artist",
+   "source": "constructed",
+   "tags": [
+    "cover"
+   ],
+   "seed": {
+    "title": "Hallelujah",
+    "artist": "Leonard Cohen",
+    "album": "Various Positions",
+    "durationMs": 277000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000104",
+     "title": "Hallelujah",
+     "artists": [
+      "Jeff Buckley"
+     ],
+     "album": "Grace",
+     "durationMs": 413000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "same-title-other-artist",
+   "source": "constructed",
+   "tags": [
+    "homonym"
+   ],
+   "seed": {
+    "title": "Hello",
+    "artist": "Adele",
+    "album": "25",
+    "durationMs": 295000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000105",
+     "title": "Hello",
+     "artists": [
+      "Lionel Richie"
+     ],
+     "album": "Can't Slow Down",
+     "durationMs": 250000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "karaoke",
+   "source": "constructed",
+   "tags": [
+    "versions"
+   ],
+   "seed": {
+    "title": "Wonderwall",
+    "artist": "Oasis",
+    "album": null,
+    "durationMs": 259000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000106",
+     "title": "Wonderwall (Karaoke Version)",
+     "artists": [
+      "Oasis"
+     ],
+     "album": null,
+     "durationMs": 259000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "Even credited to the band."
+  },
+  {
+   "id": "remix",
+   "source": "constructed",
+   "tags": [
+    "versions"
+   ],
+   "seed": {
+    "title": "Levitating",
+    "artist": "Dua Lipa",
+    "album": null,
+    "durationMs": 203000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000107",
+     "title": "Levitating (The Blessed Madonna Remix)",
+     "artists": [
+      "Dua Lipa",
+      "Madonna",
+      "Missy Elliott"
+     ],
+     "album": "Club Future Nostalgia",
+     "durationMs": 323000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "duration-far",
+   "source": "constructed",
+   "tags": [
+    "duration"
+   ],
+   "seed": {
+    "title": "Bohemian Rhapsody",
+    "artist": "Queen",
+    "album": null,
+    "durationMs": 354000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000108",
+     "title": "Bohemian Rhapsody",
+     "artists": [
+      "Queen"
+     ],
+     "album": "Greatest Hits (Radio Edit)",
+     "durationMs": 300000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "54 s apart: another edit."
+  },
+  {
+   "id": "two-recordings-no-evidence",
+   "source": "constructed",
+   "tags": [
+    "ambiguous",
+    "hard"
+   ],
+   "seed": {
+    "title": "Love Song",
+    "artist": "Unknown Band",
+    "album": null,
+    "durationMs": null,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000109",
+     "title": "Love Song",
+     "artists": [
+      "Unknown Band"
+     ],
+     "album": "First Album",
+     "durationMs": 222000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    },
+    {
+     "videoId": "ATV00000110",
+     "title": "Love Song",
+     "artists": [
+      "Unknown Band"
+     ],
+     "album": "Re-recorded",
+     "durationMs": 251000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "Two takes, nothing to tell them apart."
+  },
+  {
+   "id": "two-recordings-close-scores",
+   "source": "constructed",
+   "tags": [
+    "ambiguous"
+   ],
+   "seed": {
+    "title": "Love Song",
+    "artist": "Unknown Band",
+    "album": null,
+    "durationMs": 236000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000111",
+     "title": "Love Song",
+     "artists": [
+      "Unknown Band"
+     ],
+     "album": "First Album",
+     "durationMs": 232000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    },
+    {
+     "videoId": "ATV00000112",
+     "title": "Love Song",
+     "artists": [
+      "Unknown Band"
+     ],
+     "album": "Re-recorded",
+     "durationMs": 240000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "4 s either side of the file: both close, neither confirmed."
+  },
+  {
+   "id": "instrumental",
+   "source": "constructed",
+   "tags": [
+    "versions"
+   ],
+   "seed": {
+    "title": "Teardrop",
+    "artist": "Massive Attack",
+    "album": null,
+    "durationMs": 330000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000113",
+     "title": "Teardrop (Instrumental)",
+     "artists": [
+      "Massive Attack"
+     ],
+     "album": "Mezzanine",
+     "durationMs": 330000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "acoustic",
+   "source": "constructed",
+   "tags": [
+    "versions"
+   ],
+   "seed": {
+    "title": "Iris",
+    "artist": "Goo Goo Dolls",
+    "album": null,
+    "durationMs": 289000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000114",
+     "title": "Iris (Acoustic)",
+     "artists": [
+      "Goo Goo Dolls"
+     ],
+     "album": null,
+     "durationMs": 290000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "greyed-out",
+   "source": "constructed",
+   "tags": [
+    "availability"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000115",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": "Underground Folclor",
+     "durationMs": 222000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": false
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "podcast-episode",
+   "source": "constructed",
+   "tags": [
+    "types",
+    "romanian"
+   ],
+   "seed": {
+    "title": "Sărbătoare, cântare",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": null,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "PEP00000116",
+     "title": "Sărbătoare, cântare",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": null,
+     "durationMs": null,
+     "kind": "PODCAST_EPISODE",
+     "explicit": null,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "clean-seed-explicit-only",
+   "source": "constructed",
+   "tags": [
+    "edition"
+   ],
+   "seed": {
+    "title": "Smack That",
+    "artist": "Akon",
+    "album": null,
+    "durationMs": 212000,
+    "explicit": false
+   },
+   "results": [
+    {
+     "videoId": "ATV00000117",
+     "title": "Smack That",
+     "artists": [
+      "Akon",
+      "Eminem"
+     ],
+     "album": "Konvicted",
+     "durationMs": 212000,
+     "kind": "SONG",
+     "explicit": true,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "The file is the clean edition; only the explicit one is listed."
+  },
+  {
+   "id": "ro-similar-band-names",
+   "source": "constructed",
+   "tags": [
+    "romanian",
+    "homonym"
+   ],
+   "seed": {
+    "title": "Perfect fără tine",
+    "artist": "Vama",
+    "album": null,
+    "durationMs": 201000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000118",
+     "title": "Perfect fără tine",
+     "artists": [
+      "Vama Veche"
+     ],
+     "album": null,
+     "durationMs": 201000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "Vama and Vama Veche are two bands."
+  },
+  {
+   "id": "title-subset",
+   "source": "constructed",
+   "tags": [
+    "homonym",
+    "romanian"
+   ],
+   "seed": {
+    "title": "Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ATV00000119",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": null,
+     "durationMs": 222000,
+     "kind": "SONG",
+     "explicit": false,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": ""
+  },
+  {
+   "id": "untyped",
+   "source": "constructed",
+   "tags": [
+    "types"
+   ],
+   "seed": {
+    "title": "Pe Drum",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 222000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "UNK00000120",
+     "title": "Pe Drum",
+     "artists": [
+      "Subcarpați"
+     ],
+     "album": null,
+     "durationMs": 222000,
+     "kind": "UNKNOWN",
+     "explicit": null,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "No videoType: not trusted as a song."
+  },
+  {
+   "id": "live-capture-official-audio-upload",
+   "source": "live-2026-11-11",
+   "tags": [
+    "types",
+    "real"
+   ],
+   "seed": {
+    "title": "Hotel California",
+    "artist": "Eagles",
+    "album": "Hotel California",
+    "durationMs": 391000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "dLl4PZtxia8",
+     "title": "Eagles - Hotel California (Official Audio)",
+     "artists": [
+      "Eagles"
+     ],
+     "album": null,
+     "durationMs": 392000,
+     "kind": "USER_VIDEO",
+     "explicit": null,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "Real radio item: an 'Official Audio' upload typed UGC."
+  },
+  {
+   "id": "live-capture-topic-upload",
+   "source": "live-2026-11-11",
+   "tags": [
+    "types",
+    "real"
+   ],
+   "seed": {
+    "title": "Wonderwall",
+    "artist": "Oasis",
+    "album": null,
+    "durationMs": 259000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "ZrOKjDZOtkA",
+     "title": "Wonderwall (Remastered)",
+     "artists": [
+      "Oasis - Topic"
+     ],
+     "album": null,
+     "durationMs": 259000,
+     "kind": "USER_VIDEO",
+     "explicit": null,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "Real radio item: the Topic track came typed UGC from this network."
+  },
+  {
+   "id": "live-capture-ro-upload",
+   "source": "live-2026-11-11",
+   "tags": [
+    "types",
+    "real",
+    "romanian"
+   ],
+   "seed": {
+    "title": "Folclor Nemuritor",
+    "artist": "Subcarpați",
+    "album": null,
+    "durationMs": 330000,
+    "explicit": null
+   },
+   "results": [
+    {
+     "videoId": "EGnFT9WF9uY",
+     "title": "SUBCARPAȚI - Folclor Nemuritor",
+     "artists": [
+      "SubcarpatiRO"
+     ],
+     "album": null,
+     "durationMs": 330000,
+     "kind": "USER_VIDEO",
+     "explicit": null,
+     "playable": true
+    }
+   ],
+   "expect": null,
+   "why": "Real radio item: a channel upload of the song."
+  }
+ ]
+}

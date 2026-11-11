@@ -1,0 +1,151 @@
+{
+ "ytmusicapi": "1.12.3",
+ "fixture": "real/2026_11_watch_radio_DF_CKTwIg3I.json",
+ "call": "watch",
+ "results": [
+  {
+   "videoId": "DF_CKTwIg3I",
+   "title": "Subcarpati - Drumul spre pace",
+   "length": "4:17",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "SubcarpatiRO"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "t2IcvXBIBsg",
+   "title": "Subcarpați - Scrisoare din trecut",
+   "length": "4:45",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "SubcarpatiRO"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "PpEjNEUbsBI",
+   "title": "raku - da-i volum!",
+   "length": "3:11",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "raku"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "cdg6rG4tH5A",
+   "title": "Guess Who - Flori Ilegale",
+   "length": "2:57",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Guess Who"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "WA3HgnDz0cc",
+   "title": "Deliric X Silent Strike - Azi (feat. EMAA) (Lyric Video)",
+   "length": "2:51",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "FacemRecordsTV"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "EGnFT9WF9uY",
+   "title": "SUBCARPAȚI - Folclor Nemuritor",
+   "length": "5:30",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "SubcarpatiRO"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "WZs68EYMqz8",
+   "title": "Chimie - Povesti despre noroc si ghinion (prod. gAZAh) (Videoclip Oficial)",
+   "length": "4:27",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Chimie Oficial"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "-n-RgLefrJw",
+   "title": "Suie Paparude - Nu Te Mai Saturi De Noi [official]",
+   "length": "3:06",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Șuie Paparude"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "eVze5ubKecQ",
+   "title": "Spike - Iti pare rau (feat Dan Spataru)",
+   "length": "3:19",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "OkapiSoundOfficial"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "Qg9J3ua2hEU",
+   "title": "Subcarpați - Ca o molie",
+   "length": "4:43",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "SubcarpatiRO"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "Ya-ss4DvLRA",
+   "title": "Cheloo - Apel la sinceritate (Videoclip Oficial)",
+   "length": "2:33",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "Cheloo16Hz"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  },
+  {
+   "videoId": "G1oxqQj8tuI",
+   "title": "ROA - FLOW DE VARĂ (Official Video)",
+   "length": "3:28",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "artists": [
+    "ROA"
+   ],
+   "album": null,
+   "albumId": null,
+   "year": null
+  }
+ ]
+}
