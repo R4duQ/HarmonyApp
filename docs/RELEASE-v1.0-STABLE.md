@@ -1,8 +1,14 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **162**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 161), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **163**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 162), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 163 — Online mixes start
+
+- **Online and Combined mixes work again.** Builds 160 to 162 stopped every online mix at
+  once: a text rule for reading YouTube Music's answers used syntax Android does not
+  accept. Fixed, and a test now keeps that syntax out.
 
 ## Build 162 — Online mixes no longer close the app; a diagnostics log
 
