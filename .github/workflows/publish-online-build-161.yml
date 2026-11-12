@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_SOURCE_SHA: '5afc3d0aa8479221449d08f22969df90f2cb350e'
+  APP_SOURCE_SHA: '1405b2e5e1c19ce58e97779f1889e047c4ed516f'
   JAVA_VERSION: '17'
   GO_VERSION: '1.26.6'
   ANDROID_API_LEVEL: '35'
@@ -107,7 +107,7 @@ jobs:
       - name: Require passing CI and merged source
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_CI_RUN: '43061640739'
+          EXPECTED_CI_RUN: '43180467349'
         shell: bash
         run: |
           set -euo pipefail
