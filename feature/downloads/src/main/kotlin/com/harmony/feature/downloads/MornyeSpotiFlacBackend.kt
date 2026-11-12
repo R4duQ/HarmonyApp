@@ -7,7 +7,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * The Mornye build: Mornye 5's Rust runtime, through its UniFFI bindings.
+ * Harmony's download runtime: Mornye 5's Rust runtime, through its UniFFI bindings.
  *
  * Mornye is what SpotiFLAC became upstream; its Rust runtime replaced the Go
  * one and keeps the Go runtime's wire formats as a compatibility contract, so
@@ -35,7 +35,7 @@ private object MornyeSpotiFlacBackend : SpotiFlacBackend {
     override val reinitializable = true
 
     // Its own directory: the Go runtime's encrypted extension storage is not
-    // this runtime's to rewrite, and the stable build may be installed again.
+    // this runtime's to rewrite (older Harmony builds used it under spotiflac/).
     override val runtimeDirectory = "mornye/runtime-v1"
 
     /** Extension calls give up after this long unless the extension sets its own limit. */

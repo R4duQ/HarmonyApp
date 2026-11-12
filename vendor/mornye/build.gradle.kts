@@ -2,9 +2,9 @@ plugins {
     alias(libs.plugins.harmony.android.library)
 }
 
-// Mornye's Rust backend and its UniFFI Kotlin bindings, for the Mornye build of
-// Harmony. scripts/ci/build-mornye-backend.sh stages them under vendor-mornye/
-// before Gradle runs; the stable build never touches this module.
+// Mornye's Rust backend and its UniFFI Kotlin bindings, Harmony's download
+// runtime. scripts/ci/build-mornye-backend.sh stages them under vendor-mornye/
+// before Gradle runs.
 val staged = rootDir.resolve("vendor-mornye")
 
 android {

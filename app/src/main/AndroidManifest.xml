@@ -92,26 +92,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- SpotiFLAC extension OAuth / signed-session callbacks.
-                 MainActivity is singleTask so browser verification returns to
+            <!-- Download extension OAuth / signed-session callbacks. Mornye's
+                 runtime sends them back on mornye:// (SpotiFLAC's Go runtime
+                 used spotiflac://). MainActivity is singleTask so browser verification returns to
                  the existing Harmony activity through onNewIntent(). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="spotiflac" android:host="callback" />
+                <data android:scheme="mornye" android:host="callback" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="spotiflac" android:host="spotify-callback" />
+                <data android:scheme="mornye" android:host="spotify-callback" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="spotiflac" android:host="session-grant" />
+                <data android:scheme="mornye" android:host="session-grant" />
             </intent-filter>
 
             <!-- Spotify Authorization Code + PKCE return for Playlist Transfer. -->

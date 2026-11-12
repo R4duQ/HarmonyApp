@@ -32,11 +32,11 @@ concurrency:
 
 env:
   JAVA_VERSION: '17'
-  GO_VERSION: '1.26.6'
   ANDROID_API_LEVEL: '35'
   ANDROID_BUILD_TOOLS: '35.0.0'
   NDK_VERSION: '29.0.14206865'
-  SPOTIFLAC_TAG: 'v4.9.6'
+  MORNYE_TAG: 'v5.3.1'
+  MORNYE_NDK_VERSION: '30.0.16248370'
 
 jobs:
   shots:
@@ -55,12 +55,6 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -78,22 +72,22 @@ jobs:
             "platforms;android-${ANDROID_API_LEVEL}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" \
             "cmake;3.22.1" \
-            "ndk;${NDK_VERSION}"
+            "ndk;${NDK_VERSION}" \
+            "ndk;${MORNYE_NDK_VERSION}"
 
       # The app depends on the downloads module, which needs this backend to build.
-      - name: Build pinned SpotiFLAC Go backend
+      - name: Build pinned Mornye Rust backend
         env:
-          NDK_VERSION: ${{ env.NDK_VERSION }}
-          SPOTIFLAC_TAG: ${{ env.SPOTIFLAC_TAG }}
-          EXPECTED_GO_VERSION: ${{ env.GO_VERSION }}
-        run: bash ./scripts/ci/build-spotiflac-backend.sh
+          MORNYE_TAG: ${{ env.MORNYE_TAG }}
+          MORNYE_NDK_VERSION: ${{ env.MORNYE_NDK_VERSION }}
+        run: bash ./scripts/ci/build-mornye-backend.sh
 
       - name: Render the screenshots (this commit)
         timeout-minutes: 25
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew :app:testStableDebugUnitTest \
+          ./gradlew :app:testDebugUnitTest \
             --tests 'com.harmony.app.ThemeShowcaseScreenshotTest' \
             -Proborazzi.test.record=true --no-daemon --stacktrace
           mkdir -p "$RUNNER_TEMP/shots"
@@ -112,7 +106,7 @@ jobs:
           # Main's UI code is built against this commit's other modules. When this commit
           # changed an API that code uses (a new case of a sealed type, say), it no longer
           # builds: then there are no before_ shots, and the after_ ones still stand.
-          if ./gradlew :app:testStableDebugUnitTest \
+          if ./gradlew :app:testDebugUnitTest \
             --tests 'com.harmony.app.ThemeShowcaseScreenshotTest' \
             -Proborazzi.test.record=true --no-daemon --stacktrace; then
             for f in app/build/outputs/roborazzi/*.png; do cp "$f" "$RUNNER_TEMP/shots/before_$(basename "$f")"; done
