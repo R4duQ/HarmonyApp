@@ -195,6 +195,12 @@ class SmartQueueManager @Inject constructor(
      */
     private fun inLibrary(songId: Long): Boolean = songId >= 0
 
+    /**
+     * Whether "Mix from this song" can start from [song]: a library song, or
+     * a song an online mix prepared (not a computer's song).
+     */
+    fun canMixFrom(song: Song): Boolean = inLibrary(song.id) || OnlineSongs.isOnline(song)
+
     /** Whether [songId] was put in the current queue by this manager (a Smart Shuffle pick). Main thread. */
     fun isPick(songId: Long): Boolean = songId in generated
 
@@ -829,7 +835,9 @@ class SmartQueueManager @Inject constructor(
     fun startMix(source: MixSource = preferredMixSource): Boolean {
         val scope = managerScope ?: return false
         val state = playback.playerState.value
-        val seed = state.currentSong?.takeIf { inLibrary(it.id) } ?: return false
+        // A library song, or a song an online mix prepared (its YouTube Music id is known).
+        val seed = state.currentSong?.takeIf { canMixFrom(it) } ?: return false
+        val seedVideoId = OnlineSongs.keyOf(seed.uri)?.let(OnlineSongs::videoIdOf)
         if (_journey.value != null) finishJourney(revertToSmart = false)
         if (_mix.value == null) modeBeforeMix = state.shuffleMode
         val mixState = MixState(
@@ -844,7 +852,8 @@ class SmartQueueManager @Inject constructor(
         onlinePicks.clear()
         DiagnosticsLog.line("MIX", "start seed=${seed.id} source=$source generation=${mixState.generation}")
         // The online side starts from the same seed; with OFFLINE it makes no request at all.
-        online.start(sessionKey(mixState), source, SeedTrack(seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs), ::avoidKeys)
+        online.start(sessionKey(mixState), source,
+            SeedTrack(seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs, videoId = seedVideoId), ::avoidKeys)
         reRankJob?.cancel()
         // As in activate: the guard goes up before the mode changes, so the
         // top-up can't append to the old queue in between.
@@ -858,8 +867,12 @@ class SmartQueueManager @Inject constructor(
                 mutex.withLock {
                     runCatching {
                         brain.resetSession()
-                        brain.onTrackStarted(seed.id)
-                        brain.onManualSelect(seed.id)
+                        // The brain knows library songs only; an online seed leaves it to follow
+                        // the library songs the mix plays.
+                        if (inLibrary(seed.id)) {
+                            brain.onTrackStarted(seed.id)
+                            brain.onManualSelect(seed.id)
+                        }
                     }
                     if (runs.isNotEmpty()) mutateQueue { removeRuns(runs) }
                 }
@@ -1146,7 +1159,8 @@ class SmartQueueManager @Inject constructor(
         // queued before it instead, or the random picks below fill in when there is none.
         val anchor = current.id.takeIf(::inLibrary) ?: prefixIds.lastOrNull(::inLibrary)
         val mixState = _mix.value
-        val mixPlan = if (mixState != null && brain.available && anchor != null) {
+        // The brain's mix needs a library seed; from an online seed the library's part is Smart Shuffle's.
+        val mixPlan = if (mixState != null && inLibrary(mixState.seedSongId) && brain.available && anchor != null) {
             runCatching {
                 brain.prepare()
                 brain.mix(
