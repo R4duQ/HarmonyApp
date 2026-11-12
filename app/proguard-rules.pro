@@ -6,7 +6,7 @@
     native <methods>;
 }
 
-# shuffle_jni.cpp registers its natives on this class by name in JNI_OnLoad.
+# libharmonyshuffle (Rust) exports its natives by their JNI names: keep the class and method names.
 -keep class com.harmony.core.dsp.SmartShuffleNative {
     native <methods>;
 }
@@ -14,11 +14,6 @@
 # Room, Hilt, Compose, Coroutines, DataStore all ship consumer rules via AGP;
 # no additional keeps required. Verify with a minified release install before
 # every release (see docs/release-checklist.md).
-
-# GoMobile-generated Java wrappers call into libgojni by stable class/method names.
-# Keep the bridge intact in minified public release builds.
--keep class gobackend.** { *; }
--keep class go.** { *; }
 
 # youtubedl-android (the YouTube converter). It unpacks Python and yt-dlp with
 # commons-compress, whose zip extra-field registry creates classes through

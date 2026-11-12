@@ -3,7 +3,8 @@ package com.harmony.core.eq
 import java.nio.ByteBuffer
 
 /**
- * The JNI surface of MobileEqEngine (eq_jni.cpp registers these by name).
+ * The JNI surface of the EQ engine, libharmonyeq (Rust, native/harmonyeq),
+ * which exports these by their JNI names.
  *
  * [handle] is the engine's address. Every per-buffer and per-frame call is
  * garbage-free: audio goes through direct ByteBuffers, and arrays are filled

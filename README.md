@@ -15,7 +15,9 @@ earlier build, so 1.0 installs as an update over them when it is signed with the
 
 ## Build locally
 
-Requires Java 17 and an Android SDK. The release workflow records the SDK, NDK,
+Requires Java 17, an Android SDK with the NDK, and Rust (https://rustup.rs): the
+song analyzer, equalizer and Smart Shuffle are Rust (`native/`), and Gradle
+builds them with the toolchain pinned in `native/rust-toolchain.toml`. The release workflow records the SDK, NDK,
 Rust and backend versions used for builds. Open the project root in Android Studio
 and configure your SDK through the untracked `local.properties` file.
 

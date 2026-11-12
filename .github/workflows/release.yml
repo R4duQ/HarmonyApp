@@ -79,6 +79,12 @@ jobs:
             "ndk;${NDK_VERSION}" \
             "ndk;${MORNYE_NDK_VERSION}"
 
+      # The app's own native libraries are Rust (native/); Gradle builds them
+      # with the toolchain pinned there.
+      - name: Install the pinned Rust toolchain for native/
+        working-directory: native
+        run: rustup show active-toolchain || rustup toolchain install
+
       - name: Build pinned Mornye Rust backend
         env:
           MORNYE_TAG: ${{ env.MORNYE_TAG }}

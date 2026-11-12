@@ -1,0 +1,6 @@
+# The toolchain native/ builds with, everywhere (rustup installs it on first use).
+[toolchain]
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]
+targets = ["aarch64-linux-android", "x86_64-linux-android"]
+profile = "minimal"

@@ -15,11 +15,3 @@ target_compile_definitions(eq_engine_test PRIVATE HARMONY_EQ_TESTING)
 target_compile_options(eq_engine_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(eq_engine_test PRIVATE Threads::Threads)
 
-# The JNI library for the host JVM, so the Kotlin unit tests can run the real
-# engine: point java.library.path (HARMONY_EQ_HOST_LIB_DIR) at this build directory.
-find_package(JNI)
-if(JNI_FOUND)
-  add_library(harmonyeq SHARED ../../main/cpp/MobileEqEngine.cpp ../../main/cpp/eq_jni.cpp)
-  target_include_directories(harmonyeq PRIVATE ../../main/cpp ${JNI_INCLUDE_DIRS})
-  target_compile_options(harmonyeq PRIVATE -Wall -Wextra -Werror -fvisibility=hidden)
-endif()
