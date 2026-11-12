@@ -45,3 +45,5 @@ website/dist/
 ios/Harmony.xcodeproj/
 ios/Config/Info.plist
 ios/Harmony/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+# Rust build output (native/).
+native/target/
