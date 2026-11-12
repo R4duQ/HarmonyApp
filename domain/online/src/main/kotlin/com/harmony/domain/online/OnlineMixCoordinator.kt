@@ -207,6 +207,14 @@ class OnlineMixCoordinator(
 
     private suspend fun run(gen: Long, session: MixSessionKey, seed: SeedTrack, avoid: suspend () -> Set<String>) {
         val started = clock()
+        val known = seed.videoId?.takeIf(CatalogTrack::isVideoId)
+        if (known != null) {
+            // A song an online mix prepared: its id is the catalog's own, nothing to search for.
+            apply(gen) { it.copy(seed = SeedStatus.Identified(known, 100)) }
+            log("ONLINE_MIX seed=${session.seedSongId} identify=known video=$known")
+            follow(gen, session, seed, known, avoid)
+            return
+        }
         val outcome = identify(seed)
         val match = outcome.result
         if (!current(gen)) return
@@ -221,7 +229,11 @@ class OnlineMixCoordinator(
         val seedId = match.track!!.videoId
         apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, match.score)) }
         log("ONLINE_MIX seed=${session.seedSongId} identify=ok video=$seedId score=${match.score} ms=${clock() - started}")
+        follow(gen, session, seed, seedId, avoid)
+    }
 
+    /** From the seed's confirmed id: its radio, the plan, then preparing the candidates one by one. */
+    private suspend fun follow(gen: Long, session: MixSessionKey, seed: SeedTrack, seedId: String, avoid: suspend () -> Set<String>) {
         var radioLimit = RADIO_LIMIT
         var expansions = 0
         if (!plan(gen, session, seed, seedId, radioLimit, avoid)) return
@@ -282,9 +294,18 @@ class OnlineMixCoordinator(
         val fresh = batch.accepted.map { p -> OnlineCandidate(p.track, p.identityKey, p.score, p.reasons) }
         // The library's copy first: nothing to download for a recording it has.
         val withLocal = fresh.map { c ->
-            val songId = runCatching { local.find(c.track) }.getOrNull()
+            val songId = try {
+                local.find(c.track)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                onError("library lookup of video ${c.videoId} failed", t)
+                null
+            }
             if (songId != null) c.copy(stage = CandidateStage.IN_LIBRARY, localSongId = songId, detail = "in your library") else c
         }
+        // Which recommendations the library has (ids only), to tell from the log why one was downloaded.
+        log("ONLINE_MIX seed=${session.seedSongId} library " + withLocal.joinToString(" ") { "${it.videoId}=${if (it.localSongId != null) "yes" else "no"}" })
         if (!current(gen)) return false
         apply(gen) { it.copy(candidates = it.candidates + withLocal, turnedAway = batch.turnedAway.size) }
         log("ONLINE_MIX seed=${session.seedSongId} radio=${tracks.size} accepted=${fresh.size} local=${withLocal.count { it.localSongId != null }} " +

@@ -1106,6 +1106,27 @@ class SmartQueueManagerQueueTest {
     }
 
     @Test
+    fun aMixCanStartFromASongAnOnlineMixPrepared() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, brain) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        c.startMix(MixSource.COMBINED); advanceUntilIdle()
+        feed.offer(prepared("vidINTHEEND")); advanceUntilIdle()
+        val at = ids(p).indexOf(onlineId("vidINTHEEND"))
+        while (p.idx < at) { p.skipAfter(0.95f); advanceUntilIdle() }
+        val online = p.q[p.idx]
+        assertTrue(c.canMixFrom(online))
+        val manualBefore = brain.manual.size
+        assertTrue("a mix starts from the online song", c.startMix(MixSource.ONLINE)); advanceUntilIdle()
+        assertEquals(online.id, c.mix.value?.seedSongId)
+        assertEquals("its YouTube Music id is handed over: nothing to search for", "vidINTHEEND", feed.seeds.last().videoId)
+        assertEquals("the brain is not told of a song it has no vector for", manualBefore, brain.manual.size)
+        assertTrue("the queue still fills", ids(p).size > p.idx + 1)
+        // A computer's song still can't seed a mix.
+        assertFalse(c.canMixFrom(song(1).copy(id = -5, uri = "harmony-remote://media/pc%3Adesk%3A5")))
+    }
+
+    @Test
     fun aFastSkipOfAnOnlineSongIsToldAndOnlineModeNeverRunsDry() = runTest(UnconfinedTestDispatcher()) {
         val feed = FakeFeed()
         val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
@@ -1129,6 +1150,7 @@ private class FakeFeed : OnlineMixFeed {
     private val ready = MutableSharedFlow<MixSessionKey>(extraBufferCapacity = 16)
     override val readyChanged: Flow<MixSessionKey> = ready
     val starts = mutableListOf<Pair<MixSessionKey, MixSource>>()
+    val seeds = mutableListOf<SeedTrack>()
     var stops = 0
     var current: MixSessionKey? = null
     val skips = mutableListOf<String>()
@@ -1137,6 +1159,7 @@ private class FakeFeed : OnlineMixFeed {
     override fun start(session: MixSessionKey, source: MixSource, seed: SeedTrack, avoid: suspend () -> Set<String>) {
         stop()
         starts += session to source
+        seeds += seed
         current = session.takeIf { source != MixSource.OFFLINE }
     }
     override fun stop() { stops++; current = null }

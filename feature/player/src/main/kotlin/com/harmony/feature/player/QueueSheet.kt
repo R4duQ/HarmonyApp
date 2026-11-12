@@ -247,8 +247,10 @@ internal fun QueueSheetContent(
             )
         }
 
-        // A computer's song (a negative id) has no vector here: no mix from it.
-        val canMix = mixAvailable && nowPlaying != null && nowPlaying.id >= 0
+        // A computer's song (a negative id) has no vector here: no mix from it. A song an
+        // online mix prepared has its YouTube Music id, so a mix can start from it.
+        val canMix = mixAvailable && nowPlaying != null &&
+            (nowPlaying.id >= 0 || com.harmony.domain.playback.OnlineSongs.isOnline(nowPlaying))
         if (mix != null || canMix) {
             MixBar(mix = mix, palette = palette, onStart = onStartMix, onStop = onStopMix)
         }
