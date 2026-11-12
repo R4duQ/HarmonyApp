@@ -4,7 +4,7 @@ Android music player with a local library, playlists, equalizer, personalized so
 discovery, Spotify playlist import and album and track downloads through the
 configured SpotiFLAC and Soulseek integrations.
 
-**1.0** (`versionCode = 164`) is the first stable version. It contains every change
+**1.0** (`versionCode = 165`) is the first stable version. It contains every change
 made so far: the FLAC compatibility fix, album downloads, the three-step Discover flow
 ([instructions](DISCOVER-FLOW.md)), SpotiFLAC search across its providers (Tidal
 included), Smart Shuffle, the Home, playlist and album page redesigns, the Android Auto fixes
@@ -15,8 +15,10 @@ earlier build, so 1.0 installs as an update over them when it is signed with the
 
 ## Build locally
 
-Requires Java 17 and an Android SDK. The release workflow records the SDK, NDK,
-Go and backend versions used for builds. Open the project root in Android Studio
+Requires Java 17, an Android SDK with the NDK, and Rust (https://rustup.rs): the
+song analyzer, equalizer and Smart Shuffle are Rust (`native/`), and Gradle
+builds them with the toolchain pinned in `native/rust-toolchain.toml`. The release workflow records the SDK, NDK,
+Rust and backend versions used for builds. Open the project root in Android Studio
 and configure your SDK through the untracked `local.properties` file.
 
 ```sh
@@ -24,10 +26,10 @@ chmod +x gradlew
 ./gradlew :app:assembleDebug -PharmonyAbi=arm64-v8a
 ```
 
-The ZIP includes the local backend artifact for local builds. `vendor-maven/` is
-ignored by Git; a fresh Git checkout must first build it using
-`scripts/ci/build-spotiflac-backend.sh`, with the toolchain and environment from
-`.github/workflows/release.yml`. GitHub Actions performs this step automatically.
+Downloads run on Mornye's Rust runtime. `vendor-mornye/` is ignored by Git; a
+fresh Git checkout must first build it with `scripts/ci/build-mornye-backend.sh`
+(it needs `rustup` and the NDK named in `.github/workflows/release.yml`).
+GitHub Actions performs this step automatically.
 
 Windows installation and update instructions: [INSTRUCTIUNI.txt](INSTRUCTIUNI.txt).
 Keep the existing signing key when updating an installed app.
@@ -48,8 +50,8 @@ Actions secrets before triggering a signed build:
 - `HARMONY_KEY_ALIAS`
 - `HARMONY_KEY_PASSWORD`
 
-The workflow builds signed arm64-v8a and x86_64 APKs and publishes a GitHub
-release. Check whether the tag/release already exists before pushing it: the
+The workflow builds a signed arm64-v8a APK and publishes a GitHub release.
+(Mornye's runtime is built for ARM only, so there is no x86_64 emulator APK.) Check whether the tag/release already exists before pushing it: the
 existing workflow replaces release assets when a release with that tag exists.
 Uploading these sources alone does not trigger a tagged release.
 

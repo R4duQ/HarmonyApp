@@ -11,8 +11,6 @@ captures/
 .DS_Store
 .cxx/
 
-# Generated from pinned SpotiFLAC Go source by CI/local release tooling.
-vendor-maven/
 # Mornye's Rust backend and bindings, staged by scripts/ci/build-mornye-backend.sh.
 vendor-mornye/
 feature/downloads/libs/
@@ -47,3 +45,5 @@ website/dist/
 ios/Harmony.xcodeproj/
 ios/Config/Info.plist
 ios/Harmony/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+# Rust build output (native/).
+native/target/

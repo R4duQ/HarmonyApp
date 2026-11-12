@@ -1,31 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION_NAME="${1:?usage: package-release.sh <version-name> [abi] [stable|mornye]}"
+VERSION_NAME="${1:?usage: package-release.sh <version-name> [abi]}"
 ABI="${2:-arm64-v8a}"
-# stable: SpotiFLAC 4.9.6's Go download runtime; mornye: Mornye 5's Rust one.
-FLAVOR="${3:-stable}"
-APK_IN="app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk"
+APK_IN="app/build/outputs/apk/release/app-release.apk"
 DIST_DIR="dist"
+APK_OUT_NAME="Harmony-v${VERSION_NAME}-${ABI}.apk"
+# Mornye's Rust download runtime; UniFFI reaches it through JNA's dispatcher.
+BACKEND_LIBRARIES="libmornye_mobile.so libjnidispatch.so"
 
-case "$FLAVOR" in
-  stable)
-    APK_OUT_NAME="Harmony-v${VERSION_NAME}-${ABI}.apk"
-    BACKEND_LIBRARIES="libgojni.so"
-    ;;
-  mornye)
-    APK_OUT_NAME="Harmony-v${VERSION_NAME}-mornye-${ABI}.apk"
-    # UniFFI reaches the Rust library through JNA's dispatcher.
-    BACKEND_LIBRARIES="libmornye_mobile.so libjnidispatch.so"
-    ;;
-  *)
-    echo "ERROR: unsupported release flavor: $FLAVOR" >&2
-    exit 8
-    ;;
-esac
-
+# Mornye builds its Android runtime for ARM only, so there is no x86_64 APK.
 case "$ABI" in
-  arm64-v8a|x86_64) ;;
+  arm64-v8a) ;;
   *)
     echo "ERROR: unsupported release ABI: $ABI" >&2
     exit 5

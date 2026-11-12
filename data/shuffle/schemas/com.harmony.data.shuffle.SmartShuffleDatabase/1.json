@@ -1,0 +1,146 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "0889228796871e496566f844432623f3",
+    "entities": [
+      {
+        "tableName": "acoustic_vectors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`songId` INTEGER NOT NULL, `fileHash` TEXT NOT NULL, `extractorVersion` INTEGER NOT NULL, `vector` BLOB, `measuredAt` INTEGER NOT NULL, PRIMARY KEY(`songId`))",
+        "fields": [
+          {
+            "fieldPath": "songId",
+            "columnName": "songId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileHash",
+            "columnName": "fileHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "extractorVersion",
+            "columnName": "extractorVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vector",
+            "columnName": "vector",
+            "affinity": "BLOB",
+            "notNull": false
+          },
+          {
+            "fieldPath": "measuredAt",
+            "columnName": "measuredAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "songId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "markov_transitions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fromSongId` INTEGER NOT NULL, `toSongId` INTEGER NOT NULL, `weight` REAL NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`fromSongId`, `toSongId`))",
+        "fields": [
+          {
+            "fieldPath": "fromSongId",
+            "columnName": "fromSongId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toSongId",
+            "columnName": "toSongId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weight",
+            "columnName": "weight",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "fromSongId",
+            "toSongId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_markov_transitions_fromSongId",
+            "unique": false,
+            "columnNames": [
+              "fromSongId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_markov_transitions_fromSongId` ON `${TABLE_NAME}` (`fromSongId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "zone_bandit",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`context` INTEGER NOT NULL, `arm` INTEGER NOT NULL, `pulls` REAL NOT NULL, `rewards` REAL NOT NULL, PRIMARY KEY(`context`, `arm`))",
+        "fields": [
+          {
+            "fieldPath": "context",
+            "columnName": "context",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "arm",
+            "columnName": "arm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pulls",
+            "columnName": "pulls",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rewards",
+            "columnName": "rewards",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "context",
+            "arm"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0889228796871e496566f844432623f3')"
+    ]
+  }
+}

@@ -1,8 +1,21 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **164**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 163), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **165**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 164), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 165 — One app, on Rust
+
+- **Downloads run on Mornye only.** The separate stable build (SpotiFLAC 4.9.6, Go) is
+  gone: there is one phone APK, and its downloads use Mornye 5.3.1, the Rust runtime that
+  replaced SpotiFLAC's. Coming from the stable build, a provider may ask you to verify
+  once more, and sign-in pages now return on `mornye://` links.
+- **The song analyzer, the equalizer and Smart Shuffle are now written in Rust** instead
+  of C++. They give the same results (checked value for value against the C++), with
+  memory safety, and a fault in them now fails that one call instead of closing the app.
+  Songs that score exactly the same in Smart Shuffle are now ordered the same way on
+  every phone.
+- **No emulator APK any more:** Mornye is built for ARM phones only.
 
 ## Build 164 — Mix from an online song
 
@@ -119,34 +132,29 @@ Qobuz, Deezer and provider fallback rules are unchanged.
 
 ## Download
 
-- `Harmony-v1.0-arm64-v8a.apk`: for phones (64-bit ARM, Android 10 or newer). The stable
-  build: downloads run on SpotiFLAC 4.9.6, as before.
-- `Harmony-v1.0-mornye-arm64-v8a.apk`: the same app for phones, with downloads running on
-  Mornye 5.3.1 instead (see below). Try it if you want the newer download runtime.
-- `Harmony-v1.0-x86_64.apk`: for the Android emulator only (stable build).
+- `Harmony-v1.0-arm64-v8a.apk`: for phones (64-bit ARM, Android 10 or newer). Downloads
+  run on Mornye 5.3.1 (see below).
 - `Harmony-v1.0-iOS-unsigned.ipa`: Harmony for iPhone (iOS 16 or newer), unsigned. Install it
   from Windows or a Mac with Sideloadly or AltStore, which sign it with your Apple ID; with a
   free Apple ID it is signed again every 7 days. See `ios/INSTALARE-iOS.md`.
 
-The two phone APKs are the same app with the same version, so either one installs over
-the other, in both directions, and keeps your library, playlists and settings. Only the
-downloads differ.
+It installs over any earlier build, including the old stable and Mornye APKs, and keeps
+your library, playlists and settings.
 
-### Stable or Mornye
+### Mornye
 
 SpotiFLAC, the download runtime behind Harmony's lossless downloads, has become
 **Mornye**, and from version 5 its Go runtime was replaced by a new one written in Rust.
-The stable build keeps SpotiFLAC 4.9.6, which still runs every current download
-extension. The Mornye build uses Mornye 5.3.1 with the same extensions (Tidal, Qobuz,
-Deezer, Amazon), the same requests and the same answers, so downloads look and behave
-the same. Differences you may notice:
+Harmony uses Mornye 5.3.1 with the same extensions (Tidal, Qobuz, Deezer, Amazon), the
+same requests and the same answers as before. Differences you may notice after the old
+stable build:
 
 - Sign-in and verification pages return to the app on `mornye://` links instead of
   `spotiflac://`. If the Mornye app itself is also installed, Android may ask which app
   should open them: choose Harmony.
 - Mornye looks up network addresses with its own encrypted DNS.
-- Extension sign-ins are stored separately per runtime, so after switching builds a
-  provider may ask you to verify once more.
+- Extension sign-ins are stored separately per runtime, so a provider may ask you to
+  verify once more.
 
 `SHA256SUMS.txt` and `APK-SIGNATURE.txt` let you check the file and its signing
 certificate.

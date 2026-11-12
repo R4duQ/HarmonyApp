@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.harmony.app"
-        versionCode = 164
+        versionCode = 165
         versionName = "1.0"
 
         // Optional single-ABI build: -PharmonyAbi=arm64-v8a
@@ -39,21 +39,6 @@ android {
                 events("failed")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
             }
-        }
-    }
-
-    // The download runtime (see feature/downloads): stable is SpotiFLAC 4.9.6's
-    // Go runtime, mornye is Mornye 5's Rust one. Same app ID and version code,
-    // so either APK installs over the other and keeps the library.
-    flavorDimensions += "backend"
-    productFlavors {
-        create("stable") {
-            dimension = "backend"
-            isDefault = true
-        }
-        create("mornye") {
-            dimension = "backend"
-            versionNameSuffix = "-mornye"
         }
     }
 

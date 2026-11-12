@@ -67,7 +67,7 @@ internal object SpotiFlacNativeRuntime {
 
         if (packagedMachine != expectedMachine) {
             throw incompatibleRuntime(
-                userMessage = "This Harmony APK contains a ${elfMachineLabel(packagedMachine)} SpotiFLAC backend, but Android runs $primaryAbi. Soulseek remains available in this build.",
+                userMessage = "This Harmony APK contains a ${elfMachineLabel(packagedMachine)} download backend, but Android runs $primaryAbi. Soulseek remains available in this build.",
                 deviceAbis = deviceAbis,
                 primaryAbi = primaryAbi,
                 nativeDir = nativeDir,
@@ -110,9 +110,9 @@ internal object SpotiFlacNativeRuntime {
     }.getOrNull()
 
     private fun apkHint(primaryAbi: String): String = when (primaryAbi) {
-        "x86_64" -> "Install the Harmony x86_64 emulator APK."
         "arm64-v8a" -> "Install the Harmony arm64-v8a phone APK."
-        else -> "Use a 64-bit ARM device or a 64-bit x86 Android emulator."
+        // Mornye's runtime is built for ARM only; there is no x86_64 APK.
+        else -> "Downloads need a 64-bit ARM device. Soulseek remains available."
     }
 
     private fun elfMachineLabel(machine: Int): String = when (machine) {

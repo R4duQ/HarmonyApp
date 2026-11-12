@@ -1,0 +1,20 @@
+[package]
+name = "harmonyshuffle"
+version = "1.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Harmony's offline Smart Shuffle, its Diagnostic Brain and the 24-D acoustic extractor (SmartShuffleNative)."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni.workspace = true
+# clock_gettime(CLOCK_THREAD_CPUTIME_ID) for the self-test's CPU budget.
+libc = "0.2"
+
+[features]
+# Test-only hooks (poisoning the session vector).
+testing = []

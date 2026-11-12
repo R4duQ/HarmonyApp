@@ -116,7 +116,7 @@ class SpotiFlacDownloadEngine @Inject constructor(
         }
     }
 
-    /** "Mornye" in the Mornye build, "SpotiFLAC" in the stable one: the engine behind album and track downloads. */
+    /** "Mornye": the engine behind album and track downloads. */
     val engineName: String get() = backend.displayName
 
     // MainActivity can receive the deep link before a workflow ViewModel is
@@ -831,12 +831,12 @@ class SpotiFlacDownloadEngine @Inject constructor(
         initMutex.withLock {
             if (initialized) return@withLock
 
-            // The public phone APK used to contain an ARM64-only GoMobile
-            // backend. Android's emulator translation layer can sometimes
-            // install and launch that APK on an x86_64 Pixel image, but the
-            // first Gobackend call may terminate the process instead of
-            // returning a catchable UnsatisfiedLinkError. Validate the actual
-            // extracted ELF before touching the generated Go bindings. A
+            // The phone APK carries an ARM-only native runtime. Android's
+            // emulator translation layer can sometimes install and launch it
+            // on an x86_64 image, but the first native call may terminate the
+            // process instead of returning a catchable UnsatisfiedLinkError.
+            // Validate the actual extracted ELF before touching the generated
+            // bindings. A
             // mismatched build now leaves the Downloads screen alive and
             // explains which APK the user needs.
             SpotiFlacNativeRuntime.requireCompatible(context, backend.nativeLibrary)

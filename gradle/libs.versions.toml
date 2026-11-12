@@ -105,3 +105,4 @@ harmony-android-application = { id = "harmony.android.application", version = "u
 harmony-android-library = { id = "harmony.android.library", version = "unspecified" }
 harmony-hilt = { id = "harmony.hilt", version = "unspecified" }
 harmony-jvm-library = { id = "harmony.jvm.library", version = "unspecified" }
+harmony-rust-jni = { id = "harmony.rust.jni", version = "unspecified" }
