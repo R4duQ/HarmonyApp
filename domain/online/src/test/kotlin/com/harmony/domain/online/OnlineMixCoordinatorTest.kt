@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -135,7 +136,7 @@ class OnlineMixCoordinatorTest {
         val (c, catalog, _) = coordinator(FakeCatalog({ CatalogResult.Ok(listOf(SEED_SONG)) }, { id -> radioAsked += id; CatalogResult.Ok(RADIO) }))
         c.start(key, MixSource.ONLINE, SEED.copy(videoId = "knownVid001")) { emptySet() }
         advanceUntilIdle()
-        assertEquals(SeedStatus.Identified("knownVid001", 100), c.state.value.seed)
+        assertEquals(SeedStatus.Identified("knownVid001", 100, SeedBasis.KNOWN), c.state.value.seed)
         assertEquals("no search for a song whose id is known", 0, catalog.searches)
         assertEquals(listOf("knownVid001"), radioAsked)
         assertTrue(c.state.value.candidates.isNotEmpty())
@@ -361,5 +362,105 @@ class OnlineMixCoordinatorFailureTest {
         } finally {
             scope.cancel()
         }
+    }
+}
+
+
+/** Step 2 (the file's sound) and step 3 (the artist, the genre) when the tags don't find the song. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixSeedFallbackTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    /** A file whose tags say nothing useful. */
+    private val badTags = SeedTrack("Track 05", "Unknown artist", null, 216_000, uri = "content://media/external/audio/media/5", genre = "Rock")
+    private val inTheEnd = song("itheend", "In the End", "Linkin Park", ms = 216_000, album = "Hybrid Theory")
+    private val byLp = song("numb00", "Numb", "Linkin Park", ms = 185_000)
+    private val rockSong = song("rock01", "Some Rock Song", "Some Band", ms = 200_000)
+
+    private fun TestScope.make(
+        search: (String) -> List<CatalogTrack>,
+        fingerprinter: SongFingerprinter,
+    ): Pair<OnlineMixCoordinator, MutableList<String>> {
+        val radios = mutableListOf<String>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val catalog = FakeCatalog({ q -> CatalogResult.Ok(search(q)) }, { id -> radios += id; CatalogResult.Ok(RADIO) })
+        val c = OnlineMixCoordinator(catalog, FakePreparer(), LocalCopies.NONE, scope,
+            clock = { testScheduler.currentTime }, fingerprinter = fingerprinter)
+        return c to radios
+    }
+
+    @Test
+    fun theFilesSoundFindsWhatItsTagsCouldNot() = runTest {
+        var asked = 0
+        val (c, radios) = make(
+            search = { q -> if (q == "Linkin Park In the End") listOf(inTheEnd) else emptyList() },
+            fingerprinter = { asked++; FingerprintResult.Found("In the End", "Linkin Park", "Hybrid Theory") },
+        )
+        c.start(key, MixSource.ONLINE, badTags) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedStatus.Identified(inTheEnd.videoId, 100, SeedBasis.FINGERPRINT), c.state.value.seed)
+        assertEquals(listOf(inTheEnd.videoId), radios)
+        // The same file again: the fingerprint is not asked twice.
+        c.start(key.copy(generation = 2), MixSource.ONLINE, badTags) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(1, asked)
+    }
+
+    @Test
+    fun notRecognisedThenTheArtistsRadio() = runTest {
+        val tagged = badTags.copy(title = "In the End (my rip)", artist = "Linkin Park")
+        val (c, radios) = make(
+            search = { q -> if (q == "Linkin Park") listOf(rockSong, byLp) else emptyList() },
+            fingerprinter = { FingerprintResult.NotFound },
+        )
+        c.start(key, MixSource.ONLINE, tagged) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedStatus.Identified(byLp.videoId, 0, SeedBasis.ARTIST), c.state.value.seed)
+        assertEquals("a song by the same artist, not the first result", listOf(byLp.videoId), radios)
+        assertFalse(SeedBasis.ARTIST.exact)
+    }
+
+    @Test
+    fun noArtistThenTheGenresRadioAndAMeaninglessGenreIsNotUsed() = runTest {
+        val (c, radios) = make(search = { q -> if (q == "Rock") listOf(rockSong) else emptyList() }, fingerprinter = { FingerprintResult.Failed("offline") })
+        c.start(key, MixSource.ONLINE, badTags) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedStatus.Identified(rockSong.videoId, 0, SeedBasis.GENRE), c.state.value.seed)
+        assertEquals(listOf(rockSong.videoId), radios)
+
+        val (c2, radios2) = make(search = { emptyList() }, fingerprinter = { FingerprintResult.NotFound })
+        c2.start(key, MixSource.ONLINE, badTags.copy(genre = "(13)")) { emptySet() }
+        advanceUntilIdle()
+        assertTrue(c2.state.value.seed is SeedStatus.NotIdentified)
+        assertTrue(radios2.isEmpty())
+        assertEquals(null, LooseAnchors.usableGenre("Other"))
+        assertEquals(null, LooseAnchors.usableGenre("  "))
+        assertEquals("Hip-Hop", LooseAnchors.usableGenre("Hip-Hop"))
+    }
+
+    @Test
+    fun aFingerprinterThatThrowsIsAFailedStepNotACrash() = runTest {
+        val errors = mutableListOf<String>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val c = OnlineMixCoordinator(FakeCatalog({ CatalogResult.Ok(emptyList()) }, { CatalogResult.Ok(RADIO) }), FakePreparer(), LocalCopies.NONE, scope,
+            clock = { testScheduler.currentTime }, onError = { what, _ -> errors += what },
+            fingerprinter = { throw IllegalStateException("decoder") })
+        c.start(key, MixSource.ONLINE, badTags.copy(genre = null)) { emptySet() }
+        advanceUntilIdle()
+        assertTrue(c.state.value.seed is SeedStatus.NotIdentified)
+        assertEquals(listOf("recognising a file by its sound failed"), errors)
+    }
+
+    @Test
+    fun aSongFoundByItsTagsIsNeverFingerprinted() = runTest {
+        var asked = 0
+        val (c, _) = make(search = { listOf(SEED_SONG) }, fingerprinter = { asked++; FingerprintResult.NotFound })
+        c.start(key, MixSource.ONLINE, SEED.copy(uri = "content://x/1")) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedBasis.TAGS, (c.state.value.seed as SeedStatus.Identified).basis)
+        assertEquals(0, asked)
     }
 }

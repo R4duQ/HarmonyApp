@@ -853,7 +853,14 @@ class SmartQueueManager @Inject constructor(
         DiagnosticsLog.line("MIX", "start seed=${seed.id} source=$source generation=${mixState.generation}")
         // The online side starts from the same seed; with OFFLINE it makes no request at all.
         online.start(sessionKey(mixState), source,
-            SeedTrack(seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs, videoId = seedVideoId), ::avoidKeys)
+            SeedTrack(
+                seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs,
+                videoId = seedVideoId,
+                // The library's file, to recognise by its sound when the tags don't find it.
+                uri = seed.uri.takeIf { seedVideoId == null },
+                genre = seed.genre,
+            ),
+            ::avoidKeys)
         reRankJob?.cancel()
         // As in activate: the guard goes up before the mode changes, so the
         // top-up can't append to the old queue in between.

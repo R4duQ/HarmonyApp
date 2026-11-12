@@ -14,6 +14,7 @@ import com.harmony.domain.online.OnlineMixCoordinator
 import com.harmony.domain.online.OnlineMixFeed
 import com.harmony.domain.online.UrlConnectionTransport
 import com.harmony.domain.online.YtMusicClient
+import com.harmony.feature.downloads.FileFingerprinter
 import com.harmony.feature.downloads.OnlineMixPreparer
 import dagger.Module
 import dagger.Provides
@@ -42,7 +43,11 @@ import javax.inject.Singleton
 object OnlineMixModule {
     @Provides
     @Singleton
-    fun onlineMixFeed(preparer: OnlineMixPreparer, local: LibraryLocalCopies): OnlineMixFeed {
+    fun onlineMixFeed(
+        preparer: OnlineMixPreparer,
+        local: LibraryLocalCopies,
+        fingerprinter: FileFingerprinter,
+    ): OnlineMixFeed {
         val country = Locale.getDefault().country.takeIf { it.length == 2 }
         return OnlineMixCoordinator(
             catalog = YtMusicClient(
@@ -52,6 +57,8 @@ object OnlineMixModule {
             ),
             preparer = preparer,
             local = local,
+            // Tags not enough: the file is recognised by its sound (only a fingerprint is sent).
+            fingerprinter = fingerprinter,
             // Nothing that goes wrong online may take the app down: it is logged, and the
             // coordinator reports it as the mix's state (the library's mix plays on).
             scope = CoroutineScope(

@@ -114,8 +114,11 @@ the queue.
 ## The flow
 
 ```
-song playing ─▶ identify (search, songs) ─▶ SongMatcher ─▶ confirmed videoId
-                                                   └─▶ not found / ambiguous: no online picks
+song playing ─▶ identify (search, songs) ─▶ SongMatcher ─▶ confirmed videoId          (TAGS)
+              └▶ not confirmed: fingerprint 12 s of the file (Shazam) ─▶ search again   (FINGERPRINT)
+              └▶ still not: a song by the same artist ─▶ artist radio                   (ARTIST, looser)
+              └▶ still not: a song of the file's genre ─▶ genre radio                   (GENRE, looser)
+              └▶ nothing: no online picks, the library's mix plays on
 confirmed id ─▶ radio (always the seed's) ─▶ OnlineMixPlanner ─▶ candidates
 candidate ─▶ library has it? ─▶ play the library's song
           └▶ Mornye: search providers, download, check fLaC + length ─▶ online cache ─▶ queue
@@ -153,6 +156,32 @@ Measured on the first run, with no tuning: **0 wrong matches, 21/23 = 91.3%
 recovered, 10/10 Romanian**. The two misses are the cases built to be hard
 (nothing but the name confirms the song). `SongMatcherCorpusTest` fails the
 build if either threshold is missed.
+
+## When the tags are not enough (`SeedFallbacks`, `FileFingerprinter`)
+
+Only for a library song, and only after the tags found nothing (not after a
+catalogue failure: then nothing more is asked).
+
+1. **By its sound.** `FileFingerprinter` decodes 12 s of the file on the
+   phone, from a third of the way in (`MediaExtractor`/`MediaCodec`, any format
+   the phone plays), downmixes to mono, resamples to 16 kHz and builds the same
+   Shazam signature the Recognize screen builds from the microphone
+   (`ShazamSignature`, sent by `ShazamClient`). Only the signature leaves the
+   phone, never audio. The answer's title and artist are searched again and
+   must pass `SongMatcher` like tags would (the file's length is kept). Answers
+   are cached for the session's TTL; a failure (no network, undecodable file)
+   is not cached and is not read as "unknown song".
+2. **By its artist.** A search for the artist; the first song whose credits
+   include the seed's lead artist starts the radio.
+3. **By its genre.** Only when the genre tag names one (not blank, not an
+   ID3v1 number, not "Other"/"Unknown"/"Misc"): the first song of a search for
+   it starts the radio.
+
+The queue panel says which: "Found on YouTube Music", "Recognised by its
+sound…", or "Song not found: looser suggestions from the artist's radio / by
+genre". Tests: `OnlineMixSeedFallbackTest` (order, each step's stop, caching,
+no fallback after a failure, no genre from a meaningless tag) and
+`FileAudioWindowTest`.
 
 ## From the radio to candidates (`OnlineMixPlanner`)
 
@@ -265,7 +294,8 @@ which serves `file://` addresses.
 
 Settings → *Online mixes (experimental)*: **off by default**. On: the mix
 source (Combined, Online, Offline; tap to change) and *Prepare online songs on
-mobile data* (off by default).
+mobile data* (off by default). The setting's text says that a sound
+fingerprint (never audio) goes to Shazam when tags are not enough.
 
 ## Tests that block a merge (CI, `android-check`)
 

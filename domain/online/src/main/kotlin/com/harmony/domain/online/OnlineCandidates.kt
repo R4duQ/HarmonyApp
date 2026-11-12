@@ -146,7 +146,8 @@ fun interface LocalCopies {
 sealed interface SeedStatus {
     data object Idle : SeedStatus
     data object Identifying : SeedStatus
-    data class Identified(val videoId: String, val score: Int) : SeedStatus
+    /** The radio starts from [videoId]; [basis] says how exact that is (the song itself, or its artist or genre). */
+    data class Identified(val videoId: String, val score: Int, val basis: SeedBasis = SeedBasis.TAGS) : SeedStatus
 
     /** The catalog was asked and no recording was confirmed ([verdict] says why). */
     data class NotIdentified(val verdict: MatchVerdict, val resultsSeen: Int, val songsSeen: Int) : SeedStatus
