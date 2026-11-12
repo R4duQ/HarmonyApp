@@ -49,6 +49,11 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    private fun versionLabel(): String = runCatching {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        "${info.versionName} (${info.longVersionCode})"
+    }.getOrDefault("unknown")
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -56,6 +61,9 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
 
    override fun onCreate() {
         super.onCreate()
+        // Crashes and caught errors go to a log the listener can open, copy and share
+        // (Settings › Diagnostics log): Logcat is out of reach without a computer.
+        com.harmony.core.common.crash.DiagnosticsLog.install(filesDir, versionLabel())
         androidx.work.WorkManager.initialize(this, workManagerConfiguration)
 
         // Kicks off: periodic maintenance + immediate scan/analyze + change watching.

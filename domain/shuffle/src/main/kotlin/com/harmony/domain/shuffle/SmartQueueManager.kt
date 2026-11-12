@@ -1,5 +1,6 @@
 package com.harmony.domain.shuffle
 
+import com.harmony.core.common.crash.DiagnosticsLog
 import com.harmony.core.model.MixSource
 import com.harmony.core.model.MixState
 import com.harmony.core.model.MoodFilter
@@ -841,6 +842,7 @@ class SmartQueueManager @Inject constructor(
         )
         _mix.value = mixState
         onlinePicks.clear()
+        DiagnosticsLog.line("MIX", "start seed=${seed.id} source=$source generation=${mixState.generation}")
         // The online side starts from the same seed; with OFFLINE it makes no request at all.
         online.start(sessionKey(mixState), source, SeedTrack(seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs), ::avoidKeys)
         reRankJob?.cancel()
@@ -922,10 +924,18 @@ class SmartQueueManager @Inject constructor(
         val out = mutableListOf<Song>()
         // A pick dropped as a repeat leaves its place to the next one ready (a few rounds at most).
         var rounds = 0
-        while (out.size < max && rounds++ < MAX_ONLINE_ROUNDS) {
-            val picks = online.take(sessionKey(mix), max - out.size)
-            if (picks.isEmpty()) break
-            out += readySongs(picks, prefixIds, exclude)
+        try {
+            while (out.size < max && rounds++ < MAX_ONLINE_ROUNDS) {
+                val picks = online.take(sessionKey(mix), max - out.size)
+                if (picks.isEmpty()) break
+                out += readySongs(picks, prefixIds, exclude)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // The online side never stops the queue: the library's mix fills in.
+            brainLog.write(listOf("MIX online picks failed: ${t.javaClass.simpleName}"))
+            DiagnosticsLog.error("ONLINE_MIX", "taking ready picks failed", t)
         }
         return out
     }
@@ -959,6 +969,17 @@ class SmartQueueManager @Inject constructor(
      * is writing the queue.
      */
     private suspend fun onOnlineReady(key: MixSessionKey) {
+        try {
+            appendReadyOnline(key)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            brainLog.write(listOf("MIX online append failed: ${t.javaClass.simpleName}"))
+            DiagnosticsLog.error("ONLINE_MIX", "appending a ready pick failed", t)
+        }
+    }
+
+    private suspend fun appendReadyOnline(key: MixSessionKey) {
         val mix = _mix.value ?: return
         if (sessionKey(mix) != key || isMutatingQueue) return
         mutex.withLock {

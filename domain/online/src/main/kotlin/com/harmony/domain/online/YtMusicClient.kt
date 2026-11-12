@@ -43,6 +43,8 @@ class YtMusicClient(
     /** Two-letter country for `gl`, as ytmusicapi's `location`; null lets the server decide. */
     private val location: String? = null,
     private val timeoutMs: Int = DEFAULT_TIMEOUT_MS,
+    /** Something unexpected was caught and turned into a failed request: for the diagnostics log. */
+    private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) : OnlineCatalog {
     private val json = Json { ignoreUnknownKeys = true }
     private val visitorLock = Mutex()
@@ -81,7 +83,11 @@ class YtMusicClient(
         } catch (e: YtmParsers.SchemaException) {
             return CatalogResult.Failed(CatalogFailure.SchemaChanged(e.where))
         }
-        tracks += YtmParsers.watchTracks(panel)
+        try {
+            tracks += YtmParsers.watchTracks(panel)
+        } catch (e: RuntimeException) {
+            return CatalogResult.Failed(CatalogFailure.SchemaChanged("next: ${e.javaClass.simpleName}"))
+        }
         var pages = 1
         while (tracks.size < limit && pages < MAX_RADIO_PAGES) {
             // As ytmusicapi: the token goes into the URL as given (it comes URL-encoded already).
@@ -94,7 +100,7 @@ class YtMusicClient(
             // Seen live (2026-11, anonymous): a continuation can repeat the first page.
             // ytmusicapi returns the repeats; Harmony stops when a page brings nothing new.
             val known = tracks.mapTo(HashSet()) { it.videoId }
-            val more = YtmParsers.watchTracks(panel).filter { it.videoId !in known }
+            val more = runCatching { YtmParsers.watchTracks(panel) }.getOrDefault(emptyList()).filter { it.videoId !in known }
             if (more.isEmpty()) break
             tracks += more
             pages++
@@ -133,6 +139,10 @@ class YtMusicClient(
             throw e
         } catch (e: IOException) {
             return CatalogResult.Failed(networkFailure(e))
+        } catch (e: Exception) {
+            // A platform's HTTP stack can throw more than IOException (a SecurityException, say).
+            onError("$endpoint request failed", e)
+            return CatalogResult.Failed(CatalogFailure.Unexpected(e.javaClass.simpleName))
         }
         if (reply.status == 429) return CatalogResult.Failed(CatalogFailure.RateLimited(retryAfterMs(reply.headers["retry-after"])))
         if (reply.status >= 400) return CatalogResult.Failed(CatalogFailure.Http(reply.status))
@@ -156,14 +166,20 @@ class YtMusicClient(
                 throw e
             } catch (e: IOException) {
                 return null
+            } catch (e: Exception) {
+                onError("home page request failed", e)
+                return null
             }
             if (reply.status != 200) return null
-            val found = YTCFG.findAll(reply.body).firstNotNullOfOrNull { m ->
-                runCatching {
-                    val cfg = json.parseToJsonElement(m.groupValues[1]).jsonObject
-                    (cfg["VISITOR_DATA"] as? JsonPrimitive)?.content
-                }.getOrNull()
-            }
+            // The page is large; a regex engine that gives up on it (Android's ICU can) means no id, not a crash.
+            val found = runCatching {
+                YTCFG.findAll(reply.body).firstNotNullOfOrNull { m ->
+                    runCatching {
+                        val cfg = json.parseToJsonElement(m.groupValues[1]).jsonObject
+                        (cfg["VISITOR_DATA"] as? JsonPrimitive)?.content
+                    }.getOrNull()
+                }
+            }.getOrNull()
             // An empty id is remembered too: ytmusicapi sends the header empty and the calls still work.
             (found ?: "").also { visitorId = it }
         }

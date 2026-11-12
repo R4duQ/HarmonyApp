@@ -319,3 +319,35 @@ class OnlineMixCoordinatorTest {
         assertTrue(c.state.value.candidates.none { it.videoId.startsWith("r2") })
     }
 }
+
+/** Whatever the platform throws, the online side reports it and the app goes on. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixCoordinatorFailureTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+
+    @Test
+    fun anUnexpectedErrorIsReportedNotThrown() = runTest {
+        val uncaught = mutableListOf<Throwable>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob() +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, t -> uncaught += t })
+        try {
+            val catalog = FakeCatalog({ throw IllegalStateException("platform HTTP stack") }, { CatalogResult.Ok(RADIO) })
+            val c = OnlineMixCoordinator(catalog, FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime })
+            c.start(key, MixSource.COMBINED, SEED) { emptySet() }
+            advanceUntilIdle()
+            assertEquals(SeedStatus.Failed(CatalogFailure.Unexpected("IllegalStateException")), c.state.value.seed)
+            assertTrue("nothing escaped to the app", uncaught.isEmpty())
+
+            // An Error while preparing (a missing class, a native library) is a failed attempt, not a crash.
+            val preparer = FakePreparer { throw NoClassDefFoundError("x") }
+            val c2 = OnlineMixCoordinator(FakeCatalog({ CatalogResult.Ok(listOf(SEED_SONG)) }, { CatalogResult.Ok(RADIO) }), preparer, LocalCopies.NONE, scope, clock = { testScheduler.currentTime })
+            c2.start(key, MixSource.ONLINE, SEED) { emptySet() }
+            runCurrent()
+            assertEquals(CandidateStage.RETRY_LATER, c2.state.value.candidates.first().stage)
+            assertEquals("NoClassDefFoundError", c2.state.value.candidates.first().detail)
+            assertTrue(uncaught.isEmpty())
+        } finally {
+            scope.cancel()
+        }
+    }
+}

@@ -109,10 +109,17 @@ jobs:
           # The test stays as on this commit; the screens it renders go back to main.
           git checkout "$base" -- core/ui/src/main feature/player/src/main feature/library/src/main app/src/main
           rm -rf app/build/outputs/roborazzi
-          ./gradlew :app:testStableDebugUnitTest \
+          # Main's UI code is built against this commit's other modules. When this commit
+          # changed an API that code uses (a new case of a sealed type, say), it no longer
+          # builds: then there are no before_ shots, and the after_ ones still stand.
+          if ./gradlew :app:testStableDebugUnitTest \
             --tests 'com.harmony.app.ThemeShowcaseScreenshotTest' \
-            -Proborazzi.test.record=true --no-daemon --stacktrace
-          for f in app/build/outputs/roborazzi/*.png; do cp "$f" "$RUNNER_TEMP/shots/before_$(basename "$f")"; done
+            -Proborazzi.test.record=true --no-daemon --stacktrace; then
+            for f in app/build/outputs/roborazzi/*.png; do cp "$f" "$RUNNER_TEMP/shots/before_$(basename "$f")"; done
+          else
+            echo "::warning::The UI code as on main does not build against this commit's modules: no before_ screenshots."
+            echo "No before_ screenshots: main's UI code does not build against this commit's modules." > "$RUNNER_TEMP/shots/NO_BEFORE.txt"
+          fi
           git checkout HEAD -- core/ui/src/main feature/player/src/main feature/library/src/main app/src/main
 
       - name: Keep them on a ui-screenshots branch

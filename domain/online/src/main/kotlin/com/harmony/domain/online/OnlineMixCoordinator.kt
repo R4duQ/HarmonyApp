@@ -102,6 +102,8 @@ class OnlineMixCoordinator(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Ids, counts and timings only: never titles, URLs or keys. */
     private val log: (String) -> Unit = {},
+    /** Something unexpected was caught (the app goes on): for the diagnostics log, with its stack. */
+    private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) : OnlineMixFeed {
     private val _state = MutableStateFlow(OnlineMixState())
     override val state: StateFlow<OnlineMixState> = _state.asStateFlow()
@@ -129,7 +131,18 @@ class OnlineMixCoordinator(
         synchronized(skippedArtists) { skippedArtists.clear() }
         wake = Channel(Channel.CONFLATED)
         _state.value = OnlineMixState(session = session, source = source, seed = SeedStatus.Identifying)
-        job = scope.launch { run(gen, session, seed, avoid) }
+        job = scope.launch {
+            try {
+                run(gen, session, seed, avoid)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // Whatever went wrong stays in the online side: the mix plays on from the library.
+                apply(gen) { it.copy(seed = SeedStatus.Failed(CatalogFailure.Unexpected(t.javaClass.simpleName))) }
+                log("ONLINE_MIX seed=${session.seedSongId} stopped=${t.javaClass.simpleName}")
+                onError("session of seed ${session.seedSongId} stopped", t)
+            }
+        }
     }
 
     override fun stop() {
@@ -291,8 +304,9 @@ class OnlineMixCoordinator(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            PrepareOutcome.TemporaryError(e.javaClass.simpleName)
+        } catch (t: Throwable) {
+            onError("preparing video $id failed", t)
+            PrepareOutcome.TemporaryError(t.javaClass.simpleName)
         }
         if (!current(gen)) return
         val attempts = candidate.attempts + 1
@@ -311,7 +325,15 @@ class OnlineMixCoordinator(
             }.copy(attempts = attempts, progress = null)
         }
         apply(gen) { s -> s.copy(candidates = s.candidates.map { if (it.videoId == id) updated(it) else it }) }
-        log("ONLINE_MIX seed=${session.seedSongId} prepare video=$id outcome=${outcome.javaClass.simpleName} attempt=$attempts ms=${clock() - started}")
+        val why = when (outcome) {
+            is PrepareOutcome.Ready -> outcome.audio.let { "${it.codec} ${it.bitDepth}/${it.sampleRateHz}" }
+            is PrepareOutcome.NotAvailable -> outcome.reason
+            is PrepareOutcome.NotVerified -> outcome.reason
+            is PrepareOutcome.TemporaryError -> outcome.reason
+            is PrepareOutcome.RejectedAudio -> outcome.reason
+            is PrepareOutcome.Held -> outcome.reason
+        }
+        log("ONLINE_MIX seed=${session.seedSongId} prepare video=$id outcome=${outcome.javaClass.simpleName} ($why) attempt=$attempts ms=${clock() - started}")
         if (outcome is PrepareOutcome.Ready) _ready.tryEmit(session)
     }
 

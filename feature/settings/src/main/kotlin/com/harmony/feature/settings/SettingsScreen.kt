@@ -12,6 +12,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -514,6 +518,18 @@ fun SettingsScreen(
             onClick = onOpenTagEditor,
         )
 
+        // Crashes, caught errors and the online mix's steps, readable on the phone.
+        var showDiagnostics by remember { mutableStateOf(false) }
+        EditorialSettingRow(
+            title = "Diagnostics log",
+            subtitle = "Crashes and errors, with the online mix's steps. Open it to copy or share it",
+            palette = palette,
+            onClick = { showDiagnostics = true },
+        )
+        if (showDiagnostics) {
+            DiagnosticsLogDialog(onDismiss = { showDiagnostics = false })
+        }
+
         EditorialSettingRow(
             title = "Check a file",
             subtitle = "Inspect a track's spectrum — see if a FLAC is really lossless, " +
@@ -711,4 +727,61 @@ private fun ReplayGainMode.label(): String = when (this) {
     ReplayGainMode.OFF -> "Off"
     ReplayGainMode.TRACK -> "Track"
     ReplayGainMode.ALBUM -> "Album"
+}
+
+/**
+ * The diagnostics log (crashes with their stack, errors the app caught and
+ * went on from, the online mix's steps), newest at the bottom, to copy or
+ * share as text. It names code, ids and timings, not songs.
+ */
+@Composable
+private fun DiagnosticsLogDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf(com.harmony.core.common.crash.DiagnosticsLog.read()) }
+    val scroll = rememberScrollState()
+    androidx.compose.runtime.LaunchedEffect(text) { scroll.scrollTo(scroll.maxValue) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text("Diagnostics log") },
+        text = {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(scroll),
+            ) {
+                androidx.compose.material3.Text(
+                    text.ifBlank { "Nothing logged yet." },
+                    fontSize = 10.5.sp,
+                    lineHeight = 13.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
+            }
+        },
+        confirmButton = {
+            Row {
+                androidx.compose.material3.TextButton(onClick = {
+                    val share = android.content.Intent(android.content.Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_SUBJECT, "Harmony diagnostics log")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                    context.startActivity(android.content.Intent.createChooser(share, "Share the diagnostics log"))
+                }, enabled = text.isNotBlank()) { androidx.compose.material3.Text("Share") }
+                androidx.compose.material3.TextButton(onClick = {
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("Harmony diagnostics log", text))
+                    android.widget.Toast.makeText(context, "Diagnostics log copied", android.widget.Toast.LENGTH_SHORT).show()
+                }, enabled = text.isNotBlank()) { androidx.compose.material3.Text("Copy") }
+            }
+        },
+        dismissButton = {
+            Row {
+                androidx.compose.material3.TextButton(onClick = {
+                    com.harmony.core.common.crash.DiagnosticsLog.clear()
+                    text = ""
+                }) { androidx.compose.material3.Text("Clear") }
+                androidx.compose.material3.TextButton(onClick = onDismiss) { androidx.compose.material3.Text("Close") }
+            }
+        },
+    )
 }

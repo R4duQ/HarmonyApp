@@ -114,4 +114,7 @@ sealed interface CatalogFailure {
 
     /** The online source is off (Offline mode, or the feature flag). No request was made. */
     data object Disabled : CatalogFailure
+
+    /** Something this version did not expect went wrong ([kind]: the error's class name). Not retried. */
+    data class Unexpected(val kind: String) : CatalogFailure
 }
