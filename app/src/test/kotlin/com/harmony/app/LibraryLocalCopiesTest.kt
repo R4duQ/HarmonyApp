@@ -21,7 +21,7 @@ import java.lang.reflect.Proxy
 import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [28])
+@Config(application = Application::class, sdk = [34])
 class LibraryLocalCopiesTest {
     @Test
     fun firstLookupBuildsTheIndexAndTheIndexRefreshesAfterExpiry() = runBlocking {
