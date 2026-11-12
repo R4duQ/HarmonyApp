@@ -1,5 +1,6 @@
 package com.harmony.domain.shuffle
 
+import com.harmony.core.common.crash.DiagnosticsLog
 import com.harmony.core.model.MixSource
 import com.harmony.core.model.MixState
 import com.harmony.core.model.MoodFilter
@@ -841,6 +842,7 @@ class SmartQueueManager @Inject constructor(
         )
         _mix.value = mixState
         onlinePicks.clear()
+        DiagnosticsLog.line("MIX", "start seed=${seed.id} source=$source generation=${mixState.generation}")
         // The online side starts from the same seed; with OFFLINE it makes no request at all.
         online.start(sessionKey(mixState), source, SeedTrack(seed.title, seed.artist, seed.album.ifBlank { null }, seed.durationMs), ::avoidKeys)
         reRankJob?.cancel()
@@ -933,6 +935,7 @@ class SmartQueueManager @Inject constructor(
         } catch (t: Throwable) {
             // The online side never stops the queue: the library's mix fills in.
             brainLog.write(listOf("MIX online picks failed: ${t.javaClass.simpleName}"))
+            DiagnosticsLog.error("ONLINE_MIX", "taking ready picks failed", t)
         }
         return out
     }
@@ -969,6 +972,7 @@ class SmartQueueManager @Inject constructor(
             throw e
         } catch (t: Throwable) {
             brainLog.write(listOf("MIX online append failed: ${t.javaClass.simpleName}"))
+            DiagnosticsLog.error("ONLINE_MIX", "appending a ready pick failed", t)
         }
     }
 

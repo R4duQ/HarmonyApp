@@ -61,8 +61,9 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
 
    override fun onCreate() {
         super.onCreate()
-        // A crash is written down before the app goes, so it can be copied from Settings afterwards.
-        com.harmony.core.common.crash.CrashReports.install(filesDir, versionLabel())
+        // Crashes and caught errors go to a log the listener can open, copy and share
+        // (Settings › Diagnostics log): Logcat is out of reach without a computer.
+        com.harmony.core.common.crash.DiagnosticsLog.install(filesDir, versionLabel())
         androidx.work.WorkManager.initialize(this, workManagerConfiguration)
 
         // Kicks off: periodic maintenance + immediate scan/analyze + change watching.

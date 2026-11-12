@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import com.harmony.core.common.crash.DiagnosticsLog
 import com.harmony.core.model.Song
 import com.harmony.domain.library.discovery.TrackIdentity
 import com.harmony.domain.library.repository.LibraryRepository
@@ -44,17 +45,28 @@ object OnlineMixModule {
     fun onlineMixFeed(preparer: OnlineMixPreparer, local: LibraryLocalCopies): OnlineMixFeed {
         val country = Locale.getDefault().country.takeIf { it.length == 2 }
         return OnlineMixCoordinator(
-            catalog = YtMusicClient(UrlConnectionTransport(), location = country),
+            catalog = YtMusicClient(
+                UrlConnectionTransport(),
+                location = country,
+                onError = { what, error -> DiagnosticsLog.error("ONLINE_MIX", what, error) },
+            ),
             preparer = preparer,
             local = local,
             // Nothing that goes wrong online may take the app down: it is logged, and the
             // coordinator reports it as the mix's state (the library's mix plays on).
             scope = CoroutineScope(
                 SupervisorJob() + Dispatchers.Default +
-                    CoroutineExceptionHandler { _, error -> Log.e("ONLINE_MIX", "online mix stopped", error) },
+                    CoroutineExceptionHandler { _, error ->
+                        Log.e("ONLINE_MIX", "online mix stopped", error)
+                        DiagnosticsLog.error("ONLINE_MIX", "online mix stopped", error)
+                    },
             ),
             // Ids, counts and timings only.
-            log = { Log.i("ONLINE_MIX", it) },
+            log = { line ->
+                Log.i("ONLINE_MIX", line)
+                DiagnosticsLog.line("ONLINE_MIX", line.removePrefix("ONLINE_MIX "))
+            },
+            onError = { what, error -> DiagnosticsLog.error("ONLINE_MIX", what, error) },
         )
     }
 }

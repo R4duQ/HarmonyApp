@@ -43,6 +43,8 @@ class YtMusicClient(
     /** Two-letter country for `gl`, as ytmusicapi's `location`; null lets the server decide. */
     private val location: String? = null,
     private val timeoutMs: Int = DEFAULT_TIMEOUT_MS,
+    /** Something unexpected was caught and turned into a failed request: for the diagnostics log. */
+    private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) : OnlineCatalog {
     private val json = Json { ignoreUnknownKeys = true }
     private val visitorLock = Mutex()
@@ -139,6 +141,7 @@ class YtMusicClient(
             return CatalogResult.Failed(networkFailure(e))
         } catch (e: Exception) {
             // A platform's HTTP stack can throw more than IOException (a SecurityException, say).
+            onError("$endpoint request failed", e)
             return CatalogResult.Failed(CatalogFailure.Unexpected(e.javaClass.simpleName))
         }
         if (reply.status == 429) return CatalogResult.Failed(CatalogFailure.RateLimited(retryAfterMs(reply.headers["retry-after"])))
@@ -161,7 +164,10 @@ class YtMusicClient(
                 transport.execute(HttpRequest("GET", DOMAIN, baseHeaders(), null, timeoutMs))
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: IOException) {
+                return null
             } catch (e: Exception) {
+                onError("home page request failed", e)
                 return null
             }
             if (reply.status != 200) return null
