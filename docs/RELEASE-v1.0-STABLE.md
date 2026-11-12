@@ -1,8 +1,15 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **163**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 162), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **164**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 163), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 164 — Mix from an online song
+
+- **"Mix from this song" on songs an online mix added.** The button was hidden for them;
+  now a mix can start from such a song, straight from its YouTube Music radio.
+- **The diagnostics log says which recommendations are already in your library**, and
+  logs a failed library lookup instead of downloading the song again quietly.
 
 ## Build 163 — Online mixes start
 

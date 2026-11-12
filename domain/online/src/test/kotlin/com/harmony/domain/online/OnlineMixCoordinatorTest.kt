@@ -130,6 +130,18 @@ class OnlineMixCoordinatorTest {
     }
 
     @Test
+    fun aSeedWhoseIdIsKnownIsNotSearchedFor() = runTest {
+        val radioAsked = mutableListOf<String>()
+        val (c, catalog, _) = coordinator(FakeCatalog({ CatalogResult.Ok(listOf(SEED_SONG)) }, { id -> radioAsked += id; CatalogResult.Ok(RADIO) }))
+        c.start(key, MixSource.ONLINE, SEED.copy(videoId = "knownVid001")) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedStatus.Identified("knownVid001", 100), c.state.value.seed)
+        assertEquals("no search for a song whose id is known", 0, catalog.searches)
+        assertEquals(listOf("knownVid001"), radioAsked)
+        assertTrue(c.state.value.candidates.isNotEmpty())
+    }
+
+    @Test
     fun notASongMeansNoRadioAndNoGuess() = runTest {
         val video = SEED_SONG.copy(kind = CatalogKind.USER_VIDEO)
         val (c, catalog, _) = coordinator(FakeCatalog({ CatalogResult.Ok(listOf(video)) }, { CatalogResult.Ok(RADIO) }))

@@ -13,6 +13,11 @@ data class SeedTrack(
     val durationMs: Long? = null,
     /** The file's own explicit mark; null when its tags don't say (the usual case). */
     val explicit: Boolean? = null,
+    /**
+     * The catalog's id of this very recording, when it is already known (a
+     * song an online mix prepared): then nothing is searched for.
+     */
+    val videoId: String? = null,
 ) {
     val knownDurationMs: Long? get() = durationMs?.takeIf { it > 0 }
 
