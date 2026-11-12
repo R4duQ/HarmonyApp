@@ -38,6 +38,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "harmonyeq"
+version = "1.0.0"
+dependencies = [
+ "jni",
+]
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
