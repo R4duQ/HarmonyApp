@@ -51,6 +51,41 @@ class OnlineMixSourcesTest {
     }
 
     @Test
+    fun aFullProtectedCacheRefusesAdmission() {
+        val dir = Files.createTempDirectory("online-cache-full").toFile()
+        try {
+            val queued = dir.resolve("queued00001.flac").apply { writeBytes(ByteArray(10)) }
+            val cache = OnlineCache(dir)
+            assertFalse(cache.makeRoom(OnlineCache.LIMIT_BYTES - 5, setOf("queued00001")))
+            assertTrue("protected audio survives failed admission", queued.exists())
+            assertFalse(cache.makeRoom(OnlineCache.LIMIT_BYTES + 1, emptySet()))
+            assertTrue(queued.exists())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun rejectedPublicationKeepsTheStagedFileAndCreatesNoTarget() {
+        val dir = Files.createTempDirectory("online-cache-store").toFile()
+        val staged = Files.createTempFile("online-staged", ".flac").toFile()
+        try {
+            staged.writeText("fLaC")
+            val oversized = object : java.io.File(staged.path) {
+                override fun length(): Long = OnlineCache.LIMIT_BYTES + 1
+            }
+            val target = dir.resolve("abcdefghijk.flac")
+            assertFalse(OnlineCache(dir).store(oversized, target, emptySet()))
+            assertTrue(staged.exists())
+            assertFalse(target.exists())
+            assertFalse(dir.resolve("abcdefghijk.flac.part").exists())
+            assertTrue(OnlineCache(dir).store(staged, target, emptySet()))
+            assertEquals("fLaC", target.readText())
+        } finally {
+            staged.delete()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun theCacheMakesRoomWithoutTouchingWhatTheQueueHolds() {
         val dir = Files.createTempDirectory("online-mix").toFile()
         try {

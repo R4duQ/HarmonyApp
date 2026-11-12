@@ -267,6 +267,37 @@ class OnlineMixCoordinatorTest {
     }
 
     @Test
+    fun bufferingInterruptsAnActivePreparationAndRetriesTheSameSong() = runTest {
+        var cancelled = false
+        val blocking = CompletableDeferred<Unit>()
+        val preparer = FakePreparer { track ->
+            if (!cancelled) {
+                try { blocking.await() } finally { cancelled = true }
+            }
+            FakePreparer.ready(track)
+        }
+        val (c, _, _) = coordinator(preparer = preparer)
+        c.start(key, MixSource.ONLINE, SEED) { emptySet() }
+        runCurrent()
+        assertEquals(CandidateStage.PREPARING, c.state.value.candidates.first().stage)
+
+        c.setPlaybackBusy(true)
+        runCurrent()
+        assertTrue("the active transfer was cancelled", cancelled)
+        assertEquals(CandidateStage.HELD, c.state.value.candidates.first().stage)
+        assertTrue(c.take(key, 1).isEmpty())
+        advanceTimeBy(120_000)
+        runCurrent()
+        assertEquals("nothing else starts during buffering", 1, preparer.calls.size)
+
+        c.setPlaybackBusy(false)
+        runCurrent()
+        assertEquals(CandidateStage.READY, c.state.value.candidates.first().stage)
+        assertEquals(listOf("r1000000000", "r1000000000"), preparer.calls)
+        assertEquals("r1000000000", c.take(key, 1).single().candidate.videoId)
+    }
+
+    @Test
     fun aFastSkipDropsThatArtistsWaitingSongs() = runTest {
         val radio = listOf(SEED_SONG, song("a1", "One", "Alpha"), song("b1", "Two", "Beta"), song("a2", "Three", "Alpha"))
         val (c, _, _) = coordinator(FakeCatalog({ CatalogResult.Ok(listOf(SEED_SONG)) }, { CatalogResult.Ok(radio) }))

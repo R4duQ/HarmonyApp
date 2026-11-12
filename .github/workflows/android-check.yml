@@ -81,6 +81,19 @@ jobs:
             "ndk;${NDK_VERSION}" \
             "ndk;${MORNYE_NDK_VERSION}"
 
+      - name: Install pinned host FFmpeg for Amazon finalizer tests
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          # The Linux wheel carries a static FFmpeg binary. Its hash is published by PyPI:
+          # https://pypi.org/project/imageio-ffmpeg/0.6.0/#files
+          python3 -m venv "$RUNNER_TEMP/host-ffmpeg"
+          echo "imageio-ffmpeg==0.6.0 --hash=sha256:c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282" > "$RUNNER_TEMP/host-ffmpeg.txt"
+          "$RUNNER_TEMP/host-ffmpeg/bin/pip" install --only-binary=:all: --no-deps --require-hashes --retries 3 --timeout 20 -r "$RUNNER_TEMP/host-ffmpeg.txt"
+          FFMPEG=$("$RUNNER_TEMP/host-ffmpeg/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')
+          "$FFMPEG" -version
+          echo "HARMONY_TEST_FFMPEG=$FFMPEG" >> "$GITHUB_ENV"
+
       - name: Build pinned SpotiFLAC Go backend
         env:
           NDK_VERSION: ${{ env.NDK_VERSION }}
@@ -124,14 +137,7 @@ jobs:
           # ytmusicapi's own parsers still read the recorded answers as the committed outputs say.
           build/ytmusic-venv/bin/python -I scripts/ytmusic/expected_outputs.py domain/online/src/test/resources/ytmusic --check
 
-      - name: Install host FFmpeg for Amazon finalizer tests
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
       - name: Playback and download tests
-        env:
-          HARMONY_TEST_FFMPEG: /usr/bin/ffmpeg
         run: >-
           ./gradlew
           :playback:service:testReleaseUnitTest
@@ -149,6 +155,9 @@ jobs:
           :feature:home:testReleaseUnitTest
           --no-daemon
           --stacktrace
+
+      - name: Online mix local-library regression
+        run: ./gradlew :app:testStableDebugUnitTest --tests 'com.harmony.app.LibraryLocalCopiesTest' --no-daemon --stacktrace
 
       - name: Upload test report
         if: failure()

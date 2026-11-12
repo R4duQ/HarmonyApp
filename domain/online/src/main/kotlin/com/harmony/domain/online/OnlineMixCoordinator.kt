@@ -4,6 +4,9 @@ import com.harmony.core.model.MixSource
 
 import com.harmony.domain.library.discovery.TrackIdentity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -296,7 +299,7 @@ class OnlineMixCoordinator(
         apply(gen) { s -> s.copy(candidates = s.candidates.map { if (it.videoId == id) it.copy(stage = CandidateStage.PREPARING, detail = null, progress = null) else it }) }
         val started = clock()
         val outcome = try {
-            preparer.prepare(candidate.track) { p ->
+            prepareWhileIdle(candidate.track) { p ->
                 apply(gen) { s -> s.copy(candidates = s.candidates.map { if (it.videoId == id) it.copy(progress = p) else it }) }
             }
         } catch (e: CancellationException) {
@@ -333,6 +336,24 @@ class OnlineMixCoordinator(
         log("ONLINE_MIX seed=${session.seedSongId} prepare video=$id outcome=${outcome.javaClass.simpleName} ($why) attempt=$attempts ms=${clock() - started}")
         if (outcome is PrepareOutcome.Ready) _ready.tryEmit(session)
     }
+
+    /** Cancellation waits for the native job's cleanup before another preparation can start. */
+    private suspend fun prepareWhileIdle(track: CatalogTrack, progress: (Float?) -> Unit): PrepareOutcome = coroutineScope {
+        val preparation = async { preparer.prepare(track, progress) }
+        val playbackWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            busy.first { it }
+            preparation.cancel(PlaybackBusyCancellation())
+        }
+        try {
+            preparation.await()
+        } catch (e: PlaybackBusyCancellation) {
+            PrepareOutcome.Held("waiting for playback", retryAfterMs = 0)
+        } finally {
+            playbackWatcher.cancel()
+        }
+    }
+
+    private class PlaybackBusyCancellation : CancellationException("playback needs the connection")
 
     // -- the catalog --------------------------------------------------------------------------
 

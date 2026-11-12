@@ -46,16 +46,27 @@ internal object OnlineSourceMatch {
  * never one the queue holds.
  */
 internal class OnlineCache(private val dir: File) {
-    fun makeRoom(incoming: Long, inUse: Set<String>) {
+    fun makeRoom(incoming: Long, inUse: Set<String>): Boolean {
+        require(incoming >= 0)
+        if (incoming > LIMIT_BYTES) return false
         dir.mkdirs()
-        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".flac") }?.sortedBy { it.lastModified() } ?: return
+        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".flac") }?.sortedBy { it.lastModified() } ?: return false
         var used = files.sumOf { it.length() }
         for (f in files) {
-            if (used + incoming <= LIMIT_BYTES) break
+            if (used <= LIMIT_BYTES - incoming) break
             if (f.nameWithoutExtension in inUse) continue
             val size = f.length()
             if (f.delete()) used -= size
         }
+        return used <= LIMIT_BYTES - incoming
+    }
+
+    /** Admission and publication share the lock across replaced/cancelled mix sessions. */
+    @Synchronized
+    fun store(staged: File, target: File, inUse: Set<String>): Boolean {
+        if (!makeRoom(staged.length(), inUse)) return false
+        place(staged, target)
+        return true
     }
 
     /** Moves [staged] to [target] (a copy when they are on different file systems). */
