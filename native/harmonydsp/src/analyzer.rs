@@ -261,9 +261,8 @@ impl Analyzer {
             return None;
         }
         let sr = sample_rate;
-        let hann = (0..FFT_SIZE)
-            .map(|i| 0.5f32 * (1.0 - (2.0f32 * PI * i as f32 / (FFT_SIZE - 1) as f32).cos()))
-            .collect();
+        let hann =
+            (0..FFT_SIZE).map(|i| 0.5f32 * (1.0 - (2.0f32 * PI * i as f32 / (FFT_SIZE - 1) as f32).cos())).collect();
         // C++: std::cos(kPi * c * (m + 0.5) / kNumMels), with kPi * c in float
         // and the rest in double.
         let mut dct = vec![0.0f64; NUM_MFCC * NUM_MELS];
@@ -629,9 +628,7 @@ mod tests {
     use super::*;
 
     fn sine(freq: f32, sr: i32, secs: f32, amp: f32) -> Vec<f32> {
-        (0..(sr as f32 * secs) as usize)
-            .map(|i| amp * (2.0 * PI * freq * i as f32 / sr as f32).sin())
-            .collect()
+        (0..(sr as f32 * secs) as usize).map(|i| amp * (2.0 * PI * freq * i as f32 / sr as f32).sin()).collect()
     }
 
     fn analyze(samples: &[f32], sr: i32, chunk: usize) -> [f32; FEATURE_COUNT] {

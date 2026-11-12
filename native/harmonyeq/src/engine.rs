@@ -85,6 +85,7 @@ enum AutoRule {
     Cut,
     Hold,
 }
+#[rustfmt::skip]
 const AUTO_RULE: [AutoRule; NUM_BANDS] = [
     AutoRule::Boost, AutoRule::Boost, // 31, 62 Hz: sub-bass
     AutoRule::Cut, AutoRule::Cut,     // 125, 250 Hz: boxy, muddy

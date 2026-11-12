@@ -15,9 +15,8 @@ impl Fft {
         let log2 = size.trailing_zeros();
         let cos = (0..size / 2).map(|k| (2.0 * PI * k as f64 / size as f64).cos() as f32).collect();
         let sin = (0..size / 2).map(|k| (2.0 * PI * k as f64 / size as f64).sin() as f32).collect();
-        let bit_reverse = (0..size as u32)
-            .map(|i| (0..log2).fold(0u32, |r, b| r | (((i >> b) & 1) << (log2 - 1 - b))))
-            .collect();
+        let bit_reverse =
+            (0..size as u32).map(|i| (0..log2).fold(0u32, |r, b| r | (((i >> b) & 1) << (log2 - 1 - b)))).collect();
         Fft { size, cos, sin, bit_reverse }
     }
 

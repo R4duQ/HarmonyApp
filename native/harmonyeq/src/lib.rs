@@ -116,7 +116,12 @@ fn throw_illegal_argument(env: &mut JNIEnv, message: &str) {
 
 /// The address range [byte_offset, byte_offset + byte_count) of direct
 /// `buffer`, or None (with an IllegalArgumentException thrown).
-fn direct_range(env: &mut JNIEnv, buffer: &JByteBuffer, byte_offset: jint, byte_count: i64) -> Option<(*mut u8, usize)> {
+fn direct_range(
+    env: &mut JNIEnv,
+    buffer: &JByteBuffer,
+    byte_offset: jint,
+    byte_count: i64,
+) -> Option<(*mut u8, usize)> {
     if buffer.is_null() {
         throw_illegal_argument(env, "buffer is null");
         return None;

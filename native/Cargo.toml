@@ -9,7 +9,7 @@
 # (`cargo build --release`) produce the JNI libraries the JVM unit tests load.
 [workspace]
 resolver = "2"
-members = ["harmonydsp", "harmonyeq"]
+members = ["harmonydsp", "harmonyeq", "harmonyshuffle"]
 
 [workspace.package]
 edition = "2021"
