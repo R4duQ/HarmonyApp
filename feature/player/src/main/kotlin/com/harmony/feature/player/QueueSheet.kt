@@ -583,6 +583,7 @@ private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette) {
             is CatalogFailure.Http -> "error ${f.status}"
             is CatalogFailure.SchemaChanged -> "answer not understood (needs an update)"
             CatalogFailure.Disabled -> "off"
+            is CatalogFailure.Unexpected -> "something went wrong (${f.kind})"
         } + " · your library plays on"
     }
     val shown = online.candidates.filter { it.stage != CandidateStage.QUEUED }.take(5)

@@ -49,6 +49,11 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    private fun versionLabel(): String = runCatching {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        "${info.versionName} (${info.longVersionCode})"
+    }.getOrDefault("unknown")
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -56,6 +61,8 @@ class HarmonyApplication : Application(), Configuration.Provider, coil.ImageLoad
 
    override fun onCreate() {
         super.onCreate()
+        // A crash is written down before the app goes, so it can be copied from Settings afterwards.
+        com.harmony.core.common.crash.CrashReports.install(filesDir, versionLabel())
         androidx.work.WorkManager.initialize(this, workManagerConfiguration)
 
         // Kicks off: periodic maintenance + immediate scan/analyze + change watching.

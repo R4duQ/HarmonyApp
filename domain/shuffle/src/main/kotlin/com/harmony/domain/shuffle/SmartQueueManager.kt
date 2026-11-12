@@ -922,10 +922,17 @@ class SmartQueueManager @Inject constructor(
         val out = mutableListOf<Song>()
         // A pick dropped as a repeat leaves its place to the next one ready (a few rounds at most).
         var rounds = 0
-        while (out.size < max && rounds++ < MAX_ONLINE_ROUNDS) {
-            val picks = online.take(sessionKey(mix), max - out.size)
-            if (picks.isEmpty()) break
-            out += readySongs(picks, prefixIds, exclude)
+        try {
+            while (out.size < max && rounds++ < MAX_ONLINE_ROUNDS) {
+                val picks = online.take(sessionKey(mix), max - out.size)
+                if (picks.isEmpty()) break
+                out += readySongs(picks, prefixIds, exclude)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // The online side never stops the queue: the library's mix fills in.
+            brainLog.write(listOf("MIX online picks failed: ${t.javaClass.simpleName}"))
         }
         return out
     }
@@ -956,6 +963,16 @@ class SmartQueueManager @Inject constructor(
      * is writing the queue.
      */
     private suspend fun onOnlineReady(key: MixSessionKey) {
+        try {
+            appendReadyOnline(key)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            brainLog.write(listOf("MIX online append failed: ${t.javaClass.simpleName}"))
+        }
+    }
+
+    private suspend fun appendReadyOnline(key: MixSessionKey) {
         val mix = _mix.value ?: return
         if (sessionKey(mix) != key || isMutatingQueue) return
         mutex.withLock {

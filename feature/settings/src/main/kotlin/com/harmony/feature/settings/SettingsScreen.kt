@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -513,6 +514,28 @@ fun SettingsScreen(
             palette = palette,
             onClick = onOpenTagEditor,
         )
+
+        // The last crash, written as the app went down: copied to share with whoever is helping.
+        var crashReport by remember { mutableStateOf(com.harmony.core.common.crash.CrashReports.read(context.filesDir)) }
+        crashReport?.let { report ->
+            EditorialSettingRow(
+                title = "Last crash report",
+                subtitle = "Tap to copy it (the code that failed, not your music). " +
+                    report.lineSequence().drop(3).firstOrNull().orEmpty().take(120),
+                palette = palette,
+                onClick = {
+                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Harmony crash report", report))
+                    android.widget.Toast.makeText(context, "Crash report copied", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                trailing = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        com.harmony.core.common.crash.CrashReports.clear(context.filesDir)
+                        crashReport = null
+                    }) { androidx.compose.material3.Text("Clear") }
+                },
+            )
+        }
 
         EditorialSettingRow(
             title = "Check a file",

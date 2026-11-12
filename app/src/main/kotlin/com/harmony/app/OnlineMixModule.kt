@@ -19,6 +19,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,7 +47,12 @@ object OnlineMixModule {
             catalog = YtMusicClient(UrlConnectionTransport(), location = country),
             preparer = preparer,
             local = local,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            // Nothing that goes wrong online may take the app down: it is logged, and the
+            // coordinator reports it as the mix's state (the library's mix plays on).
+            scope = CoroutineScope(
+                SupervisorJob() + Dispatchers.Default +
+                    CoroutineExceptionHandler { _, error -> Log.e("ONLINE_MIX", "online mix stopped", error) },
+            ),
             // Ids, counts and timings only.
             log = { Log.i("ONLINE_MIX", it) },
         )

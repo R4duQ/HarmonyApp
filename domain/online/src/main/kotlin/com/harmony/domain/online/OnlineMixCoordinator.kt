@@ -126,7 +126,17 @@ class OnlineMixCoordinator(
         synchronized(skippedArtists) { skippedArtists.clear() }
         wake = Channel(Channel.CONFLATED)
         _state.value = OnlineMixState(session = session, source = source, seed = SeedStatus.Identifying)
-        job = scope.launch { run(gen, session, seed, avoid) }
+        job = scope.launch {
+            try {
+                run(gen, session, seed, avoid)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // Whatever went wrong stays in the online side: the mix plays on from the library.
+                apply(gen) { it.copy(seed = SeedStatus.Failed(CatalogFailure.Unexpected(t.javaClass.simpleName))) }
+                log("ONLINE_MIX seed=${session.seedSongId} stopped=${t.javaClass.simpleName}")
+            }
+        }
     }
 
     override fun stop() {
@@ -288,8 +298,8 @@ class OnlineMixCoordinator(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            PrepareOutcome.TemporaryError(e.javaClass.simpleName)
+        } catch (t: Throwable) {
+            PrepareOutcome.TemporaryError(t.javaClass.simpleName)
         }
         if (!current(gen)) return
         val attempts = candidate.attempts + 1
