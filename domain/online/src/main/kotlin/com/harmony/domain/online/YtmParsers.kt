@@ -30,7 +30,7 @@ internal object YtmParsers {
     private val DOT_SEPARATOR = " • "
     private val DURATION = Regex("^(\\d+:)*\\d+:\\d+$")
     private val YEAR = Regex("^\\d{4}$")
-    private val VIEWS_PREFIX = Regex("(?U)^\\D*?[\\s:\\uff1a\\u200e-\\u200f\\u202a-\\u202e]")
+    private val VIEWS_PREFIX = Regex("^\\D*?[\\s:\\uff1a\\u200e-\\u200f\\u202a-\\u202e]")
     private val LATIN = Regex("[a-zA-Z]")
 
     // -- search(query, filter="songs") ---------------------------------------------------
