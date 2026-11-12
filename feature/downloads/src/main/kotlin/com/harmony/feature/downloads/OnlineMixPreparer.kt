@@ -111,10 +111,10 @@ class OnlineMixPreparer @Inject constructor(
             if (!OnlineSourceMatch.lengthAgrees(info.durationMs, expected)) {
                 return@withContext PrepareOutcome.RejectedAudio("length differs by ${abs(info.durationMs - (expected ?: 0)) / 1000} s")
             }
-            withContext(NonCancellable) {
-                cache.makeRoom(staged.length(), inUse())
-                cache.place(staged, target)
+            val stored = withContext(NonCancellable) {
+                cache.store(staged, target, inUse())
             }
+            if (!stored) return@withContext PrepareOutcome.Held("online cache is full")
             engine.reportImported(downloaded, SystemClock.elapsedRealtime() - started)
             PrepareOutcome.Ready(PreparedAudio(target.path, info.codec, info.bitDepth, info.sampleRateHz, info.durationMs, target.length(), downloaded.provider))
         } finally {

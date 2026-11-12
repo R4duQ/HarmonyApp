@@ -65,7 +65,7 @@ class LibraryLocalCopies @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : LocalCopies {
     private val lock = Mutex()
-    private var builtAt = Long.MIN_VALUE
+    private var builtAt: Long? = null
     private var index: Map<String, List<Song>> = emptyMap()
 
     override suspend fun find(track: CatalogTrack): Long? {
@@ -77,7 +77,8 @@ class LibraryLocalCopies @Inject constructor(
 
     private suspend fun index(): Map<String, List<Song>> = lock.withLock {
         val now = SystemClock.elapsedRealtime()
-        if (now - builtAt > REFRESH_MS) {
+        val previous = builtAt
+        if (previous == null || now - previous >= REFRESH_MS) {
             index = library.observeSongs().first().filter { it.id >= 0 }.groupBy { TrackIdentity.of(it.title, it.artist, it.durationMs).key }
             builtAt = now
         }

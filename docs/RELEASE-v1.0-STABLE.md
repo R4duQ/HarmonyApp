@@ -1,8 +1,16 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **160**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 159), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **161**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 160), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 161 — Online mix reliability
+
+- Reuses matching local recordings from the first mix.
+- Interrupts online preparation while buffering or connecting to the PC, then retries when playback is ready.
+- Holds new recommendations when protected queue files fill the 1 GB online cache.
+- Rechecks recording identity before inserting a recommendation, including songs queued while its audio was preparing.
+- Online mixes remain experimental and off by default. A complete live flow on a physical phone still needs verification.
 
 ## Build 160 — Online mixes (experimental)
 
