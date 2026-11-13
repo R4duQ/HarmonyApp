@@ -1,8 +1,17 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **165**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 164), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **166**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 165), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 166 — Faster library measuring
+
+- **Measuring your library takes less work.** Each song's analysis runs about a fifth
+  faster, with exactly the same results, so nothing is measured again.
+- **Smart Shuffle keeps up with the measuring.** While Harmony measures new songs in the
+  background, Smart Shuffle now takes in just those songs instead of reading the whole
+  library again before every queue. Queues and mixes come out the same; there is simply
+  less work behind each one, which matters most on large libraries.
 
 ## Build 165 — One app, on Rust
 
