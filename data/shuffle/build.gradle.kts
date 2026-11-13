@@ -16,6 +16,13 @@ android {
     testOptions.unitTests.isReturnDefaultValues = true
 }
 
+// NativeShuffleBrainRefreshTest runs the real engine on the JVM against in-memory
+// Room databases: CI builds the host libharmonyshuffle (native/) and points this
+// variable at it. Without it that test is skipped.
+tasks.withType<Test>().configureEach {
+    System.getenv("HARMONY_SHUFFLE_HOST_LIB_DIR")?.let { systemProperty("java.library.path", it) }
+}
+
 dependencies {
     implementation(projects.core.model)
     implementation(projects.core.common)
@@ -30,4 +37,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }

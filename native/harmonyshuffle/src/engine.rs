@@ -290,6 +290,9 @@ pub struct SmartShuffleEngine {
     pub(crate) steering: Vec<f32>,
     pub(crate) zone: Vec<i8>,
     pub(crate) row_by_id: HashMap<i64, i32>,
+    /// What set_library / update_tracks were given, kept to rebuild the working space.
+    input_raw: Vec<f32>,
+    input_quality: Vec<u8>,
     pub(crate) repaired_inputs: i32,
     pub(crate) counts: [i32; 3],
 
@@ -350,6 +353,8 @@ impl SmartShuffleEngine {
             steering: Vec::new(),
             zone: Vec::new(),
             row_by_id: HashMap::new(),
+            input_raw: Vec::new(),
+            input_quality: Vec::new(),
             repaired_inputs: 0,
             counts: [0; 3],
             transitions: HashMap::new(),
@@ -492,8 +497,6 @@ impl SmartShuffleEngine {
     ) -> usize {
         let n = ids.len();
         self.ids = ids.to_vec();
-        self.vectors = vec![0.0; n * DIMS];
-        self.quality = vec![VectorQuality::Real; n];
         self.artist = vec![-1; n];
         self.album = vec![-1; n];
         self.completed = vec![0; n];
@@ -502,8 +505,58 @@ impl SmartShuffleEngine {
         self.favorite = vec![0; n];
         self.steering.clear();
         self.weights.steering = 0.0;
-        self.zone = vec![-1; n];
         self.row_by_id = HashMap::with_capacity(n * 2);
+        self.input_raw = match raw {
+            Some(r) => r[..n * DIMS].to_vec(),
+            None => vec![f32::NAN; n * DIMS],
+        };
+        self.input_quality = match quality {
+            Some(q) => q[..n].to_vec(),
+            None => vec![VectorQuality::Real as u8; n],
+        };
+        for i in 0..n {
+            self.artist[i] = artist_ids.map_or(-1, |a| a[i]);
+            self.album[i] = album_ids.map_or(-1, |a| a[i]);
+            self.row_by_id.insert(self.ids[i], i as i32);
+        }
+        self.rebuild_vectors();
+        n
+    }
+
+    /// Replaces the raw features and quality of the tracks in `ids` (24 floats
+    /// and one VectorQuality each, as for set_library) and rebuilds the working
+    /// space. Ids not in the library are ignored. Unlike set_library this keeps
+    /// the statistics, the steering and everything learned this session: it is
+    /// for new measurements arriving while the library itself is unchanged.
+    /// The vectors come out exactly as a set_library of the same data would
+    /// give them (the library-wide standardization is recomputed, so every
+    /// vector may move a little). Returns how many tracks were updated.
+    pub fn update_tracks(&mut self, ids: &[i64], raw: &[f32], quality: &[u8]) -> usize {
+        let mut updated = 0;
+        for (k, &id) in ids.iter().enumerate() {
+            let row = self.row_of(id);
+            if row < 0 || raw.len() < (k + 1) * DIMS || quality.len() <= k {
+                continue;
+            }
+            let at = row as usize * DIMS;
+            self.input_raw[at..at + DIMS].copy_from_slice(&raw[k * DIMS..(k + 1) * DIMS]);
+            self.input_quality[row as usize] = quality[k];
+            updated += 1;
+        }
+        if updated > 0 {
+            self.rebuild_vectors();
+        }
+        updated
+    }
+
+    /// The working space from the stored inputs: standardize every dimension
+    /// against the library, weight the groups, normalize; a placeholder
+    /// direction where nothing is known. Also re-checks the session vector.
+    fn rebuild_vectors(&mut self) {
+        let n = self.ids.len();
+        self.vectors = vec![0.0; n * DIMS];
+        self.quality = vec![VectorQuality::Real; n];
+        self.zone = vec![-1; n];
         self.repaired_inputs = 0;
         self.counts = [0; 3];
         self.candidate_by_row.clear();
@@ -515,7 +568,7 @@ impl SmartShuffleEngine {
         let mut known = [0i32; DIMS];
         for i in 0..n {
             for d in 0..DIMS {
-                let mut x = raw.map_or(f32::NAN, |r| r[i * DIMS + d]);
+                let mut x = self.input_raw[i * DIMS + d];
                 if x.is_infinite() || (x.is_finite() && x.abs() > 1e6) {
                     self.repaired_inputs += 1;
                     x = f32::NAN;
@@ -556,7 +609,7 @@ impl SmartShuffleEngine {
                     0.0
                 };
             }
-            let mut q = quality.map_or(VectorQuality::Real, |q| VectorQuality::from_u8(q[i]));
+            let mut q = VectorQuality::from_u8(self.input_quality[i]);
             let v = &mut self.vectors[at..at + DIMS];
             if known_dims == 0 || !normalize(v) {
                 // Nothing to stand on: a fixed pseudo-random direction, so the
@@ -574,16 +627,12 @@ impl SmartShuffleEngine {
             self.zone[i] = zone_of(v) as i8;
             self.quality[i] = q;
             self.counts[q as usize] += 1;
-            self.artist[i] = artist_ids.map_or(-1, |a| a[i]);
-            self.album[i] = album_ids.map_or(-1, |a| a[i]);
-            self.row_by_id.insert(self.ids[i], i as i32);
         }
 
         if self.has_session && !normalize(&mut self.session) {
             self.session = [0.0; DIMS];
             self.has_session = false;
         }
-        n
     }
 
     /// Listening history, aligned with the library order (each slice optional;

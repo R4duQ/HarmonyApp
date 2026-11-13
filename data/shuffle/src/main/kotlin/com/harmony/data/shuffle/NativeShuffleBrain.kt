@@ -32,8 +32,11 @@ import javax.inject.Singleton
  *    edits, play history, favourites) and smart_shuffle.db (24-D vectors,
  *    Markov habits, the zone bandit); songs not measured yet borrow a
  *    cold-start vector from the older analysis;
- *  - it is reloaded when the number of songs, vectors or analyses changes,
- *    or after [RELOAD_AFTER_MS], whichever comes first;
+ *  - it is loaded in full at first, when the songs change (their number),
+ *    and every [RELOAD_AFTER_MS] (which also picks up tag edits, favourites
+ *    and stats from the databases); in between, new 24-D vectors and new
+ *    analyses are sent alone ([refresh]): while the background indexer
+ *    measures the library, a queue no longer reloads all of it;
  *  - each outcome's learning (a Markov transition, a bandit reward) is
  *    written back to smart_shuffle.db as it happens; play counts are already
  *    recorded by the playback history.
@@ -59,20 +62,99 @@ class NativeShuffleBrain @Inject constructor(
     private var loadedAt = 0L
     private var librarySize = 0
     private var config = ShuffleConfig()
-    private var perceptual: Map<Long, FloatArray> = emptyMap()
+    private var perceptual: HashMap<Long, FloatArray> = HashMap()
     private var rowIds: LongArray = LongArray(0)
+    private var rowOf: HashMap<Long, Int> = HashMap()
+    private var rowQuality: ByteArray = ByteArray(0)
 
-    private data class SnapshotKey(val songs: Int, val vectors: Int, val analyses: Int)
+    /** How often the library was loaded in full and refreshed incrementally (tests). */
+    internal var fullLoads = 0
+    internal var refreshes = 0
+
+    /** Tests: the next [prepare] loads everything, as after [RELOAD_AFTER_MS]. */
+    internal suspend fun forceFullReload() = loadLock.withLock { snapshot = null }
+
+    private data class SnapshotKey(val songs: Int, val vectors: AcousticVectorDao.Stamp, val analyses: Int)
 
     override suspend fun prepare() {
         val e = engine ?: return
         loadLock.withLock {
             val key = withContext(dispatchers.io) {
-                SnapshotKey(songDao.songCount(), database.acousticVectors().count(), analysisDao.count())
+                SnapshotKey(songDao.songCount(), database.acousticVectors().stamp(), analysisDao.count())
             }
-            val fresh = key == snapshot && System.currentTimeMillis() - loadedAt < RELOAD_AFTER_MS
-            if (!fresh) load(e, key)
+            val previous = snapshot
+            when {
+                previous == null ||
+                    System.currentTimeMillis() - loadedAt >= RELOAD_AFTER_MS ||
+                    key.songs != previous.songs ||
+                    key.vectors.count < previous.vectors.count ||
+                    key.analyses < previous.analyses -> load(e, key)
+                key != previous -> refresh(e, previous, key)
+            }
         }
+    }
+
+    /**
+     * Sends only what the indexer added since [previous]: the vectors written
+     * since then, and the analyses of songs that had none. The engine keeps
+     * its statistics, steering and session, and its vectors come out as a
+     * full [load] of the same data would give them.
+     */
+    private suspend fun refresh(e: NativeShuffleEngine, previous: SnapshotKey, key: SnapshotKey) {
+        val written = if (key.vectors != previous.vectors) {
+            withContext(dispatchers.io) { database.acousticVectors().writtenSince(previous.vectors.latest) }
+                .filter { it.songId in rowOf }
+        } else {
+            emptyList()
+        }
+        // New analyses can only be for songs that had none: those without perceptual values.
+        val unanalysed = if (key.analyses != previous.analyses) rowIds.filter { it !in perceptual } else emptyList()
+        val failed = written.filter { AcousticVectorEntity.decode(it.vector) == null }.map { it.songId }
+        val lookup = (unanalysed + failed).distinct()
+        val (coldStart, newPerceptual) = withContext(dispatchers.io) {
+            val cold = HashMap<Long, AnalysisDao.ColdStartRow>()
+            val moods = HashMap<Long, FloatArray>()
+            for (chunk in lookup.chunked(IN_CHUNK)) {
+                analysisDao.coldStartRowsFor(chunk).forEach { cold[it.songId] = it }
+            }
+            for (chunk in unanalysed.chunked(IN_CHUNK)) {
+                analysisDao.perceptualRowsFor(chunk).forEach { moods[it.songId] = it.toArray() }
+            }
+            cold to moods
+        }
+        withContext(dispatchers.default) {
+            val updates = LinkedHashMap<Long, Pair<FloatArray?, VectorQuality>>()
+            for (row in written) {
+                val measured = AcousticVectorEntity.decode(row.vector)
+                val values = measured ?: coldStart[row.songId]?.toColdStart()
+                updates[row.songId] = values to qualityOf(measured, values)
+            }
+            for (id in unanalysed) {
+                if (id in updates) continue
+                val cold = coldStart[id] ?: continue
+                // A measured vector outranks the older analysis.
+                if (rowQuality[rowOf.getValue(id)] == VectorQuality.REAL.ordinal.toByte()) continue
+                updates[id] = cold.toColdStart() to VectorQuality.FALLBACK
+            }
+            if (updates.isNotEmpty()) {
+                val ids = updates.keys.toLongArray()
+                val raw = FloatArray(ids.size * DIMS) { Float.NaN }
+                val quality = ByteArray(ids.size)
+                ids.forEachIndexed { k, id ->
+                    val (values, q) = updates.getValue(id)
+                    values?.copyInto(raw, k * DIMS)
+                    quality[k] = q.ordinal.toByte()
+                    rowQuality[rowOf.getValue(id)] = quality[k]
+                }
+                e.updateTracks(ids, raw, quality)
+            }
+            if (newPerceptual.isNotEmpty()) {
+                perceptual.putAll(newPerceptual)
+                applySteering(e)
+            }
+        }
+        snapshot = key
+        refreshes++
     }
 
     private suspend fun load(e: NativeShuffleEngine, key: SnapshotKey) {
@@ -85,12 +167,7 @@ class NativeShuffleBrain @Inject constructor(
                 favorites = historyDao.allFavoriteIds().toHashSet(),
                 transitions = database.markov().all(),
                 bandit = database.bandit().all(),
-                perceptual = analysisDao.perceptualRows().associate { row ->
-                    row.songId to floatArrayOf(
-                        row.energy, row.danceability, row.acousticness, row.instrumentalness, row.brightness,
-                        row.warmth, row.aggressiveness, row.calmness, row.happiness, row.sadness, row.tension,
-                    )
-                },
+                perceptual = analysisDao.perceptualRows().associateTo(HashMap()) { it.songId to it.toArray() },
             )
         }
         withContext(dispatchers.default) {
@@ -105,15 +182,9 @@ class NativeShuffleBrain @Inject constructor(
             data.songs.forEachIndexed { i, song ->
                 ids[i] = song.id
                 val measured = AcousticVectorEntity.decode(data.vectors[song.id]?.vector)
-                val values = measured ?: data.coldStart[song.id]?.let {
-                    ColdStartVectors.fromAnalysis(it.bassEnergy, it.midEnergy, it.trebleEnergy, it.rms, it.peakLevel, it.bpm, it.beatConfidence)
-                }
+                val values = measured ?: data.coldStart[song.id]?.toColdStart()
                 values?.copyInto(raw, i * DIMS)
-                quality[i] = when {
-                    measured != null -> VectorQuality.REAL
-                    values != null -> VectorQuality.FALLBACK
-                    else -> VectorQuality.NONE
-                }.ordinal.toByte()
+                quality[i] = qualityOf(measured, values).ordinal.toByte()
                 val artist = song.artist.trim().lowercase()
                 // Untagged files ("<unknown>" from MediaStore) are nobody: never clumped together.
                 artists[i] = if (artist.isEmpty() || artist in UNKNOWN_ARTISTS) -1 else artistIds.getOrPut(artist) { artistIds.size }
@@ -121,6 +192,8 @@ class NativeShuffleBrain @Inject constructor(
             }
             librarySize = e.setLibrary(ids, raw, quality, artists, albums)
             rowIds = ids
+            rowOf = HashMap<Long, Int>(n * 2).apply { ids.forEachIndexed { i, id -> put(id, i) } }
+            rowQuality = quality
 
             val completed = IntArray(n)
             val skipped = IntArray(n)
@@ -158,6 +231,7 @@ class NativeShuffleBrain @Inject constructor(
         }
         snapshot = key
         loadedAt = System.currentTimeMillis()
+        fullLoads++
     }
 
     override suspend fun applyConfig(config: ShuffleConfig) {
@@ -293,14 +367,30 @@ class NativeShuffleBrain @Inject constructor(
         val favorites: Set<Long>,
         val transitions: List<MarkovTransitionEntity>,
         val bandit: List<ZoneBanditEntity>,
-        val perceptual: Map<Long, FloatArray>,
+        val perceptual: HashMap<Long, FloatArray>,
     )
+
+    private fun AnalysisDao.ColdStartRow.toColdStart(): FloatArray =
+        ColdStartVectors.fromAnalysis(bassEnergy, midEnergy, trebleEnergy, rms, peakLevel, bpm, beatConfidence)
+
+    private fun AnalysisDao.PerceptualRow.toArray(): FloatArray = floatArrayOf(
+        energy, danceability, acousticness, instrumentalness, brightness,
+        warmth, aggressiveness, calmness, happiness, sadness, tension,
+    )
+
+    private fun qualityOf(measured: FloatArray?, values: FloatArray?): VectorQuality = when {
+        measured != null -> VectorQuality.REAL
+        values != null -> VectorQuality.FALLBACK
+        else -> VectorQuality.NONE
+    }
 
     private companion object {
         const val DIMS = SmartShuffleNative.DIMS
         const val ZONES = SmartShuffleNative.ZONES
         const val RELOAD_AFTER_MS = 30 * 60 * 1000L
         const val MAX_TRANSITIONS = 50_000
+        /** Ids per `IN (...)` query: under SQLite's 999-variable limit. */
+        const val IN_CHUNK = 900
         val UNKNOWN_ARTISTS = setOf("<unknown>", "unknown")
     }
 }
