@@ -115,6 +115,16 @@ interface AcousticVectorDao {
 
     @Query("SELECT COUNT(*) FROM acoustic_vectors")
     suspend fun count(): Int
+
+    /** How many vectors there are and when the newest was written: changes whenever one is. */
+    @Query("SELECT COUNT(*) AS count, COALESCE(MAX(measuredAt), 0) AS latest FROM acoustic_vectors")
+    suspend fun stamp(): Stamp
+
+    data class Stamp(val count: Int, val latest: Long)
+
+    /** Every vector written at or after [since], measured or not (a failed measurement is NULL). */
+    @Query("SELECT * FROM acoustic_vectors WHERE measuredAt >= :since")
+    suspend fun writtenSince(since: Long): List<AcousticVectorEntity>
 }
 
 @Dao

@@ -1128,3 +1128,95 @@ fn radio_fast_on_a_large_library() {
         assert!(ms < 25.0, "{ms:.2} ms per mix batch");
     }
 }
+
+// ---- Incremental updates (update_tracks) ---------------------------------------------------
+
+/// `update_tracks` must leave the engine exactly as a full reload of the same
+/// data would (with the same statistics and steering), while keeping what a
+/// reload keeps: the session, its feedback and the learned habits.
+#[test]
+fn update_tracks_matches_a_full_reload() {
+    let base = lib3(5, 60, 3);
+    let n = base.ids.len();
+    // Before: a third of the library unmeasured, a few known only from the older analysis.
+    let mut before = base.clone();
+    for i in 0..n {
+        if i % 3 == 1 {
+            before.quality[i] = VectorQuality::None as u8;
+            before.raw[i * DIMS..(i + 1) * DIMS].fill(f32::NAN);
+        } else if i % 7 == 0 {
+            before.quality[i] = VectorQuality::Fallback as u8;
+            for d in BANDS..2 * BANDS {
+                before.raw[i * DIMS + d] = f32::NAN;
+            }
+        }
+    }
+    // The update: the background indexer measured every unmeasured song but
+    // one, and one measurement failed (NaN: a placeholder again).
+    let changed: Vec<usize> = (0..n).filter(|i| i % 3 == 1 && *i != 4).chain([0]).collect();
+    let mut after = before.clone();
+    for &i in &changed {
+        after.quality[i] = VectorQuality::Real as u8;
+        after.raw[i * DIMS..(i + 1) * DIMS].copy_from_slice(&base.raw[i * DIMS..(i + 1) * DIMS]);
+    }
+    after.raw[0..DIMS].fill(f32::NAN);
+    let ids: Vec<i64> = changed.iter().map(|&i| after.ids[i]).collect();
+    let raw: Vec<f32> = changed.iter().flat_map(|&i| after.raw[i * DIMS..(i + 1) * DIMS].to_vec()).collect();
+    let quality: Vec<u8> = changed.iter().map(|&i| after.quality[i]).collect();
+
+    let completed: Vec<i32> = (0..n as i32).map(|i| i % 5).collect();
+    let skipped: Vec<i32> = (0..n as i32).map(|i| i % 3).collect();
+    let last: Vec<i64> = (0..n as i64).map(|i| NOW - (i + 1) * 3_600_000).collect();
+    let steer: Vec<f32> = (0..n).map(|i| (i % 4) as f32 / 4.0).collect();
+    let setup = |e: &mut SmartShuffleEngine, lib: &Library| {
+        load(e, lib);
+        e.set_track_stats(Some(&completed), Some(&skipped), Some(&last), None, n);
+        e.set_steering(Some(&steer), 0.8);
+    };
+    let session = |e: &mut SmartShuffleEngine| {
+        for &i in &[2usize, 5, 8, 11] {
+            e.on_track_started(before.ids[i]);
+            e.on_manual_select(before.ids[i]);
+        }
+    };
+
+    // A: the old snapshot, a session, then the update.
+    let mut a = SmartShuffleEngine::new();
+    setup(&mut a, &before);
+    session(&mut a);
+    assert_eq!(a.update_tracks(&ids, &raw, &quality), ids.len());
+    assert_eq!(a.update_tracks(&[424_242], &[0.5; DIMS], &[2]), 0, "unknown ids are ignored");
+    // B: the same, but the update arrives as a full reload of the new snapshot.
+    let mut b = SmartShuffleEngine::new();
+    setup(&mut b, &before);
+    session(&mut b);
+    setup(&mut b, &after);
+
+    assert_eq!(a.session_vector(), b.session_vector(), "the session is kept as a reload keeps it");
+    assert!(a.has_session());
+    assert_eq!(a.feedback_count(), 4, "session feedback survives");
+    for &id in &after.ids {
+        assert_eq!(a.vector_of(id), b.vector_of(id), "vector of {id}");
+        assert_eq!(a.zone_of_track(id), b.zone_of_track(id));
+    }
+    assert_eq!(a.weights(), b.weights(), "steering weight kept");
+    for seed in 0..6u64 {
+        let qa = a.generate_queue(after.ids[2], &[], &[], &[], 12, NOW, seed);
+        let qb = b.generate_queue(after.ids[2], &[], &[], &[], 12, NOW, seed);
+        assert_eq!(qa, qb, "queue for seed {seed}");
+        assert_eq!(a.last_traces(), b.last_traces());
+        let mut audit_a = a.last_audit().clone();
+        let mut audit_b = b.last_audit().clone();
+        audit_a.elapsed_ms = 0.0;
+        audit_b.elapsed_ms = 0.0;
+        assert_eq!(audit_a, audit_b);
+        let ma = a.generate_radio(after.ids[5], after.ids[5], &[], &[], 10, NOW, seed);
+        let mb = b.generate_radio(after.ids[5], after.ids[5], &[], &[], 10, NOW, seed);
+        assert_eq!(ma, mb, "mix for seed {seed}");
+        assert_eq!(a.last_traces(), b.last_traces());
+    }
+    // The audit counts what the update changed.
+    let audit = a.last_audit();
+    let measured_before = before.quality.iter().filter(|&&q| q == VectorQuality::Real as u8).count();
+    assert!(audit.real_tracks as usize > measured_before, "more real vectors after the update");
+}

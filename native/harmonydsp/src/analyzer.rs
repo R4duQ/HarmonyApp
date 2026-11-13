@@ -211,8 +211,11 @@ pub struct Analyzer {
     // Pre-computed.
     hann: Vec<f32>,
     mel_filters: Vec<Vec<f32>>, // [mel][bin]
-    chroma_map: Vec<i32>,       // bin -> pitch class (or -1)
-    dct: Vec<f64>,              // [coef][mel] DCT-II basis
+    /// Each mel filter's bins from its first to its last non-zero weight: the
+    /// rest of its 1025 weights are zero and contribute nothing to its sum.
+    mel_ranges: [(usize, usize); NUM_MELS],
+    chroma_map: Vec<i32>, // bin -> pitch class (or -1)
+    dct: Vec<f64>,        // [coef][mel] DCT-II basis
 
     // Scratch (reused every frame: no hot-path allocation).
     re: Vec<f32>,
@@ -276,6 +279,7 @@ impl Analyzer {
             pending: Vec::with_capacity(FFT_SIZE + HOP_SIZE),
             hann,
             mel_filters: Vec::new(),
+            mel_ranges: [(0, 0); NUM_MELS],
             chroma_map: Vec::new(),
             dct,
             re: vec![0.0; FFT_SIZE],
@@ -335,6 +339,12 @@ impl Analyzer {
                     *weight = (hi - hz) / (hi - mid);
                 }
             }
+            let first = filter.iter().position(|&w| w != 0.0);
+            let last = filter.iter().rposition(|&w| w != 0.0);
+            self.mel_ranges[m] = match (first, last) {
+                (Some(first), Some(last)) => (first, last + 1),
+                _ => (0, 0),
+            };
         }
     }
 
@@ -493,12 +503,18 @@ impl Analyzer {
             }
         }
 
-        // MFCC: mel energies -> log -> DCT-II.
+        // MFCC: mel energies -> log -> DCT-II. Each filter is summed over its
+        // non-zero range only: the bins outside it would each add +0.0 to a sum
+        // that starts at +0.0 and only grows (weights and magnitudes are never
+        // negative), so the result is the same, bit for bit, at a fraction of
+        // the work (a filter spans a few dozen of the 1025 bins).
         for m in 0..NUM_MELS {
-            let filter = &self.mel_filters[m];
+            let (first, end) = self.mel_ranges[m];
+            let filter = &self.mel_filters[m][first..end];
+            let magnitude = &self.magnitude[first..end];
             let mut acc = 0.0f64;
-            for b in 0..NUM_BINS {
-                acc += (filter[b] * self.magnitude[b]) as f64;
+            for (w, mag) in filter.iter().zip(magnitude) {
+                acc += (w * mag) as f64;
             }
             self.mels[m] = (acc as f32 + 1e-10f32).ln();
         }
@@ -705,4 +721,55 @@ mod tests {
         assert_eq!(f[2], -70.0); // no gated loudness block
         assert_eq!(f[12], 0.0);
     }
+}
+
+#[cfg(test)]
+mod golden {
+    use super::*;
+
+    /// A fixed test signal: two tones, a click track and a little deterministic noise.
+    fn fixture(sr: i32, secs: f32) -> Vec<f32> {
+        let mut state = 0x2545_F491u32;
+        (0..(sr as f32 * secs) as usize)
+            .map(|i| {
+                let t = i as f32 / sr as f32;
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                let noise = (state >> 8) as f32 / (1u32 << 24) as f32 - 0.5;
+                let click = if (t * 2.0).fract() < 0.01 { 0.6 } else { 0.0 };
+                0.3 * (2.0 * PI * 220.0 * t).sin() + 0.1 * (2.0 * PI * 3100.0 * t).sin() + click + 0.02 * noise
+            })
+            .collect()
+    }
+
+    /// FNV-1a over the features' bit patterns: any change to any value shows.
+    fn fingerprint(features: &[f32; FEATURE_COUNT]) -> u64 {
+        features
+            .iter()
+            .flat_map(|v| v.to_bits().to_le_bytes())
+            .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+    }
+
+    /// The exact features, as the C++ analyzer this crate was ported from
+    /// computed them (checked value for value). A change here changes every
+    /// stored analysis: only on purpose, together with ANALYSIS_VERSION in
+    /// :domain:analysis.
+    #[test]
+    fn features_match_the_recorded_values() {
+        let recorded: [(i32, u64); 4] = GOLDEN;
+        for (sr, expected) in recorded {
+            let mut a = Analyzer::new(sr).unwrap();
+            fixture(sr, 6.0).chunks(4096).for_each(|c| a.process(c));
+            let got = fingerprint(&a.finish().unwrap());
+            assert_eq!(got, expected, "features at {sr} Hz changed: {got:#x}");
+        }
+    }
+
+    const GOLDEN: [(i32, u64); 4] = [
+        (22050, 0x6d79c5fa27c00807),
+        (44100, 0x9982c815d36c162),
+        (48000, 0x9fb2cd3a308de48a),
+        (96000, 0xe2abd4c38a1fe2bc),
+    ];
 }
