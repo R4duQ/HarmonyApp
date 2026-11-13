@@ -1,8 +1,25 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **166**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 165), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **167**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 166), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 167 — Clarity Live, and online mixes that find more songs
+
+- **Clarity Live, a live equalizer that sets every band by itself.** In the Equalizer
+  screen, Clarity Live listens to the music about 190 times a second in 24 bands spaced
+  the way the ear hears pitch (40 Hz to 16 kHz), and moves each band on its own while the
+  song plays: what is covered up by louder sounds nearby comes forward, what pushes forward
+  (a ringing resonance, harshness, boom) is held back, and the loudness stays where it was.
+  A live view shows what each band measures, the line a sound must clear to be heard, and
+  what Clarity does to it. Intensity and balance are yours to set; your sliders still apply
+  on top, Auto rests while it runs, and it adds no delay. Off by default; switched off,
+  the sound is exactly as before.
+- **Online mixes find the song even when its tags don't.** When the title and artist in a
+  file are not enough to find it on YouTube Music, Harmony recognises it by its sound (a
+  12-second fingerprint is sent to Shazam, never the audio) and searches again. If the song
+  still isn't found, the mix starts from the artist's radio, then from the file's genre,
+  and the queue says these are looser suggestions.
 
 ## Build 166 — Faster library measuring
 
