@@ -203,6 +203,23 @@ jni_fn!(Java_com_harmony_core_dsp_SmartShuffleNative_nativeSetLibrary(
     ) as jint
 });
 
+// New measurements for tracks already in the library (see SmartShuffleEngine::update_tracks):
+// [ids], 24 raw floats each in [raw], one VectorQuality each in [quality]. Returns the
+// number of tracks updated.
+jni_fn!(Java_com_harmony_core_dsp_SmartShuffleNative_nativeUpdateTracks(
+    env, handle: jlong, ids: JLongArray, raw: JFloatArray, quality: JByteArray
+) -> jint = 0; {
+    let idv = read_or!(read_longs(env, &ids), 0);
+    let rawv = read_or!(read_floats(env, &raw), 0);
+    let qv = read_or!(read_bytes(env, &quality), 0);
+    if rawv.len() != idv.len() * DIMS || qv.len() != idv.len() {
+        throw_illegal_argument(env, "update arrays disagree on the track count (raw needs 24 floats per track)");
+        return 0;
+    }
+    let q8: Vec<u8> = qv.iter().map(|&q| q as u8).collect();
+    engine_or!(handle, 0).update_tracks(&idv, &rawv, &q8) as jint
+});
+
 jni_fn!(Java_com_harmony_core_dsp_SmartShuffleNative_nativeSetTrackStats(
     env, handle: jlong, completed: JIntArray, skipped: JIntArray, last_played: JLongArray, favorite: JByteArray
 ) -> () = (); {

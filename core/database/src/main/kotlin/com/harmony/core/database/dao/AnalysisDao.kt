@@ -99,6 +99,23 @@ interface AnalysisDao {
     @Query("SELECT songId, bassEnergy, midEnergy, trebleEnergy, rms, peakLevel, bpm, beatConfidence FROM analysis_results")
     suspend fun coldStartRows(): List<ColdStartRow>
 
+    /** [coldStartRows] for some songs only (at most 900 ids a call: SQLite's variable limit). */
+    @Query(
+        "SELECT songId, bassEnergy, midEnergy, trebleEnergy, rms, peakLevel, bpm, beatConfidence " +
+            "FROM analysis_results WHERE songId IN (:songIds)"
+    )
+    suspend fun coldStartRowsFor(songIds: List<Long>): List<ColdStartRow>
+
+    /** [perceptualRows] for some songs only (at most 900 ids a call). */
+    @Query(
+        """
+        SELECT songId, energy, danceability, acousticness, instrumentalness,
+               brightness, warmth, aggressiveness, calmness, happiness, sadness, tension
+        FROM analysis_results WHERE songId IN (:songIds)
+        """
+    )
+    suspend fun perceptualRowsFor(songIds: List<Long>): List<PerceptualRow>
+
     data class ColdStartRow(
         val songId: Long,
         val bassEnergy: Float,

@@ -38,6 +38,7 @@ object SmartShuffleNative {
         artists: IntArray,
         albums: IntArray,
     ): Int
+    @JvmStatic external fun nativeUpdateTracks(handle: Long, ids: LongArray, raw: FloatArray, quality: ByteArray): Int
     @JvmStatic external fun nativeSetTrackStats(
         handle: Long,
         completed: IntArray,
@@ -136,6 +137,16 @@ class NativeShuffleEngine : Closeable {
      */
     fun setLibrary(ids: LongArray, raw: FloatArray, quality: ByteArray, artists: IntArray, albums: IntArray): Int =
         withHandle { SmartShuffleNative.nativeSetLibrary(it, ids, raw, quality, artists, albums) }
+
+    /**
+     * New measurements for songs already loaded: [raw] holds 24 floats per id
+     * (NaN = unknown), [quality] one [VectorQuality] ordinal per id. Keeps the
+     * statistics, steering and session; the vectors come out as a [setLibrary]
+     * of the same data would give them. Ids not loaded are ignored. Returns
+     * the number of songs updated.
+     */
+    fun updateTracks(ids: LongArray, raw: FloatArray, quality: ByteArray): Int =
+        withHandle { SmartShuffleNative.nativeUpdateTracks(it, ids, raw, quality) }
 
     /** Aligned with the order given to [setLibrary]. */
     fun setTrackStats(completed: IntArray, skipped: IntArray, lastPlayed: LongArray, favorite: ByteArray) =
