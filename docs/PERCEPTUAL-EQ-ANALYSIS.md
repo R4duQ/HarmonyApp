@@ -6,6 +6,14 @@ este marcată:
 - **[D] demonstrat**: citit în cod, măsurat aici (cu metoda) sau citat dintr-o sursă oficială;
 - **[I] ipoteză**: plauzibil, dar trebuie măsurat pe telefon sau confirmat cu cineva.
 
+> **Actualizare (13.11.2026): Clarity Live implementat.** La cererea ta am construit direcția C:
+> `native/harmonyeq/src/clarity.rs` (24 de benzi ERB care se reglează singure, ~190 de analize pe
+> secundă, feed-forward, fără latență adăugată, analiză decimată peste 50 kHz), în lanț după
+> ReplayGain/preamp și înaintea celor 10 benzi manuale. Auto se oprește cât rulează Clarity.
+> Comutator, intensitate, echilibru și vizualizare live în ecranul Equalizer; oprit implicit.
+> Cu Clarity oprit, ieșirea e identică bit cu bit cu motorul anterior (verificat la 44,1/48/96/192 kHz).
+> iOS (motorul C++) nu îl are încă. Testul orb din secțiunea 6 rămâne de făcut.
+
 ## Ce am analizat
 
 | Ce | Unde |

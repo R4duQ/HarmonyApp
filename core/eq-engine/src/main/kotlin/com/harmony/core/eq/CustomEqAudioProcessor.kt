@@ -115,6 +115,30 @@ class CustomEqAudioProcessor : BaseAudioProcessor() {
     fun pollDspTelemetry(effectiveGains: FloatArray?, bars: FloatArray?, peaks: FloatArray?): Float =
         MobileEqNative.nativePollDspTelemetry(checkedHandle(), effectiveGains, bars, peaks)
 
+    /**
+     * Clarity Live: 24 perceptual bands that each set themselves, live, from
+     * what the music sounds like at that moment: what is covered up by louder
+     * sounds nearby comes forward, what pushes forward (a resonance, harshness,
+     * boom) is held back, and the loudness stays where it was. Runs while the
+     * EQ is on, in place of Auto's live offsets; the sliders still apply on top.
+     * [intensity] 0..1 (0.5 is the default), [balance] -1 (hold back more) .. +1
+     * (bring out more). Adds no latency.
+     */
+    fun setClarity(enabled: Boolean, intensity: Float, balance: Float) =
+        MobileEqNative.nativeSetClarity(checkedHandle(), enabled, intensity, balance)
+
+    /** A new song starts on this engine: Clarity forgets the last one's balance. */
+    fun clarityNewTrack() = MobileEqNative.nativeClarityNewTrack(checkedHandle())
+
+    /**
+     * Clarity's live view, garbage-free: per band (24, ERB-spaced from 40 Hz to 16 kHz: EqClarity.CENTERS_HZ)
+     * the response it applies, the music's ear-weighted level and the masking
+     * threshold, dB, into the arrays given (any may be null). Returns the level
+     * match in dB, NaN while Clarity is off and flat.
+     */
+    fun clarityTelemetry(response: FloatArray?, levels: FloatArray?, masks: FloatArray?): Float =
+        MobileEqNative.nativeClarityTelemetry(checkedHandle(), response, levels, masks)
+
     /** Auto's live offset for each band right now, dB, into [out] (10 long). */
     fun liveAutoOffsets(out: FloatArray) = MobileEqNative.nativeLiveAutoOffsets(checkedHandle(), out)
 

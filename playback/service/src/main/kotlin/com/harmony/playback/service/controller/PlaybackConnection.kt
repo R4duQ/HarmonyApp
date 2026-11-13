@@ -786,6 +786,9 @@ class PlaybackConnection @Inject constructor(
                 putFloat(HarmonyMediaLibraryCallback.ARG_EQ_PREAMP, settings.preampDb)
                 putBoolean(HarmonyMediaLibraryCallback.ARG_EQ_AUTO, settings.auto)
                 putBoolean(HarmonyMediaLibraryCallback.ARG_EQ_BIT_PERFECT, settings.bitPerfectUsb)
+                putBoolean(HarmonyMediaLibraryCallback.ARG_EQ_CLARITY, settings.clarity)
+                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_CLARITY_INTENSITY, settings.clarityIntensity)
+                putFloat(HarmonyMediaLibraryCallback.ARG_EQ_CLARITY_BALANCE, settings.clarityBalance)
             },
         )
     }

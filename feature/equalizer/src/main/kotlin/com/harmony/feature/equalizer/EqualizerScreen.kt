@@ -47,6 +47,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.harmony.core.datastore.SettingsRepository
+import com.harmony.core.model.EqClarity
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.EqPresets
 import com.harmony.core.ui.component.EditorialCircleButton
@@ -113,6 +114,13 @@ class EqualizerViewModel @Inject constructor(
     fun flat() = update { it.copy(bandGainsDb = EqSettings.FLAT, preampDb = 0f) }
 
     fun setBitPerfect(on: Boolean) = update { it.copy(bitPerfectUsb = on) }
+
+    /** CLARITY LIVE; switching it on switches the equalizer on too. */
+    fun toggleClarity() = update { it.copy(clarity = !it.clarity, enabled = it.enabled || !it.clarity) }
+
+    fun setClarityIntensity(value: Float) = update { it.copy(clarityIntensity = EqClarity.intensity(value)) }
+
+    fun setClarityBalance(value: Float) = update { it.copy(clarityBalance = EqClarity.balance(value)) }
 
     private fun update(transform: (EqSettings) -> EqSettings) {
         viewModelScope.launch { settings.setEq(transform(eq.value)) }
@@ -203,6 +211,7 @@ fun EqualizerScreen(
                     when {
                         status.bitPerfect -> "Bit-perfect — the DAC gets the file untouched"
                         !eq.enabled -> "Off — flat, with clean-output protection"
+                        eq.clarity -> "On — Clarity Live sets every band, live"
                         eq.auto -> "On — Auto calibrates to what it hears, live"
                         else -> "On — your curve"
                     },
@@ -228,6 +237,15 @@ fun EqualizerScreen(
                 onBand = viewModel::setBand,
                 onFlat = viewModel::flat,
                 modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(18.dp))
+            ClarityLiveCard(
+                eq = eq,
+                status = status,
+                onToggle = viewModel::toggleClarity,
+                onIntensity = viewModel::setClarityIntensity,
+                onBalance = viewModel::setClarityBalance,
+                palette = palette,
             )
             Spacer(Modifier.height(18.dp))
             AutoCard(eq, status, viewModel, palette)
@@ -277,7 +295,11 @@ private fun AutoCard(eq: EqSettings, status: EqStatus, viewModel: EqualizerViewM
             Column(Modifier.weight(1f)) {
                 Text("Auto live", fontSize = 19.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = palette.ink)
                 Text(
-                    if (on) "Aiming at: ${autoTarget(status.output)}" else "Off — the sliders play as set",
+                    when {
+                        on && eq.clarity -> "Resting while Clarity Live sets the bands"
+                        on -> "Aiming at: ${autoTarget(status.output)}"
+                        else -> "Off — the sliders play as set"
+                    },
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
                     color = palette.muted,

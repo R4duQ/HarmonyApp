@@ -16,6 +16,7 @@
 // `-> ()` comes from the jni_fn! macro's uniform shape.
 #![allow(clippy::needless_range_loop, clippy::unused_unit)]
 
+pub mod clarity;
 pub mod denormals;
 pub mod design;
 pub mod engine;
@@ -28,6 +29,7 @@ use jni::objects::{JByteBuffer, JClass, JFloatArray, ReleaseMode};
 use jni::sys::{jboolean, jfloat, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
+pub use clarity::CLARITY_BANDS;
 pub use engine::{auto_offset_target_db, target_curve_db, Engine};
 
 pub const NUM_BANDS: usize = 10;
@@ -394,6 +396,48 @@ jni_fn!(Java_com_harmony_core_eq_MobileEqNative_nativeLiveAutoOffsets(env, handl
         return;
     }
     write_floats(env, &out, &e.live_auto_offsets_db());
+});
+
+// Clarity Live: on/off (it runs while the EQ is on), intensity 0..1, balance -1..1.
+jni_fn!(Java_com_harmony_core_eq_MobileEqNative_nativeSetClarity(env, handle: jlong, enabled: jboolean, intensity: jfloat, balance: jfloat) -> () = (); {
+    let _ = env;
+    engine_or!(handle, ()).set_clarity(enabled == JNI_TRUE, intensity, balance);
+});
+
+jni_fn!(Java_com_harmony_core_eq_MobileEqNative_nativeClarityNewTrack(env, handle: jlong) -> () = (); {
+    let _ = env;
+    engine_or!(handle, ()).clarity_new_track();
+});
+
+/// True when `array` is null or holds at least `n` floats; otherwise throws.
+fn room_for(env: &mut JNIEnv, array: &JFloatArray, n: usize, what: &str) -> bool {
+    if array.is_null() || env.get_array_length(array).is_ok_and(|len| len as usize >= n) {
+        return true;
+    }
+    throw_illegal_argument(env, what);
+    false
+}
+
+// Clarity's live view: per band (24) the response it applies, the music's
+// level and the masking threshold, dB. Any array may be null. Returns the
+// level match in dB, NaN while Clarity is off and flat.
+jni_fn!(Java_com_harmony_core_eq_MobileEqNative_nativeClarityTelemetry(
+    env, handle: jlong, response: JFloatArray, levels: JFloatArray, masks: JFloatArray
+) -> jfloat = f32::NAN; {
+    let e = engine_or!(handle, f32::NAN);
+    for array in [&response, &levels, &masks] {
+        if !room_for(env, array, CLARITY_BANDS, "expected room for 24 Clarity bands") {
+            return f32::NAN;
+        }
+    }
+    let mut r = [0.0f32; CLARITY_BANDS];
+    let mut l = [0.0f32; CLARITY_BANDS];
+    let mut m = [0.0f32; CLARITY_BANDS];
+    let output = e.clarity_telemetry(Some(&mut r), Some(&mut l), Some(&mut m));
+    write_floats(env, &response, &r);
+    write_floats(env, &levels, &l);
+    write_floats(env, &masks, &m);
+    output
 });
 
 // ---- Telemetry (UI thread, 60 fps) -----------------------------------------------------------

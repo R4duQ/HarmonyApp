@@ -25,6 +25,17 @@ data class EqSettings(
      * of equalizing it. Ignored everywhere else.
      */
     val bitPerfectUsb: Boolean = false,
+    /**
+     * Clarity Live: 24 perceptual bands that each set themselves, live, from
+     * what the music sounds like at that moment (a model of hearing: what is
+     * covered up comes forward, what pushes forward is held back, loudness
+     * kept). Works while [enabled], in place of [auto]; the sliders apply on top.
+     */
+    val clarity: Boolean = false,
+    /** Clarity's intensity, 0..1; 0.5 is the model's default. */
+    val clarityIntensity: Float = EqClarity.DEFAULT_INTENSITY,
+    /** −1 holds back more of what pushes forward, +1 brings out more of what is covered up. */
+    val clarityBalance: Float = 0f,
 ) {
     companion object {
         const val BAND_COUNT = 10
@@ -40,6 +51,37 @@ data class EqSettings(
                 gains?.getOrNull(i)?.takeIf { it.isFinite() }?.coerceIn(-MAX_GAIN_DB, MAX_GAIN_DB) ?: 0f
             }
     }
+}
+
+/** Clarity Live's bands and limits, as the engine (native/harmonyeq/src/clarity.rs) has them. */
+object EqClarity {
+    const val BAND_COUNT = 24
+    const val LOW_HZ = 40f
+    const val HIGH_HZ = 16_000f
+    const val DEFAULT_INTENSITY = 0.5f
+
+    private fun erbNumber(hz: Float): Float = 21.4f * kotlin.math.log10(1f + 0.00437f * hz)
+    private fun hzOfErb(erb: Float): Float = (Math.pow(10.0, erb / 21.4).toFloat() - 1f) / 0.00437f
+
+    /** Band centres, Hz: evenly spaced on the ERB scale, narrow in the bass and wide in the treble. */
+    val CENTERS_HZ: List<Float> = run {
+        val low = erbNumber(LOW_HZ)
+        val step = (erbNumber(HIGH_HZ) - low) / BAND_COUNT
+        List(BAND_COUNT) { hzOfErb(low + step * (it + 0.5f)) }
+    }
+
+    /** "64", "1.2K", "12K": a band's centre for a narrow axis. */
+    fun label(band: Int): String {
+        val hz = CENTERS_HZ[band]
+        return when {
+            hz < 1000f -> "${(hz / 10f).toInt() * 10}"
+            hz < 10_000f -> "${(hz / 100f).toInt() / 10f}K"
+            else -> "${(hz / 1000f).toInt()}K"
+        }
+    }
+
+    fun intensity(value: Float): Float = value.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: DEFAULT_INTENSITY
+    fun balance(value: Float): Float = value.takeIf { it.isFinite() }?.coerceIn(-1f, 1f) ?: 0f
 }
 
 /** The presets, as Winamp named them (its curves moved onto these bands), and a few more. */

@@ -35,6 +35,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 
+use crate::clarity::{self, ClarityStage, CLARITY_BANDS};
 use crate::denormals::FlushDenormals;
 use crate::design::{
     design_band, design_band_pass, design_high_pass, design_low_pass, pade_tanh, sclamp, smax, smin, Biquad,
@@ -269,6 +270,10 @@ struct AudioState {
     release_alpha: f32,
     frame_index: i64,
     prime_frames: usize, // outputs still to skip after a reset (the lookahead filling up)
+
+    // Clarity Live: 24 perceptual bands that set themselves (clarity.rs).
+    clarity: Box<ClarityStage>,
+    seen_clarity_track: u32,
 }
 
 /// What only the polling (UI) thread touches.
@@ -323,6 +328,17 @@ pub struct Engine {
     frozen_out: AtomicBool,
     heal_count: AtomicU32,
     sanitized_samples: AtomicU32,
+    // Clarity Live controls and telemetry.
+    clarity_enabled: AtomicBool,
+    clarity_intensity: AtomicF32,
+    clarity_balance: AtomicF32,
+    clarity_track: AtomicU32,
+    clarity_response_out: [AtomicF32; CLARITY_BANDS],
+    clarity_level_out: [AtomicF32; CLARITY_BANDS],
+    clarity_mask_out: [AtomicF32; CLARITY_BANDS],
+    clarity_output_out: AtomicF32,
+    clarity_engaged_out: AtomicBool,
+    clarity_listening_out: AtomicBool,
     // Mirrors of audio-thread values any thread may read without the lock.
     sample_rate_out: AtomicI32,
     channels_out: AtomicI32,
@@ -411,6 +427,8 @@ impl Engine {
             release_alpha: 0.0,
             frame_index: 0,
             prime_frames: 0,
+            clarity: Box::new(ClarityStage::new()),
+            seen_clarity_track: 0,
         };
         let poller = PollerState {
             fft: Fft::new(FFT_SIZE),
@@ -457,6 +475,16 @@ impl Engine {
             frozen_out: AtomicBool::new(true),
             heal_count: AtomicU32::new(0),
             sanitized_samples: AtomicU32::new(0),
+            clarity_enabled: AtomicBool::new(false),
+            clarity_intensity: AtomicF32::new(0.5),
+            clarity_balance: AtomicF32::new(0.0),
+            clarity_track: AtomicU32::new(0),
+            clarity_response_out: Default::default(),
+            clarity_level_out: std::array::from_fn(|_| AtomicF32::new(-200.0)),
+            clarity_mask_out: std::array::from_fn(|_| AtomicF32::new(-200.0)),
+            clarity_output_out: AtomicF32::new(0.0),
+            clarity_engaged_out: AtomicBool::new(false),
+            clarity_listening_out: AtomicBool::new(false),
             sample_rate_out: AtomicI32::new(48000),
             channels_out: AtomicI32::new(2),
             latency_out: AtomicI32::new(0),
@@ -511,6 +539,7 @@ impl Engine {
         }
         a.analysis_state = [[0.0; 2]; NUM_BANDS];
         a.block_power = [0.0; NUM_BANDS];
+        a.clarity.configure(sample_rate, channels as usize);
 
         // Every coefficient depends on the rate: redesign all of them now, at
         // full precision, and start from them directly (the state is cleared anyway).
@@ -601,6 +630,8 @@ impl Engine {
         while start < frames {
             let count = BLOCK.min(frames - start);
             self.update_controls(&mut a);
+            a.clarity.advance(count);
+            self.publish_clarity(&mut a);
             let block = start * channels;
             let written = self.process_block(&mut a, &mut output[block..block + count * channels], count);
             if written > 0 && start != produced {
@@ -662,7 +693,20 @@ impl Engine {
         }
 
         let eq_on = self.eq_enabled.load(Ordering::Relaxed);
-        let auto_on = eq_on && self.auto_mode.load(Ordering::Relaxed);
+        // Clarity Live sets its bands from the music itself; Auto's live offsets
+        // would chase another target on top of it, so they rest while it runs.
+        let clarity_on = eq_on && self.clarity_enabled.load(Ordering::Relaxed);
+        let (recover, tame) = clarity::weights(
+            self.clarity_intensity.load(Ordering::Relaxed),
+            self.clarity_balance.load(Ordering::Relaxed),
+        );
+        a.clarity.set_controls(clarity_on, recover, tame);
+        let track = self.clarity_track.load(Ordering::Acquire);
+        if track != a.seen_clarity_track {
+            a.seen_clarity_track = track;
+            a.clarity.new_song();
+        }
+        let auto_on = eq_on && self.auto_mode.load(Ordering::Relaxed) && !clarity_on;
 
         // Stage 2a: the slow tonal envelope (about 1.2 s), frozen below -42 dBFS
         // so silence and quiet intros never teach it anything.
@@ -748,6 +792,9 @@ impl Engine {
         let mut need_db = 0.0f32;
         if eq_on {
             let (mut sum_in, mut sum_out) = (0.0f64, 0.0f64);
+            // Clarity Live is left out: it keeps the loudness where it was by
+            // itself, and its lifts are small and on weak bands (the limiter
+            // still has the last word). Counting it here would undo its level match.
             for b in 0..NUM_BANDS {
                 a.band_energy[b] = sanitize_f64(a.band_energy[b]);
                 let energy = a.band_energy[b] + EPSILON as f64;
@@ -779,6 +826,9 @@ impl Engine {
         let mut input = [0.0f32; MAX_CHANNELS];
         let knee = a.saturator_knee;
         let headroom = 1.0f32 - knee;
+        let clarity_engaged = a.clarity.engaged();
+        let clarity_listening = a.clarity.enabled();
+        let mut staged = [0.0f64; MAX_CHANNELS];
         for i in 0..frames {
             // Stage 1: de-zippering. Coefficients and the preamp glide per sample.
             let coef_alpha = a.coef_alpha;
@@ -817,11 +867,24 @@ impl Engine {
             let sibilance = sibilance_filter.run(&mut a.sibilance_state, raw).abs() as f32;
             let rate = if sibilance > a.sibilance_envelope { a.env_attack } else { a.env_release };
             a.sibilance_envelope += (sibilance - a.sibilance_envelope) * rate;
+            let mut clarity_in = 0.0f64;
             for c in 0..channels {
                 let hp = a.high_pass.current;
                 let mut y = hp.run(&mut a.hp_state[c], input[c] as f64);
                 mono += y;
                 y *= a.preamp_linear as f64;
+                clarity_in += y;
+                staged[c] = y;
+            }
+            // Clarity Live hears what reaches it (after ReplayGain and the preamps), before its own bands.
+            if clarity_listening {
+                a.clarity.listen((clarity_in / channels as f64) as f32);
+            }
+            for c in 0..channels {
+                let mut y = staged[c];
+                if clarity_engaged {
+                    y = a.clarity.process(c, y);
+                }
                 // Stage 2: ten cascaded biquads.
                 for b in 0..NUM_BANDS {
                     let filter = a.bands[b].current;
@@ -878,7 +941,7 @@ impl Engine {
             }
             state += a.analysis_state[b][0] + a.analysis_state[b][1];
         }
-        healthy = healthy && state.is_finite();
+        healthy = healthy && state.is_finite() && a.clarity.healthy();
         healthy = healthy && io[..written * channels].iter().all(|v| v.is_finite());
         if !healthy {
             self.heal_count.fetch_add(1, Ordering::Relaxed);
@@ -953,6 +1016,71 @@ impl Engine {
     /// The output: switches the high-pass, the limiter ceiling and Auto's target curve.
     pub fn set_output_device_type(&self, device: OutputDevice) {
         self.device.store(device as i32, Ordering::Release);
+    }
+
+    /// Clarity Live: 24 perceptual bands that set themselves, live, from what
+    /// the music sounds like (clarity.rs). Runs while the EQ is on, in place
+    /// of Auto's live offsets. `intensity` 0..1 (0.5 is the model's default),
+    /// `balance` −1 (hold back what pushes forward) .. +1 (bring out what is covered up).
+    pub fn set_clarity(&self, enabled: bool, intensity: f32, balance: f32) {
+        self.clarity_enabled.store(enabled, Ordering::Relaxed);
+        self.clarity_intensity
+            .store(if intensity.is_finite() { intensity.clamp(0.0, 1.0) } else { 0.5 }, Ordering::Relaxed);
+        self.clarity_balance.store(if balance.is_finite() { balance.clamp(-1.0, 1.0) } else { 0.0 }, Ordering::Relaxed);
+        self.control_generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// A new song starts on this engine: Clarity forgets the last one's balance.
+    pub fn clarity_new_track(&self) {
+        self.clarity_track.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// What Clarity hears and does now, for a live view: per band (24, ERB-spaced
+    /// from 40 Hz to 16 kHz) the response it applies, the music's ear-weighted
+    /// level and the masking threshold, all dB. Returns its level match in dB,
+    /// or NaN when Clarity is neither on nor still gliding back to flat.
+    pub fn clarity_telemetry(
+        &self,
+        response_db: Option<&mut [f32; CLARITY_BANDS]>,
+        level_db: Option<&mut [f32; CLARITY_BANDS]>,
+        mask_db: Option<&mut [f32; CLARITY_BANDS]>,
+    ) -> f32 {
+        if let Some(out) = response_db {
+            *out = std::array::from_fn(|k| self.clarity_response_out[k].load(Ordering::Relaxed));
+        }
+        if let Some(out) = level_db {
+            *out = std::array::from_fn(|k| self.clarity_level_out[k].load(Ordering::Relaxed));
+        }
+        if let Some(out) = mask_db {
+            *out = std::array::from_fn(|k| self.clarity_mask_out[k].load(Ordering::Relaxed));
+        }
+        if self.clarity_engaged_out.load(Ordering::Relaxed) || self.clarity_listening_out.load(Ordering::Relaxed) {
+            self.clarity_output_out.load(Ordering::Relaxed)
+        } else {
+            f32::NAN
+        }
+    }
+
+    /// The centres of Clarity's 24 bands, Hz.
+    pub fn clarity_band_centers_hz() -> [f32; CLARITY_BANDS] {
+        clarity::Bands::new().centers_hz
+    }
+
+    fn publish_clarity(&self, a: &mut AudioState) {
+        if !a.clarity.dirty {
+            return;
+        }
+        a.clarity.dirty = false;
+        let response = a.clarity.response_db();
+        let model = a.clarity.model();
+        for k in 0..CLARITY_BANDS {
+            self.clarity_response_out[k].store(response[k], Ordering::Relaxed);
+            self.clarity_level_out[k].store(model.level_db[k], Ordering::Relaxed);
+            self.clarity_mask_out[k].store(model.mask_db[k], Ordering::Relaxed);
+        }
+        self.clarity_output_out.store(a.clarity.output_db() as f32, Ordering::Relaxed);
+        self.clarity_engaged_out.store(a.clarity.engaged(), Ordering::Relaxed);
+        self.clarity_listening_out.store(a.clarity.enabled(), Ordering::Relaxed);
     }
 
     /// Stops feeding the analyzer (saves the copy while nothing is on screen).
@@ -1307,6 +1435,7 @@ impl AudioState {
         self.box_pos = 0;
         self.frame_index = 0;
         self.prime_frames = self.lookahead_delay;
+        self.clarity.reset();
     }
 
     /// The limiter's delay line and gain (shared by reset and heal).
@@ -1350,6 +1479,7 @@ impl AudioState {
         if !self.preamp_target_linear.is_finite() {
             self.preamp_target_linear = 1.0;
         }
+        self.clarity.heal();
         // The limiter: its delay line and gain, without touching the frame
         // count, so the output stays sample-aligned with the input.
         self.reset_limiter();

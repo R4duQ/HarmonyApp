@@ -208,6 +208,11 @@ class HarmonyMediaLibraryCallback @Inject constructor(
                     preampDb = args.getFloat(ARG_EQ_PREAMP, 0f),
                     auto = args.getBoolean(ARG_EQ_AUTO, false),
                     bitPerfectUsb = args.getBoolean(ARG_EQ_BIT_PERFECT, false),
+                    clarity = args.getBoolean(ARG_EQ_CLARITY, false),
+                    clarityIntensity = com.harmony.core.model.EqClarity.intensity(
+                        args.getFloat(ARG_EQ_CLARITY_INTENSITY, com.harmony.core.model.EqClarity.DEFAULT_INTENSITY),
+                    ),
+                    clarityBalance = com.harmony.core.model.EqClarity.balance(args.getFloat(ARG_EQ_CLARITY_BALANCE, 0f)),
                 )
             )
             else -> return Futures.immediateFuture(
@@ -653,5 +658,8 @@ class HarmonyMediaLibraryCallback @Inject constructor(
         const val ARG_EQ_PREAMP = "eqPreamp"
         const val ARG_EQ_AUTO = "eqAuto"
         const val ARG_EQ_BIT_PERFECT = "eqBitPerfectUsb"
+        const val ARG_EQ_CLARITY = "eqClarity"
+        const val ARG_EQ_CLARITY_INTENSITY = "eqClarityIntensity"
+        const val ARG_EQ_CLARITY_BALANCE = "eqClarityBalance"
     }
 }
