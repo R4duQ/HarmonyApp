@@ -478,7 +478,8 @@ fun SettingsScreen(
             title = "Online mixes (experimental)",
             subtitle = "\"Mix from this song\" can add songs YouTube Music recommends, played from your " +
                 "library when you have them, otherwise prepared as lossless FLAC through the download engine. " +
-                "No account. Off by default",
+                "No account. When a song's tags aren't enough, a sound fingerprint of 12 seconds of it " +
+                "(never the audio) is sent to Shazam to name it. Off by default",
             palette = palette,
             trailing = {
                 EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)

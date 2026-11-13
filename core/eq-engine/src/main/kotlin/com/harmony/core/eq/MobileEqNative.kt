@@ -78,6 +78,26 @@ internal object MobileEqNative {
         fftPeaks32: FloatArray?,
     ): Float
 
+    const val CLARITY_BANDS = 24
+
+    /** Clarity Live: on/off (it runs while the EQ is on), intensity 0..1, balance -1..1. */
+    @JvmStatic external fun nativeSetClarity(handle: Long, enabled: Boolean, intensity: Float, balance: Float)
+
+    /** A new song starts on this engine: Clarity forgets the last one's balance. */
+    @JvmStatic external fun nativeClarityNewTrack(handle: Long)
+
+    /**
+     * Clarity's live view, per band (24): the response it applies, the music's
+     * ear-weighted level and the masking threshold, dB. Any array may be null.
+     * Returns the level match in dB, NaN while Clarity is off and flat.
+     */
+    @JvmStatic external fun nativeClarityTelemetry(
+        handle: Long,
+        response24: FloatArray?,
+        levels24: FloatArray?,
+        masks24: FloatArray?,
+    ): Float
+
     /** Fills [bars] and [peaks] (0..1) and returns how many bars were written. */
     @JvmStatic external fun nativePollSpectrum(handle: Long, bars: FloatArray?, peaks: FloatArray?): Int
 }

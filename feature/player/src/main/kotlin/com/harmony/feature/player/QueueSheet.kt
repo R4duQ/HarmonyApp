@@ -62,6 +62,7 @@ import com.harmony.domain.online.CatalogFailure
 import com.harmony.domain.online.MatchVerdict
 import com.harmony.domain.online.OnlineCandidate
 import com.harmony.domain.online.OnlineMixState
+import com.harmony.domain.online.SeedBasis
 import com.harmony.domain.online.SeedStatus
 import com.harmony.core.model.PlayerState
 import com.harmony.core.ui.component.Artwork
@@ -572,7 +573,12 @@ private fun MixBar(
 private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette) {
     val seedLine = when (val seed = online.seed) {
         SeedStatus.Idle, SeedStatus.Identifying -> "Finding this song on YouTube Music…"
-        is SeedStatus.Identified -> "Found on YouTube Music"
+        is SeedStatus.Identified -> when (seed.basis) {
+            SeedBasis.KNOWN, SeedBasis.TAGS -> "Found on YouTube Music"
+            SeedBasis.FINGERPRINT -> "Recognised by its sound, found on YouTube Music"
+            SeedBasis.ARTIST -> "Song not found: looser suggestions from the artist's radio"
+            SeedBasis.GENRE -> "Song not found: looser suggestions by genre"
+        }
         is SeedStatus.NotIdentified -> when (seed.verdict) {
             MatchVerdict.AMBIGUOUS -> "Several recordings match on YouTube Music: none chosen"
             MatchVerdict.UNCERTAIN -> "Not sure which YouTube Music song this is: none chosen"

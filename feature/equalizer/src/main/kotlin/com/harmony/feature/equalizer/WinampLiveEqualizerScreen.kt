@@ -99,7 +99,7 @@ fun WinampLiveEqualizerScreen(
 ) {
     val telemetry = rememberLiveDspTelemetry()
     val on = eq.enabled && !status.bitPerfect
-    val auto = on && eq.auto
+    val auto = on && eq.auto && !eq.clarity // Auto rests while Clarity Live runs
     Column(modifier.skinWindow()) {
         // Top bar: EQ ON, AUTO LIVE, the live preamp, FLAT.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

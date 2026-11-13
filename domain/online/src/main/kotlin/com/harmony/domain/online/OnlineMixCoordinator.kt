@@ -104,6 +104,8 @@ class OnlineMixCoordinator(
     private val log: (String) -> Unit = {},
     /** Something unexpected was caught (the app goes on): for the diagnostics log, with its stack. */
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
+    /** Recognises a file by its sound when its tags don't find it (step 2). */
+    private val fingerprinter: SongFingerprinter = SongFingerprinter.NONE,
 ) : OnlineMixFeed {
     private val _state = MutableStateFlow(OnlineMixState())
     override val state: StateFlow<OnlineMixState> = _state.asStateFlow()
@@ -119,6 +121,7 @@ class OnlineMixCoordinator(
 
     private val identified = ExpiringCache<String, MatchOutcome>(200, clock)
     private val radios = ExpiringCache<String, CatalogResult<List<CatalogTrack>>>(50, clock)
+    private val fingerprints = ExpiringCache<String, FingerprintResult>(200, clock)
     @Volatile private var pausedUntil = 0L
 
     /** The result of identifying a seed: a confirmed id, or why not. */
@@ -210,7 +213,7 @@ class OnlineMixCoordinator(
         val known = seed.videoId?.takeIf(CatalogTrack::isVideoId)
         if (known != null) {
             // A song an online mix prepared: its id is the catalog's own, nothing to search for.
-            apply(gen) { it.copy(seed = SeedStatus.Identified(known, 100)) }
+            apply(gen) { it.copy(seed = SeedStatus.Identified(known, 100, SeedBasis.KNOWN)) }
             log("ONLINE_MIX seed=${session.seedSongId} identify=known video=$known")
             follow(gen, session, seed, known, avoid)
             return
@@ -218,18 +221,91 @@ class OnlineMixCoordinator(
         val outcome = identify(seed)
         val match = outcome.result
         if (!current(gen)) return
-        if (match == null || !match.confirmed) {
-            val status = if (outcome.failure != null) SeedStatus.Failed(outcome.failure)
-            else SeedStatus.NotIdentified(match?.verdict ?: MatchVerdict.NO_MATCH, outcome.results,
-                match?.assessments?.count { it.track.kind == CatalogKind.SONG } ?: 0)
-            apply(gen) { it.copy(seed = status) }
-            log("ONLINE_MIX seed=${session.seedSongId} identify=${status.javaClass.simpleName} results=${outcome.results} ms=${clock() - started}")
+        if (match != null && match.confirmed) {
+            val seedId = match.track!!.videoId
+            apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, match.score, SeedBasis.TAGS)) }
+            log("ONLINE_MIX seed=${session.seedSongId} identify=ok video=$seedId score=${match.score} ms=${clock() - started}")
+            follow(gen, session, seed, seedId, avoid)
             return
         }
-        val seedId = match.track!!.videoId
-        apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, match.score)) }
-        log("ONLINE_MIX seed=${session.seedSongId} identify=ok video=$seedId score=${match.score} ms=${clock() - started}")
-        follow(gen, session, seed, seedId, avoid)
+        if (outcome.failure != null) {
+            // The catalog could not be asked: nothing below would fare better.
+            apply(gen) { it.copy(seed = SeedStatus.Failed(outcome.failure)) }
+            log("ONLINE_MIX seed=${session.seedSongId} identify=Failed ${outcome.failure.javaClass.simpleName} ms=${clock() - started}")
+            return
+        }
+        log("ONLINE_MIX seed=${session.seedSongId} identify=${match?.verdict ?: MatchVerdict.NO_MATCH} by tags results=${outcome.results}")
+
+        // Step 2: the tags were not enough; recognise the file by its sound.
+        val heard = seed.uri?.let { recognise(it) }
+        if (!current(gen)) return
+        if (heard != null) {
+            val byName = SeedTrack(heard.title, heard.artist, heard.album, seed.knownDurationMs, explicit = seed.explicit)
+            val second = identify(byName)
+            if (!current(gen)) return
+            val found = second.result?.takeIf { it.confirmed }
+            if (found != null) {
+                val seedId = found.track!!.videoId
+                apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, found.score, SeedBasis.FINGERPRINT)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=fingerprint video=$seedId score=${found.score} ms=${clock() - started}")
+                follow(gen, session, byName, seedId, avoid)
+                return
+            }
+        }
+
+        // Step 3: not the song itself; a radio from its artist, else from its genre.
+        val artist = heard?.artist ?: seed.artist
+        if (artist.isNotBlank()) {
+            val anchor = (ask { catalog.searchSongs(artist, SEARCH_LIMIT) } as? CatalogResult.Ok)?.value
+                ?.let { LooseAnchors.byArtist(artist, it) }
+            if (!current(gen)) return
+            if (anchor != null) {
+                apply(gen) { it.copy(seed = SeedStatus.Identified(anchor.videoId, 0, SeedBasis.ARTIST)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=artist video=${anchor.videoId} ms=${clock() - started}")
+                follow(gen, session, seed, anchor.videoId, avoid)
+                return
+            }
+        }
+        val genre = LooseAnchors.usableGenre(seed.genre)
+        if (genre != null) {
+            val anchor = (ask { catalog.searchSongs(genre, SEARCH_LIMIT) } as? CatalogResult.Ok)?.value?.let(LooseAnchors::byGenre)
+            if (!current(gen)) return
+            if (anchor != null) {
+                apply(gen) { it.copy(seed = SeedStatus.Identified(anchor.videoId, 0, SeedBasis.GENRE)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=genre video=${anchor.videoId} ms=${clock() - started}")
+                follow(gen, session, seed, anchor.videoId, avoid)
+                return
+            }
+        }
+        val status = SeedStatus.NotIdentified(match?.verdict ?: MatchVerdict.NO_MATCH, outcome.results,
+            match?.assessments?.count { it.track.kind == CatalogKind.SONG } ?: 0)
+        apply(gen) { it.copy(seed = status) }
+        log("ONLINE_MIX seed=${session.seedSongId} identify=none ms=${clock() - started}")
+    }
+
+    /** What the file's sound says it is (kept per file), or null. A failure is logged, never thrown. */
+    private suspend fun recognise(uri: String): FingerprintResult.Found? {
+        val result = fingerprints.getOrLoad(uri) {
+            val r = try {
+                fingerprinter.identify(uri)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                onError("recognising a file by its sound failed", t)
+                FingerprintResult.Failed(t.javaClass.simpleName)
+            }
+            r to when (r) {
+                is FingerprintResult.Found -> IDENTIFY_TTL_MS
+                FingerprintResult.NotFound -> NOT_FOUND_TTL_MS
+                is FingerprintResult.Failed -> 0L
+            }
+        }
+        log("ONLINE_MIX fingerprint=" + when (result) {
+            is FingerprintResult.Found -> "found"
+            FingerprintResult.NotFound -> "not-found"
+            is FingerprintResult.Failed -> "failed (${result.reason})"
+        })
+        return result as? FingerprintResult.Found
     }
 
     /** From the seed's confirmed id: its radio, the plan, then preparing the candidates one by one. */

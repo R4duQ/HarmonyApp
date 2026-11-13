@@ -18,6 +18,10 @@ data class SeedTrack(
      * song an online mix prepared): then nothing is searched for.
      */
     val videoId: String? = null,
+    /** The file, for recognising it by its sound when its tags are not enough. */
+    val uri: String? = null,
+    /** The file's genre tag, for a genre radio when nothing else is found. */
+    val genre: String? = null,
 ) {
     val knownDurationMs: Long? get() = durationMs?.takeIf { it > 0 }
 

@@ -30,6 +30,8 @@ import com.harmony.core.model.EqSettings
 import com.harmony.core.model.ReplayGainMode
 import com.harmony.core.model.Song
 import com.harmony.domain.playback.AudioLevels
+import com.harmony.domain.playback.ClarityLive
+import com.harmony.domain.playback.ClarityTelemetrySource
 import com.harmony.domain.playback.EqLive
 import com.harmony.domain.playback.EqOutput
 import com.harmony.domain.playback.DspTelemetrySource
@@ -115,6 +117,8 @@ class HarmonyPlayer(
             engine.exo.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     engine.equalizer.setLevelGainDb(replayGainDbFor(engine.exo.currentMediaItem))
+                    // Clarity learns each song's balance afresh (not the one this engine played before).
+                    engine.equalizer.clarityNewTrack()
                 }
             })
         }
@@ -329,6 +333,8 @@ class HarmonyPlayer(
             engine.equalizer.setPreampDb(settings.preampDb)
             engine.equalizer.setEqEnabled(settings.enabled)
             engine.equalizer.setAutoMode(settings.enabled && settings.auto)
+            // Clarity Live runs while the EQ is on; the engine rests Auto while it does.
+            engine.equalizer.setClarity(settings.enabled && settings.clarity, settings.clarityIntensity, settings.clarityBalance)
         }
         if (settings.bitPerfectUsb != before.bitPerfectUsb) applyBitPerfect()
     }
@@ -395,6 +401,9 @@ class HarmonyPlayer(
     private fun startAnalyser() {
         AudioLevels.source = DspTelemetrySource { gains, bars, peaks ->
             activeEngine.equalizer.pollDspTelemetry(gains, bars, peaks)
+        }
+        ClarityLive.source = ClarityTelemetrySource { response, levels, masks ->
+            activeEngine.equalizer.clarityTelemetry(response, levels, masks)
         }
         scope.launch {
             AudioLevels.watchers.collect { count ->
@@ -496,6 +505,7 @@ class HarmonyPlayer(
     fun release() {
         scope.cancel()
         AudioLevels.source = null
+        ClarityLive.source = null
         outputMonitor.stop()
         player.release()
         // The players are released, so their audio threads no longer touch the engines.

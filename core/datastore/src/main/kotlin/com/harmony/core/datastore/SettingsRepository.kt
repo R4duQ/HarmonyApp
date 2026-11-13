@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.harmony.core.model.EqAuto
+import com.harmony.core.model.EqClarity
 import com.harmony.core.model.EqSettings
 import com.harmony.core.model.OutputForm
 import com.harmony.core.model.OutputForms
@@ -103,6 +104,9 @@ class SettingsRepository @Inject constructor(
         val EQ_PREAMP_V2 = floatPreferencesKey("eq_preamp_v2")
         val EQ_AUTO = booleanPreferencesKey("eq_auto")
         val EQ_BIT_PERFECT_USB = booleanPreferencesKey("eq_bit_perfect_usb")
+        val EQ_CLARITY = booleanPreferencesKey("eq_clarity_live")
+        val EQ_CLARITY_INTENSITY = floatPreferencesKey("eq_clarity_intensity")
+        val EQ_CLARITY_BALANCE = floatPreferencesKey("eq_clarity_balance")
         val ENERGY = floatPreferencesKey("energy_slider") // -1 sentinel = off
         val SOULSEEK_FORMAT = stringPreferencesKey("soulseek_format_preference")
         val ONLINE_MIX = booleanPreferencesKey("online_mix_enabled")
@@ -164,6 +168,9 @@ class SettingsRepository @Inject constructor(
                 .coerceIn(-EqSettings.MAX_PREAMP_DB, EqSettings.MAX_PREAMP_DB),
             auto = p[Keys.EQ_AUTO] ?: p[Keys.AUTO_EQ_TONE] ?: false,
             bitPerfectUsb = p[Keys.EQ_BIT_PERFECT_USB] ?: false,
+            clarity = p[Keys.EQ_CLARITY] ?: false,
+            clarityIntensity = EqClarity.intensity(p[Keys.EQ_CLARITY_INTENSITY] ?: EqClarity.DEFAULT_INTENSITY),
+            clarityBalance = EqClarity.balance(p[Keys.EQ_CLARITY_BALANCE] ?: 0f),
         )
     }
 
@@ -279,6 +286,9 @@ class SettingsRepository @Inject constructor(
             ?.coerceIn(-EqSettings.MAX_PREAMP_DB, EqSettings.MAX_PREAMP_DB) ?: 0f
         it[Keys.EQ_AUTO] = eq.auto
         it[Keys.EQ_BIT_PERFECT_USB] = eq.bitPerfectUsb
+        it[Keys.EQ_CLARITY] = eq.clarity
+        it[Keys.EQ_CLARITY_INTENSITY] = EqClarity.intensity(eq.clarityIntensity)
+        it[Keys.EQ_CLARITY_BALANCE] = EqClarity.balance(eq.clarityBalance)
     }
 
     private suspend inline fun edit(
