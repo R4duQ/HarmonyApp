@@ -1,0 +1,31 @@
+# Harmony's native audio code, in Rust. One crate per Android shared library;
+# each keeps the library name the Kotlin side loads (System.loadLibrary).
+#
+#   harmonydsp      core/dsp-native  NativeAnalyzer   (song analysis features)
+#   harmonyshuffle  core/dsp-native  SmartShuffleNative
+#   harmonyeq       core/eq-engine   MobileEqNative   (the float EQ engine)
+#
+# Android builds go through cargo-ndk (see the Gradle modules); host builds
+# (`cargo build --release`) produce the JNI libraries the JVM unit tests load.
+[workspace]
+resolver = "2"
+members = ["harmonydsp", "harmonyeq", "harmonyshuffle"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+license = "Proprietary"
+publish = false
+
+[workspace.dependencies]
+jni = { version = "0.21.1", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# Unwind (not abort): every JNI entry point catches panics and reports a
+# failure to Kotlin instead of taking the app down.
+panic = "unwind"
+debug = false
+strip = "symbols"

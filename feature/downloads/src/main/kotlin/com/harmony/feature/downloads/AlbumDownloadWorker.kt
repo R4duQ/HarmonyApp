@@ -464,7 +464,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
         } finally { staged?.delete() }
     }
 
-    /** The engine's name as the app shows it: Mornye in the Mornye build, SpotiFLAC in the stable one. */
+    /** The engine's name as the app shows it ("Mornye"). */
     private fun displaySource(): String = spoti.engineName
 
     private fun updateNotification(title: String, detail: String) {

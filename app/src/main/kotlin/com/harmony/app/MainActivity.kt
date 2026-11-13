@@ -177,9 +177,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        // spotiflac:// for the stable build, mornye:// for the Mornye one; each
-        // build's manifest only lets its own scheme through.
-        private val SPOTIFLAC_SCHEMES = setOf("spotiflac", "mornye")
+        // Mornye's runtime sends extension callbacks back on mornye://.
+        private val SPOTIFLAC_SCHEMES = setOf("mornye")
         private val SPOTIFLAC_CALLBACK_HOSTS = setOf("callback", "spotify-callback", "session-grant")
         private const val SPOTIFY_PLAYLIST_SCHEME = "com.harmony.app"
         private const val SPOTIFY_PLAYLIST_CALLBACK_HOST = "spotify-playlist-callback"

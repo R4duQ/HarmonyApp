@@ -12,8 +12,8 @@ import com.harmony.core.model.VectorQuality
 import java.io.Closeable
 
 /**
- * The JNI surface of SmartShuffleEngine (shuffle_jni.cpp registers these by
- * name in JNI_OnLoad). Use [NativeShuffleEngine] and [NativeAcousticExtractor];
+ * The JNI surface of Smart Shuffle, libharmonyshuffle (Rust,
+ * native/harmonyshuffle), which exports these by their JNI names. Use [NativeShuffleEngine] and [NativeAcousticExtractor];
  * this object only holds the raw calls.
  */
 object SmartShuffleNative {
@@ -103,7 +103,7 @@ object SmartShuffleNative {
     @JvmStatic external fun nativeExtractorDestroy(handle: Long)
 }
 
-/** The scorer's knobs, mirrored from the C++ Weights. */
+/** The scorer's knobs, mirrored from the native Weights. */
 data class ShuffleWeights(
     val similarity: Float = 1.00f,
     val markov: Float = 0.30f,

@@ -5,8 +5,9 @@ how they sound.
 
 | Layer | File | Role |
 |---|---|---|
-| C++ | `src/main/cpp/SmartShuffleEngine.h/.cpp` | 24-D extractor, session vector, scorer, sampling, dithering, Sonic Adventure, the `ShuffleDiagnosticBrain`, `runSyntheticBrainSimulation()` |
-| JNI | `src/main/cpp/shuffle_jni.cpp` | `SmartShuffleNative`, registered in `JNI_OnLoad`, one lock per engine |
+| Rust | `native/harmonyshuffle/src/` | 24-D extractor, session vector, scorer, sampling, dithering, Sonic Adventure, the Diagnostic Brain (`brain.rs`), the mix (`radio.rs`), `run_synthetic_brain_simulation()` |
+| JNI | `native/harmonyshuffle/src/lib.rs` | `SmartShuffleNative`, exported by JNI name, one mutex per engine |
+| C++ | `src/main/cpp/SmartShuffleEngine.h/.cpp` | the original, now built by the iOS app only; the Rust port matches it value for value (ties between equal scores aside: the port breaks them stably, the same way on every platform) |
 | Kotlin | `src/main/kotlin/.../SmartShuffleNative.kt` | `NativeShuffleEngine`, `NativeAcousticExtractor` |
 | Room | `data/shuffle/.../SmartShuffleDatabase.kt` | `smart_shuffle.db`: 24-D vectors, Markov transitions, zone bandit |
 | Brain | `data/shuffle/.../NativeShuffleBrain.kt` | keeps the engine in step with both databases |
@@ -178,9 +179,9 @@ judged by listening (see the device checklist in the pull request).
 ## Running the tests
 
 ```sh
-cmake -S core/dsp-native/src/test/cpp -B build/shuffle-host && cmake --build build/shuffle-host
-./build/shuffle-host/shuffle_test          # engine, brain, extractor, self-test
-HARMONY_SHUFFLE_HOST_LIB_DIR=$PWD/build/shuffle-host ./gradlew :core:dsp-native:testReleaseUnitTest
+(cd native && cargo test --release -p harmonyshuffle --features testing)   # engine, brain, extractor, self-test
+(cd native && cargo build --release)       # the host JNI library for the JVM tests
+HARMONY_SHUFFLE_HOST_LIB_DIR=$PWD/native/target/release ./gradlew :core:dsp-native:testReleaseUnitTest
 ./gradlew :domain:shuffle:test :data:shuffle:testReleaseUnitTest
 adb logcat -s SHUFFLE_BRAIN                # the live table on a device
 ```

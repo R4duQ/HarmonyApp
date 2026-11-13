@@ -25,6 +25,10 @@ gradlePlugin {
             id = "harmony.hilt"
             implementationClass = "HiltConventionPlugin"
         }
+        register("rustJni") {
+            id = "harmony.rust.jni"
+            implementationClass = "RustJniConventionPlugin"
+        }
         register("jvmLibrary") {
             id = "harmony.jvm.library"
             implementationClass = "JvmLibraryConventionPlugin"

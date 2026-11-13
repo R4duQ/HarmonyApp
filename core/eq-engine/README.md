@@ -4,12 +4,15 @@ Harmony's float equalizer engine: a 10-band EQ whose Auto mode and every
 other stage react to live frequency analysis of the music as it plays (never
 to tags or genres), output protection that does not clip, a 60 fps spectrum
 and telemetry feed, output-device routing and hi-res USB DAC support. The DSP
-is C++ (NDK); Media3 and Android integration is Kotlin.
+is Rust (`native/harmonyeq`, built by the `harmony.rust.jni` Gradle plugin);
+Media3 and Android integration is Kotlin. The iOS app still compiles the C++
+original in `src/main/cpp`, which the Rust engine matches sample for sample.
 
 | File | What it is |
 | --- | --- |
-| `src/main/cpp/MobileEqEngine.{h,cpp}` | The 4-stage DSP chain, the live 10-band analyser and auto-calibrator, SPSC ring, 2048-point FFT, log bars and ballistics |
-| `src/main/cpp/eq_jni.cpp` | Garbage-free JNI bridge (direct buffers, `GetPrimitiveArrayCritical`, registered natives) |
+| `native/harmonyeq/src/engine.rs` | The 4-stage DSP chain, the live 10-band analyser and auto-calibrator, SPSC ring, 2048-point FFT, log bars and ballistics |
+| `native/harmonyeq/src/lib.rs` | Garbage-free JNI bridge (direct buffers, `GetPrimitiveArrayCritical`; rejects overlapping input and output) |
+| `src/main/cpp/MobileEqEngine.{h,cpp}` | The C++ original, now built by the iOS app only |
 | `CustomEqAudioProcessor.kt` | Media3 `AudioProcessor`: 16/24/32-bit or float PCM in, float out, 8–384 kHz |
 | `HiResEqAudioSink.kt`, `EqSinkStage.kt`, `GaplessTrimProcessor.kt` | Runs the processor ahead of a float-output `DefaultAudioSink` (see below) |
 | `AudioOutputMonitor.kt`, `OutputDeviceType.kt` | Routing detection, USB DAC inspection and Android 14+ bit-perfect USB |
@@ -114,7 +117,7 @@ engine's telemetry once per frame through `AudioLevels`.
 
 ## Tests
 
-- **C++ host tests** (`src/test/cpp`, run in CI) cover:
+- **Rust tests** (`cargo test --release -p harmonyeq --features testing` in `native/`, run in CI; ported from the C++ host tests in `src/test/cpp`, which the iOS CI still runs) cover:
   - response accuracy at 44.1–384 kHz;
   - never exceeding the ceiling at +12 dB on every band with full-scale noise;
   - sample alignment;
@@ -125,10 +128,8 @@ engine's telemetry once per frame through `AudioLevels`.
   - sample-rate reconfiguration;
   - spectrum accuracy;
   - concurrent audio and UI threads;
-  - speed (about 90× real time at 192 kHz stereo on a desktop core).
-
-  They are also clean under ASan, UBSan and TSan.
+  - speed (well above the 20× real-time bound at 192 kHz stereo).
 - **JVM tests** (`src/test/kotlin`) cover:
-  - the processor, through JNI against a host build of the engine;
+  - the processor, through JNI against a host build of the engine (`cargo build --release`, `HARMONY_EQ_HOST_LIB_DIR=native/target/release`);
   - the trimming processor;
   - the sink state machine, against a sink that takes random-sized bites and enforces AudioSink's contract.

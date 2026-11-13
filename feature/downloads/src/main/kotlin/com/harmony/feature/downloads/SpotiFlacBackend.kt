@@ -3,12 +3,10 @@ package com.harmony.feature.downloads
 /**
  * The native runtime that runs the download extensions.
  *
- * Harmony ships in two builds that differ only here: the stable one uses
- * SpotiFLAC 4.9.6's Go runtime, and the Mornye one uses Mornye 5's Rust
- * runtime, which replaced it upstream. Both run the same extensions from the
- * same registry, with the same request and response JSON, so the engine above
- * talks to either through this one contract. Each build provides
- * [createSpotiFlacBackend] from its own source set.
+ * Harmony uses Mornye 5's Rust runtime (MornyeSpotiFlacBackend.kt), which
+ * replaced SpotiFLAC's Go runtime upstream and keeps its request and response
+ * JSON. The engine talks to it through this contract, so tests can use fakes;
+ * [createSpotiFlacBackend] provides the real one.
  *
  * The calls mirror SpotiFLAC's Go exports, which the engine was written
  * against. Calls a runtime does not have answer as "nothing there" (an empty
