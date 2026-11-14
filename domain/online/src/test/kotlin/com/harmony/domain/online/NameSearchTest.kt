@@ -58,3 +58,28 @@ class NameSearchTest {
         assertEquals(listOf(SongGuess("A", "B")), SongGuesser.firstOf(failing, next).guess(untagged))
     }
 }
+
+/** Romanian credits ("cu" for "with") and a typo in a file's name. */
+class RomanianCreditsTest {
+    private val track = CatalogTrack("decatsamint", "Decât să mint", listOf("Agresiv", "Mitza"), "Album", null, 201_000, CatalogKind.SONG, null, true)
+
+    @Test
+    fun cuCreditsAGuestAsFeatDoes() {
+        assertEquals(listOf("agresiv", "mitza"), SongMatcher.credits("Agresiv cu Mitza"))
+        assertEquals("agresiv", com.harmony.domain.library.discovery.TrackIdentity.primaryArtist("Agresiv cu Mitza"))
+        assertEquals("decat sa mint", com.harmony.domain.library.discovery.TrackIdentity.parseTitle("Decat sa mint (cu Mitza)").first)
+        assertTrue(SongMatcher.match(SeedTrack("Decat sa mint", "Agresiv cu Mitza", null, 201_500), listOf(track)).confirmed)
+        assertTrue(SongMatcher.match(SeedTrack("Decat sa mint (cu Mitza)", "Agresiv", null, 201_500), listOf(track)).confirmed)
+    }
+
+    @Test
+    fun aTypoInTheNameStillFindsTheSongByItsName() {
+        val seed = SeedTrack("Decat sa minit", "Agresiv cu Mitza", null, 201_500)
+        assertEquals(listOf(SongGuess("Agresiv", "Decât să mint")),
+            NameSearch.pick(seed, listOf(NamedRecording("Agresiv", "Decât să mint", 201_000))))
+        assertTrue(NameSearch.oneEditApart("minit", "mint"))
+        assertTrue(!NameSearch.oneEditApart("mint", "mana"))
+        assertTrue("short words must be exact", NameSearch.pick(SeedTrack("Ce sa", "X", null, 200_000),
+            listOf(NamedRecording("X", "Ce si", 200_000))).isEmpty())
+    }
+}

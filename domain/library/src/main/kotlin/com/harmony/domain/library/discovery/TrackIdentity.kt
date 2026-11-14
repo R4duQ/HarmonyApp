@@ -30,10 +30,11 @@ data class TrackIdentity(
         private val marks = Regex("\\p{M}+")
         private val separators = Regex("[^\\p{L}\\p{N}]+")
         private val brackets = Regex("[(\\[{]([^)\\]}]*)[)\\]}]")
-        private val featuring = Regex("^(feat|ft|featuring|with)\\b.*")
+        // "cu" is Romanian for "with", the way Romanian releases credit a guest ("Agresiv cu Mitza").
+        private val featuring = Regex("^(feat|ft|featuring|with|cu)\\b.*")
         // Not "/" (AC/DC) and not "and" (Florence and the Machine): both sides of a
         // comparison split the same way, so only real credit separators matter.
-        private val artistSplit = Regex("\\s+(feat\\.?|ft\\.?|featuring|with|x|vs\\.?)\\s+|\\s*[,&;]\\s*", RegexOption.IGNORE_CASE)
+        private val artistSplit = Regex("\\s+(feat\\.?|ft\\.?|featuring|with|cu|x|vs\\.?)\\s+|\\s*[,&;]\\s*", RegexOption.IGNORE_CASE)
 
         fun normalize(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFD)
             .replace(marks, "").lowercase(Locale.ROOT).replace(separators, " ").trim()

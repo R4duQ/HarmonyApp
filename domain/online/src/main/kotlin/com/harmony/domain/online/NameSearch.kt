@@ -27,7 +27,7 @@ object NameSearch {
     /** Lengths within this agree (a rip may have a second of silence more or less). */
     const val LENGTH_TOLERANCE_MS = 3_000L
 
-    private val noise = setOf("the", "a", "an", "and", "of", "feat", "ft", "featuring", "with", "x", "vs")
+    private val noise = setOf("the", "a", "an", "and", "of", "feat", "ft", "featuring", "with", "cu", "x", "vs")
 
     /**
      * The free-text search for [seed]: its cleaned title, with the artist
@@ -54,7 +54,7 @@ object NameSearch {
             .filter { it.artist.isNotBlank() && it.title.isNotBlank() }
             .mapNotNull { r ->
                 val title = words(TrackIdentity.parseTitle(r.title).first).filter { it !in noise }
-                if (title.isEmpty() || !names.containsAll(title)) return@mapNotNull null
+                if (title.isEmpty() || !title.all { w -> named(w, names) }) return@mapNotNull null
                 val artist = words(TrackIdentity.primaryArtist(r.artist)).filter { it !in noise }
                 val artistShare = if (artist.isEmpty()) 0.0 else artist.count { it in names }.toDouble() / artist.size
                 val ms = r.durationMs?.takeIf { it > 0 }
@@ -72,6 +72,33 @@ object NameSearch {
             .distinctBy { TrackIdentity.normalize(it.artist) + "|" + TrackIdentity.normalize(it.title) }
             .take(SongGuessPrompt.MAX_GUESSES)
             .toList()
+    }
+
+    /**
+     * [word] is in [names], or one letter off a word of them when both are 4
+     * letters or more: a typo ("minit" for "mint") is the same word, a short
+     * word ("sa", "tu") has to be exact.
+     */
+    private fun named(word: String, names: Set<String>): Boolean =
+        word in names || (word.length >= 4 && names.any { it.length >= 4 && oneEditApart(it, word) })
+
+    /** At most one letter added, removed or changed. */
+    internal fun oneEditApart(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+        var i = 0
+        var j = 0
+        var edits = 0
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) { i++; j++; continue }
+            if (++edits > 1) return false
+            when {
+                a.length > b.length -> i++
+                a.length < b.length -> j++
+                else -> { i++; j++ }
+            }
+        }
+        return edits + (a.length - i) + (b.length - j) <= 1
     }
 
     private fun words(text: String): Set<String> =
