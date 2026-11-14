@@ -13,7 +13,6 @@ import com.harmony.domain.online.LocalCopies
 import com.harmony.domain.online.OnlineMixCoordinator
 import com.harmony.domain.online.OnlineMixFeed
 import com.harmony.domain.online.SeedCleaner
-import com.harmony.domain.online.SongGuesser
 import com.harmony.data.shuffle.TasteMemory
 import com.harmony.domain.online.UrlConnectionTransport
 import com.harmony.domain.online.YtMusicClient
@@ -58,8 +57,7 @@ object OnlineMixModule {
         local: LibraryLocalCopies,
         fingerprinter: FileFingerprinter,
         taste: TasteMemory,
-        nano: GeminiNanoGuesser,
-        claude: ClaudeSongGuesser,
+        guesser: GeminiNanoGuesser,
     ): OnlineMixFeed {
         val country = Locale.getDefault().country.takeIf { it.length == 2 }
         return OnlineMixCoordinator(
@@ -72,9 +70,8 @@ object OnlineMixModule {
             local = local,
             // Tags not enough: the file is recognised by its sound (only a fingerprint is sent).
             fingerprinter = fingerprinter,
-            // Nothing else found it: Gemini Nano on the phone guesses from the names (nothing is sent);
-            // without it, Claude with the listener's own API key, when one is set.
-            guesser = SongGuesser.firstOf(nano, claude),
+            // Nothing else found it: Gemini Nano on the phone guesses from the names (nothing is sent).
+            guesser = guesser,
             // What each radio puts together, remembered for the offline mix (names and ids only).
             radioObserver = { seedSongId, seed, sameSong, tracks ->
                 taste.record(
