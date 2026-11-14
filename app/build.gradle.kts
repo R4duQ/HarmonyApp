@@ -188,6 +188,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation("io.coil-kt:coil:2.7.0")
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.mlkit.genai.prompt)
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)

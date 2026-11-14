@@ -546,3 +546,70 @@ class OnlineMixRadioObserverTest {
         assertTrue(byGenre.isEmpty())
     }
 }
+
+/** Step 2b: the phone's AI guesses from the names; only a guess the catalog confirms is used. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixGuessTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    private val cryptic = SeedTrack("lp_itend_final_v2", "<unknown>", null, 216_000, uri = "content://x/9")
+    private val inTheEnd = song("itheend", "In the End", "Linkin Park", ms = 216_000, album = "Hybrid Theory")
+    private val numb = song("numb00", "Numb", "Linkin Park", ms = 185_000)
+
+    private fun TestScope.make(heard: FingerprintResult, guesser: SongGuesser, search: (String) -> List<CatalogTrack>): Pair<OnlineMixCoordinator, MutableList<String>> {
+        val radios = mutableListOf<String>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val c = OnlineMixCoordinator(FakeCatalog({ q -> CatalogResult.Ok(search(q)) }, { id -> radios += id; CatalogResult.Ok(RADIO) }),
+            FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime },
+            fingerprinter = { heard }, guesser = guesser)
+        return c to radios
+    }
+
+    @Test
+    fun aConfirmedGuessStartsTheSongsOwnRadio() = runTest {
+        var asked = 0
+        val (c, radios) = make(FingerprintResult.NotFound, {
+            asked++
+            listOf(SongGuess("Linkin Park", "In The End (Live)"), SongGuess("Linkin Park", "In the End"))
+        }) { q -> if (q == "Linkin Park In the End") listOf(inTheEnd) else emptyList() }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals("the live guess finds nothing; the second is confirmed",
+            SeedStatus.Identified(inTheEnd.videoId, 80, SeedBasis.GUESS), c.state.value.seed)
+        assertEquals(listOf(inTheEnd.videoId), radios)
+        c.start(key.copy(generation = 2), MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals("the same file is not guessed twice", 1, asked)
+    }
+
+    @Test
+    fun aGuessTheCatalogDoesNotConfirmIsOnlyAnArtistLead() = runTest {
+        val (c, radios) = make(FingerprintResult.NotFound, { listOf(SongGuess("Linkin Park", "Made Up Song")) }) { q ->
+            if (q == "Linkin Park") listOf(numb) else emptyList()
+        }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedStatus.Identified(numb.videoId, 0, SeedBasis.ARTIST), c.state.value.seed)
+        assertEquals(listOf(numb.videoId), radios)
+    }
+
+    @Test
+    fun whatTheSoundSaidIsTrustedOverAGuess() = runTest {
+        var asked = 0
+        val (c, _) = make(FingerprintResult.Found("Numb", "Linkin Park"), { asked++; emptyList() }) { emptyList() }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(0, asked)
+    }
+
+    @Test
+    fun aGuesserThatThrowsIsNoGuessNotACrash() = runTest {
+        val (c, _) = make(FingerprintResult.NotFound, { throw IllegalStateException("aicore") }) { emptyList() }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertTrue(c.state.value.seed is SeedStatus.NotIdentified)
+    }
+}

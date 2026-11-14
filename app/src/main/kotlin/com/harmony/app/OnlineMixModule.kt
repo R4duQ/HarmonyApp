@@ -57,6 +57,7 @@ object OnlineMixModule {
         local: LibraryLocalCopies,
         fingerprinter: FileFingerprinter,
         taste: TasteMemory,
+        guesser: GeminiNanoGuesser,
     ): OnlineMixFeed {
         val country = Locale.getDefault().country.takeIf { it.length == 2 }
         return OnlineMixCoordinator(
@@ -69,6 +70,8 @@ object OnlineMixModule {
             local = local,
             // Tags not enough: the file is recognised by its sound (only a fingerprint is sent).
             fingerprinter = fingerprinter,
+            // Nothing else found it: Gemini Nano on the phone guesses from the names (nothing is sent).
+            guesser = guesser,
             // What each radio puts together, remembered for the offline mix (names and ids only).
             radioObserver = { seedSongId, seed, sameSong, tracks ->
                 taste.record(

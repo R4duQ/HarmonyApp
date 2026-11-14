@@ -39,6 +39,9 @@ enum class SeedBasis {
     /** The tags were not enough; recognised by its sound, then found by what that said. */
     FINGERPRINT,
 
+    /** Nothing else found it; an on-device AI guessed it from its names, and the catalog confirmed the guess. */
+    GUESS,
+
     /** The song itself was not found: the radio starts from a song by the same artist. */
     ARTIST,
 
@@ -47,7 +50,7 @@ enum class SeedBasis {
     ;
 
     /** Suggestions follow this exact song (not just its artist or genre). */
-    val exact: Boolean get() = this == KNOWN || this == TAGS || this == NAME || this == FINGERPRINT
+    val exact: Boolean get() = this == KNOWN || this == TAGS || this == NAME || this == FINGERPRINT || this == GUESS
 }
 
 /** Where a looser radio starts when the song itself is not found. */
