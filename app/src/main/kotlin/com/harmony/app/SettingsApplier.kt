@@ -51,6 +51,7 @@ class SettingsApplier @Inject constructor(
                 // Online mixes are a feature flag: off, a mix is the library's only.
                 queueManager.preferredMixSource = if (!s.onlineMixEnabled) MixSource.OFFLINE
                 else runCatching { MixSource.valueOf(s.onlineMixSource) }.getOrDefault(MixSource.COMBINED)
+                queueManager.autoKeep = s.onlineMixEnabled && s.onlineMixAutoKeep
                 val smartStyle = runCatching { SmartShuffleStyle.valueOf(s.smartShuffleStyle) }
                     .getOrDefault(SmartShuffleStyle.BALANCED)
                 queueManager.applyPersistedSmartSettings(

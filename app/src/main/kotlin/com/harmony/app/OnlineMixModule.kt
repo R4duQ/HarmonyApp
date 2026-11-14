@@ -16,6 +16,8 @@ import com.harmony.domain.online.UrlConnectionTransport
 import com.harmony.domain.online.YtMusicClient
 import com.harmony.feature.downloads.FileFingerprinter
 import com.harmony.feature.downloads.OnlineMixPreparer
+import com.harmony.feature.downloads.OnlineSongKeeperImpl
+import com.harmony.domain.playback.OnlineSongKeeper
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -41,6 +43,11 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object OnlineMixModule {
+    /** "Keep" for online mix songs: their prepared file, copied into the library. */
+    @Provides
+    @Singleton
+    fun onlineSongKeeper(keeper: OnlineSongKeeperImpl): OnlineSongKeeper = keeper
+
     @Provides
     @Singleton
     fun onlineMixFeed(

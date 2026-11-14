@@ -122,6 +122,7 @@ class SettingsViewModel @Inject constructor(
     fun setExperimentalParallelDownloads(on: Boolean) = launch { settings.setExperimentalParallelDownloads(on) }
     fun setOnlineMixEnabled(on: Boolean) = launch { settings.setOnlineMixEnabled(on) }
     fun setOnlineMixOnMobileData(on: Boolean) = launch { settings.setOnlineMixOnMobileData(on) }
+    fun setOnlineMixAutoKeep(on: Boolean) = launch { settings.setOnlineMixAutoKeep(on) }
 
     /** Combined → Online → Offline → Combined. */
     fun cycleOnlineMixSource(current: String) = launch {
@@ -507,6 +508,15 @@ fun SettingsScreen(
                 palette = palette,
                 trailing = {
                     EditorialSwitch(state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData, palette)
+                },
+            )
+            EditorialSettingRow(
+                title = "Keep songs you finish twice",
+                subtitle = "An online song you play to the end twice is saved to your library by itself. " +
+                    "Any online song can also be kept from the queue",
+                palette = palette,
+                trailing = {
+                    EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)
                 },
             )
         }

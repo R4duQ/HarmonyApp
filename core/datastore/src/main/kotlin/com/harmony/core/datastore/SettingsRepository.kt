@@ -72,6 +72,8 @@ data class UserSettings(
     val onlineMixSource: String = "COMBINED",
     /** Whether online mixes may download over mobile data (metered networks); Wi-Fi only by default. */
     val onlineMixOnMobileData: Boolean = false,
+    /** Whether an online mix's song played to the end twice is kept in the library by itself. Off by default. */
+    val onlineMixAutoKeep: Boolean = false,
 )
 
 /**
@@ -112,6 +114,7 @@ class SettingsRepository @Inject constructor(
         val ONLINE_MIX = booleanPreferencesKey("online_mix_enabled")
         val ONLINE_MIX_SOURCE = stringPreferencesKey("online_mix_source")
         val ONLINE_MIX_MOBILE = booleanPreferencesKey("online_mix_mobile_data")
+        val ONLINE_MIX_AUTO_KEEP = booleanPreferencesKey("online_mix_auto_keep")
         val SMART_SHUFFLE_STYLE = stringPreferencesKey("smart_shuffle_style_v2")
         val SMART_SHUFFLE_FAMILIARITY = floatPreferencesKey("smart_shuffle_familiarity_v2")
         val SMART_SHUFFLE_DISCOVERY = floatPreferencesKey("smart_shuffle_discovery_v2")
@@ -148,6 +151,7 @@ class SettingsRepository @Inject constructor(
             onlineMixEnabled = p[Keys.ONLINE_MIX] ?: false,
             onlineMixSource = p[Keys.ONLINE_MIX_SOURCE] ?: "COMBINED",
             onlineMixOnMobileData = p[Keys.ONLINE_MIX_MOBILE] ?: false,
+            onlineMixAutoKeep = p[Keys.ONLINE_MIX_AUTO_KEEP] ?: false,
         )
     }
 
@@ -216,6 +220,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setOnlineMixEnabled(on: Boolean) = edit { it[Keys.ONLINE_MIX] = on }
     suspend fun setOnlineMixSource(name: String) = edit { it[Keys.ONLINE_MIX_SOURCE] = name }
     suspend fun setOnlineMixOnMobileData(on: Boolean) = edit { it[Keys.ONLINE_MIX_MOBILE] = on }
+    suspend fun setOnlineMixAutoKeep(on: Boolean) = edit { it[Keys.ONLINE_MIX_AUTO_KEEP] = on }
     suspend fun setSmartShuffleStyle(style: String) = edit { it[Keys.SMART_SHUFFLE_STYLE] = style }
     suspend fun setSmartShuffleFamiliarity(value: Float) = edit {
         it[Keys.SMART_SHUFFLE_FAMILIARITY] = value.coerceIn(0f, 1f)

@@ -20,6 +20,8 @@ import com.harmony.domain.online.OnlineMixFeed
 import com.harmony.domain.online.OnlineMixState
 import com.harmony.domain.online.ReadyPick
 import com.harmony.domain.online.SeedTrack
+import com.harmony.domain.playback.KeepStatus
+import com.harmony.domain.playback.OnlineSongKeeper
 import com.harmony.domain.playback.OnlineSongs
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
@@ -125,6 +127,7 @@ class SmartQueueManager @Inject constructor(
     private val history: PlaybackHistoryRepository,
     private val brainLog: ShuffleBrainLog,
     private val online: OnlineMixFeed,
+    private val keeper: OnlineSongKeeper = OnlineSongKeeper.NONE,
 ) {
     private val _config = MutableStateFlow(ShuffleConfig())
     val config: StateFlow<ShuffleConfig> = _config
@@ -155,6 +158,12 @@ class SmartQueueManager @Inject constructor(
      * mixes are switched on). A mix already running keeps its own source.
      */
     @Volatile var preferredMixSource: MixSource = MixSource.OFFLINE
+
+    /** Settings: an online song played to the end [AUTO_KEEP_AFTER] times is kept by itself. */
+    @Volatile var autoKeep: Boolean = false
+
+    /** By video id: the online songs being kept, kept, or not (the queue sheet's Keep buttons). */
+    val keepStatus: StateFlow<Map<String, KeepStatus>> get() = keeper.status
 
     /** Counts the starts of a mix, so each has its own [MixSessionKey]. */
     private var mixGeneration = 0L
@@ -411,6 +420,53 @@ class SmartQueueManager @Inject constructor(
         }
     }
 
+    // -- Keeping online songs ------------------------------------------------------------
+
+    /**
+     * Keeps [songs] (the online ones; others are ignored) in the library, one
+     * after another, in the background. Each song kept is then played from
+     * the library wherever it waits in the queue: same place, same audio,
+     * and from now on it is analysed and counted like any library song. The
+     * song playing goes on from its file and is not touched.
+     */
+    fun keep(songs: List<Song>) {
+        val scope = managerScope ?: return
+        val online = songs.filter(OnlineSongs::isOnline).distinctBy { it.id }
+        if (online.isEmpty()) return
+        scope.launch {
+            for (song in online) {
+                val kept = runCatching { keeper.keep(song) }.getOrNull() ?: continue
+                playFromLibrary(song, kept)
+            }
+        }
+    }
+
+    /** Every online song of the queue (played or still to come), for "Keep all". */
+    fun keepAllOnline() = keep(playback.playerState.value.queue)
+
+    /** The upcoming entries of [online] become the library's [kept], in place, with what they were. */
+    private suspend fun playFromLibrary(online: Song, kept: Song) = writeQueue {
+        val state = playback.playerState.value
+        val infos = state.infos()
+        for (i in state.queue.indices.reversed()) {
+            if (i <= state.queueIndex) break
+            if (state.queue[i].id == online.id) playback.replaceQueueRange(i, i + 1, listOf(kept), infos[i].origin)
+        }
+        if (online.id in generated) generated += kept.id
+        decisions[online.id]?.let { decisions[kept.id] = it }
+        onlinePicks[online.id]?.let { onlinePicks[kept.id] = it }
+    }
+
+    /** An online song played to its end: counted, and kept by itself the second time when [autoKeep] is on. */
+    private suspend fun noteFinished(songId: Long) {
+        val song = playback.playerState.value.queue.firstOrNull { it.id == songId }?.takeIf(OnlineSongs::isOnline) ?: return
+        val times = runCatching { keeper.finished(song) }.getOrDefault(0)
+        if (autoKeep && times >= AUTO_KEEP_AFTER) {
+            DiagnosticsLog.line("KEEP", "auto keep song=${song.id} plays=$times")
+            keep(listOf(song))
+        }
+    }
+
     // -- Feedback -----------------------------------------------------------------------
 
     /**
@@ -423,6 +479,7 @@ class SmartQueueManager @Inject constructor(
         if (outcome.movedBackward) return
         val mix = _mix.value
         val videoId = onlinePicks[outcome.songId]
+        if (outcome.songId < 0 && outcome.fraction >= FINISHED_FRACTION) noteFinished(outcome.songId)
         if (mix != null && videoId != null && outcome.fraction < FAST_SKIP_FRACTION) online.onFastSkip(sessionKey(mix), videoId)
         val event = mutex.withLock {
             runCatching {
@@ -1364,6 +1421,12 @@ class SmartQueueManager @Inject constructor(
 
         /** Heard under this share: a fast skip (the brain's rule, Smart Shuffle's too). */
         const val FAST_SKIP_FRACTION = 0.2f
+
+        /** Played this far, an online song counts as played to its end (for keeping it by itself). */
+        const val FINISHED_FRACTION = 0.9f
+
+        /** Plays to the end after which [autoKeep] keeps an online song. */
+        const val AUTO_KEEP_AFTER = 2
 
         /** A journey is queued a step at a time, so it can end the moment the user leaves it. */
         const val JOURNEY_LOOKAHEAD = 4

@@ -1179,3 +1179,77 @@ private class FakeFeed : OnlineMixFeed {
         ready.tryEmit(k)
     }
 }
+
+/** "Keep" for online mix songs: the queue then plays the library's copy, and two plays to the end keep one by itself. */
+class SmartQueueManagerKeepTest {
+    private class FakeKeeper(private val result: Song?) : com.harmony.domain.playback.OnlineSongKeeper {
+        val kept = mutableListOf<Long>()
+        private val plays = HashMap<Long, Int>()
+        override val status = MutableStateFlow<Map<String, com.harmony.domain.playback.KeepStatus>>(emptyMap())
+        override suspend fun keep(song: Song): Song? { kept += song.id; return result }
+        override suspend fun finished(song: Song): Int = plays.merge(song.id, 1, Int::plus)!!
+    }
+
+    private val online = com.harmony.domain.playback.OnlineSongs.song("abcdefghijk", "file:///data/cache/online-mix/abcdefghijk.flac",
+        "Hello", "Adele", "25", 1000)
+    private val library = song(500)
+
+    private fun build(scope: TestScope, keeper: FakeKeeper): Pair<FakePlayback, SmartQueueManager> {
+        val playback = FakePlayback()
+        val lib = fake<LibraryRepository> { name, a ->
+            when (name) {
+                "songById" -> song(a[0] as Long)
+                "songsByIds" -> (a[0] as List<*>).map { song(it as Long) }
+                else -> error("unexpected $name")
+            }
+        }
+        val history = fake<PlaybackHistoryRepository> { _, _ -> emptyList<Long>() }
+        val manager = SmartQueueManager(playback, FakeBrain(100L..199L), lib, history, ShuffleBrainLog { }, OnlineMixFeed.NONE, keeper)
+        manager.start(scope.backgroundScope)
+        return playback to manager
+    }
+
+    @Test
+    fun aKeptSongWaitingInTheQueuePlaysFromTheLibraryInItsPlace() = runTest(UnconfinedTestDispatcher()) {
+        val keeper = FakeKeeper(library)
+        val (p, c) = build(this, keeper)
+        p.setQueue(listOf(online, song(1), online, song(2)), 0, true)
+        advanceUntilIdle()
+        c.keep(listOf(online, song(1)))
+        advanceUntilIdle()
+        assertEquals("only the online song is kept", listOf(online.id), keeper.kept)
+        assertEquals("the song playing is not touched; the one waiting is the library's now",
+            listOf(online.id, 1L, 500L, 2L), p.q.map { it.id })
+    }
+
+    @Test
+    fun twoPlaysToTheEndKeepASongOnlyWhenAutoKeepIsOn() = runTest(UnconfinedTestDispatcher()) {
+        val keeper = FakeKeeper(library)
+        val (p, c) = build(this, keeper)
+        p.setQueue(listOf(online, song(1), online, song(2), online, song(3)), 0, true)
+        advanceUntilIdle()
+        p.skipAfter(0.95f); advanceUntilIdle()   // online: 1st play to the end
+        p.skipAfter(0.95f); advanceUntilIdle()   // song 1
+        p.skipAfter(0.95f); advanceUntilIdle()   // online: 2nd, but auto keep is off
+        assertTrue(keeper.kept.isEmpty())
+        c.autoKeep = true
+        p.skipAfter(0.95f); advanceUntilIdle()   // song 2
+        p.skipAfter(0.10f); advanceUntilIdle()   // online, skipped: not a play to the end
+        assertTrue(keeper.kept.isEmpty())
+        p.setQueue(listOf(online, song(4)), 0, true); advanceUntilIdle()
+        p.skipAfter(0.95f); advanceUntilIdle()   // 3rd play to the end: kept
+        assertEquals(listOf(online.id), keeper.kept)
+    }
+
+    @Test
+    fun aSongThatCouldNotBeKeptLeavesTheQueueAlone() = runTest(UnconfinedTestDispatcher()) {
+        val (p, c) = build(this, FakeKeeper(null))
+        p.setQueue(listOf(song(1), online), 0, true)
+        advanceUntilIdle()
+        val writes = p.writes.size
+        c.keepAllOnline()
+        advanceUntilIdle()
+        assertEquals(listOf(1L, online.id), p.q.map { it.id })
+        assertEquals(writes, p.writes.size)
+    }
+}
