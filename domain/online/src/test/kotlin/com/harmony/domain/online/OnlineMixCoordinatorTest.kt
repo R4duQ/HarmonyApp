@@ -508,3 +508,41 @@ class OnlineMixSeedReadingTest {
         assertFalse("<unknown>" in queries)
     }
 }
+
+/** Each seed's radio is told to the taste memory: the song's own, the artist's, never a genre's. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixRadioObserverTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    private fun TestScope.run(seed: SeedTrack, search: (String) -> List<CatalogTrack>): List<Triple<Long, Boolean, Int>> {
+        val heard = mutableListOf<Triple<Long, Boolean, Int>>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val c = OnlineMixCoordinator(FakeCatalog({ q -> CatalogResult.Ok(search(q)) }, { CatalogResult.Ok(RADIO) }), FakePreparer(),
+            LocalCopies.NONE, scope, clock = { testScheduler.currentTime }, fingerprinter = { FingerprintResult.NotFound },
+            radioObserver = { id, _, same, tracks -> heard += Triple(id, same, tracks.size) })
+        c.start(key, MixSource.ONLINE, seed) { emptySet() }
+        advanceUntilIdle()
+        return heard
+    }
+
+    @Test
+    fun theSeedsOwnRadioIsRememberedSongsOnly() = runTest {
+        val heard = run(SEED) { listOf(SEED_SONG) }
+        assertEquals("one radio, the podcast episode left out", listOf(Triple(7L, true, RADIO.size - 1)), heard)
+    }
+
+    @Test
+    fun anArtistsRadioTeachesArtistsOnlyAndAGenresNothing() = runTest {
+        val byArtist = run(SeedTrack("Unfindable", "Subcarpați", null, 100_000)) { q ->
+            if (q == "Subcarpați") listOf(song("other00001", "Other", "Subcarpați")) else emptyList()
+        }
+        assertEquals(listOf(Triple(7L, false, RADIO.size - 1)), byArtist)
+        val byGenre = run(SeedTrack("Unfindable", "<unknown>", null, 100_000, genre = "Rock")) { q ->
+            if (q == "Rock") listOf(song("rock000001", "Rock Song", "Band")) else emptyList()
+        }
+        assertTrue(byGenre.isEmpty())
+    }
+}

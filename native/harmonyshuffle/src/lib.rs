@@ -254,6 +254,25 @@ jni_fn!(Java_com_harmony_core_dsp_SmartShuffleNative_nativeAddTransitions(
     engine_or!(handle, ()).add_transitions(&f, &t, (!w.is_empty()).then_some(&w[..]));
 });
 
+// The taste memory, replaced whole: song pairs (from, to, weight) and artist pairs (by the
+// artist ids given to setLibrary); see SmartShuffleEngine::set_taste.
+jni_fn!(Java_com_harmony_core_dsp_SmartShuffleNative_nativeSetTaste(
+    env, handle: jlong, from: JLongArray, to: JLongArray, weight: JFloatArray,
+    artist_from: JIntArray, artist_to: JIntArray, artist_weight: JFloatArray
+) -> () = (); {
+    let f = read_or!(read_longs(env, &from), ());
+    let t = read_or!(read_longs(env, &to), ());
+    let w = read_or!(read_floats(env, &weight), ());
+    let af = read_or!(read_ints(env, &artist_from), ());
+    let at = read_or!(read_ints(env, &artist_to), ());
+    let aw = read_or!(read_floats(env, &artist_weight), ());
+    if f.len() != t.len() || f.len() != w.len() || af.len() != at.len() || af.len() != aw.len() {
+        throw_illegal_argument(env, "taste arrays disagree on length");
+        return;
+    }
+    engine_or!(handle, ()).set_taste(&f, &t, &w, &af, &at, &aw);
+});
+
 jni_fn!(Java_com_harmony_core_dsp_SmartShuffleNative_nativeClearTransitions(env, handle: jlong) -> () = (); {
     engine_or!(handle, ()).clear_transitions();
 });

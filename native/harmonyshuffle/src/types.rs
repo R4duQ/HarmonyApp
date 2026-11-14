@@ -305,6 +305,8 @@ pub struct RadioReport {
     pub from_session: i32,
     pub from_habits: i32,
     pub from_rare: i32,
+    /// From the taste memory (what online radios put with the seed or its artist).
+    pub from_taste: i32,
     /// After the union, duplicates removed.
     pub merged: i32,
     /// Songs new to the listener turned away by the relevance gate.

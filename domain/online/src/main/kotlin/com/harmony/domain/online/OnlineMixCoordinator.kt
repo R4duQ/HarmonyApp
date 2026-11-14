@@ -106,6 +106,8 @@ class OnlineMixCoordinator(
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
     /** Recognises a file by its sound when its tags don't find it (step 2). */
     private val fingerprinter: SongFingerprinter = SongFingerprinter.NONE,
+    /** Told of each seed's radio, for the offline mix's taste memory. */
+    private val radioObserver: RadioObserver = RadioObserver.NONE,
 ) : OnlineMixFeed {
     private val _state = MutableStateFlow(OnlineMixState())
     override val state: StateFlow<OnlineMixState> = _state.asStateFlow()
@@ -371,6 +373,7 @@ class OnlineMixCoordinator(
                 return _state.value.candidates.isNotEmpty()
             }
         }
+        if (limit == RADIO_LIMIT) remember(session, seed, tracks)
         val existing = _state.value.candidates
         val context = PlannerContext(
             seed = seed,
@@ -401,6 +404,21 @@ class OnlineMixCoordinator(
             "turned=${batch.turnedAway.size} ms=${clock() - started}")
         if (withLocal.any { it.ready }) _ready.tryEmit(session)
         return true
+    }
+
+    /** The seed's radio, for the taste memory: the song's own radio, or its artist's (never a genre's). */
+    private suspend fun remember(session: MixSessionKey, seed: SeedTrack, tracks: List<CatalogTrack>) {
+        val basis = (_state.value.seed as? SeedStatus.Identified)?.basis ?: return
+        if (basis == SeedBasis.GENRE) return
+        val songs = tracks.filter { it.kind == CatalogKind.SONG }
+        if (songs.isEmpty()) return
+        try {
+            radioObserver.onRadio(session.seedSongId, seed, basis.exact, songs)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            onError("remembering a radio failed", t)
+        }
     }
 
     private suspend fun prepareOne(gen: Long, candidate: OnlineCandidate) {

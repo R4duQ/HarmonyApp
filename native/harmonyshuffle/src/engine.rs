@@ -299,6 +299,10 @@ pub struct SmartShuffleEngine {
     // Habits.
     pub(crate) transitions: HashMap<i64, HashMap<i64, f32>>,
     pub(crate) transition_totals: HashMap<i64, f32>,
+    /// Taste: songs online radios put together (song id -> song id, 0..1).
+    pub(crate) taste_songs: HashMap<i64, HashMap<i64, f32>>,
+    /// Taste by artist (the artist ids of set_library), 0..1.
+    pub(crate) taste_artists: HashMap<i32, HashMap<i32, f32>>,
     pub(crate) bandit_pulls: [[f32; ZONES]; ZONES],
     pub(crate) bandit_rewards: [[f32; ZONES]; ZONES],
     pub(crate) weights: Weights,
@@ -359,6 +363,8 @@ impl SmartShuffleEngine {
             counts: [0; 3],
             transitions: HashMap::new(),
             transition_totals: HashMap::new(),
+            taste_songs: HashMap::new(),
+            taste_artists: HashMap::new(),
             bandit_pulls: [[0.0; ZONES]; ZONES],
             bandit_rewards: [[0.0; ZONES]; ZONES],
             weights: Weights::default(),
@@ -679,6 +685,39 @@ impl SmartShuffleEngine {
             }
             *self.transitions.entry(from[i]).or_default().entry(to[i]).or_insert(0.0) += w;
             *self.transition_totals.entry(from[i]).or_insert(0.0) += w;
+        }
+    }
+
+    /// Replaces the taste memory: what online radios, seen while the phone
+    /// was online, put together. `to[i]` was in a radio of `from[i]` (song
+    /// ids), `artist_to[i]` in radios of `artist_from[i]` (the artist ids of
+    /// set_library). Weights are 0..1; anything else, and a pair of one song
+    /// or one artist with itself, is ignored. The mix ("Mix from this song")
+    /// reads it; Smart Shuffle does not.
+    pub fn set_taste(
+        &mut self,
+        from: &[i64],
+        to: &[i64],
+        weight: &[f32],
+        artist_from: &[i32],
+        artist_to: &[i32],
+        artist_weight: &[f32],
+    ) {
+        self.taste_songs.clear();
+        self.taste_artists.clear();
+        for i in 0..from.len().min(to.len()).min(weight.len()) {
+            let w = weight[i];
+            if w.is_finite() && w > 0.0 && from[i] != to[i] {
+                let cell = self.taste_songs.entry(from[i]).or_default().entry(to[i]).or_insert(0.0);
+                *cell = cell.max(w.min(1.0));
+            }
+        }
+        for i in 0..artist_from.len().min(artist_to.len()).min(artist_weight.len()) {
+            let w = artist_weight[i];
+            if w.is_finite() && w > 0.0 && artist_from[i] >= 0 && artist_to[i] >= 0 && artist_from[i] != artist_to[i] {
+                let cell = self.taste_artists.entry(artist_from[i]).or_default().entry(artist_to[i]).or_insert(0.0);
+                *cell = cell.max(w.min(1.0));
+            }
         }
     }
 
