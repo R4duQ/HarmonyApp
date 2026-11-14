@@ -189,6 +189,7 @@ dependencies {
     implementation("io.coil-kt:coil:2.7.0")
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.mlkit.genai.prompt)
+    implementation(libs.anthropic.java)
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
@@ -196,6 +197,7 @@ dependencies {
     // ThemeShowcaseScreenshotTest: the screens in light and dark, rendered on the JVM.
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     testImplementation(composeBom)

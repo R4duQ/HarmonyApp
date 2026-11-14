@@ -40,6 +40,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import com.harmony.core.datastore.ClaudeKeyStore
 import com.harmony.core.datastore.SettingsRepository
 import com.harmony.core.datastore.ThemeMode
 import com.harmony.core.datastore.UserSettings
@@ -70,7 +71,20 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val scanLibrary: ScanLibraryUseCase,
+    private val claudeKey: ClaudeKeyStore,
 ) : ViewModel() {
+
+    /** Whether a Claude API key is set (never the key itself), and what Anthropic said of it last. */
+    val claude: StateFlow<ClaudeKeyStore.State> = claudeKey.state
+
+    init {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { claudeKey.load() }
+    }
+
+    /** Saves the key (encrypted with the Keystore), or removes it when blank. */
+    fun setClaudeKey(key: String?) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { claudeKey.setKey(key) }
+    }
 
     val state: StateFlow<UserSettings> = settings.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserSettings())
@@ -481,7 +495,7 @@ fun SettingsScreen(
                 "library when you have them, otherwise prepared as lossless FLAC through the download engine. " +
                 "No account. When a song's tags aren't enough, a sound fingerprint of 12 seconds of it " +
                 "(never the audio) is sent to Shazam to name it; on phones with Gemini Nano, the phone's own AI " +
-                "guesses from the file's name, without sending anything. Off by default",
+                "guesses from the file's name, without sending anything (or Claude, with your key, below). Off by default",
             palette = palette,
             trailing = {
                 EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)
@@ -520,6 +534,28 @@ fun SettingsScreen(
                     EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)
                 },
             )
+            val claude by viewModel.claude.collectAsStateWithLifecycle()
+            var editClaudeKey by remember { mutableStateOf(false) }
+            EditorialSettingRow(
+                title = "Guess songs with Claude",
+                subtitle = when {
+                    claude.problem != null -> "${claude.problem}. Tap to change the key"
+                    claude.hasKey -> "On, with your API key. When nothing on the phone finds a song, its title, " +
+                        "artist and album tags are sent to Anthropic for a guess (a fraction of a cent each). Tap to change"
+                    else -> "Off. Add your Anthropic API key to guess songs nothing on the phone finds, on any " +
+                        "phone. Only a song's tags are sent, never audio"
+                },
+                palette = palette,
+                onClick = { editClaudeKey = true },
+            )
+            if (editClaudeKey) {
+                ClaudeKeyDialog(
+                    hasKey = claude.hasKey,
+                    onSave = { viewModel.setClaudeKey(it); editClaudeKey = false },
+                    onRemove = { viewModel.setClaudeKey(null); editClaudeKey = false },
+                    onDismiss = { editClaudeKey = false },
+                )
+            }
         }
 
         EditorialSettingRow(
@@ -739,6 +775,58 @@ private fun ReplayGainMode.label(): String = when (this) {
     ReplayGainMode.OFF -> "Off"
     ReplayGainMode.TRACK -> "Track"
     ReplayGainMode.ALBUM -> "Album"
+}
+
+/**
+ * Enter, replace or remove the Anthropic API key. The key is typed (or
+ * pasted) into a password field and goes straight to [ClaudeKeyStore]; the
+ * stored key is never shown again.
+ */
+@Composable
+private fun ClaudeKeyDialog(hasKey: Boolean, onSave: (String) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit) {
+    var key by remember { mutableStateOf("") }
+    val valid = key.trim().startsWith("sk-ant-") && key.trim().length > 20
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text(if (hasKey) "Change the Claude API key" else "Claude API key") },
+        text = {
+            Column {
+                androidx.compose.material3.Text(
+                    "Create a key at console.anthropic.com (API keys). It is stored encrypted on this phone and " +
+                        "used only to guess songs for online mixes, on your account.",
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    singleLine = true,
+                    placeholder = { androidx.compose.material3.Text("sk-ant-…") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                        autoCorrectEnabled = false,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onSave(key) }, enabled = valid) {
+                androidx.compose.material3.Text("Save")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (hasKey) {
+                    androidx.compose.material3.TextButton(onClick = onRemove) { androidx.compose.material3.Text("Remove") }
+                }
+                androidx.compose.material3.TextButton(onClick = onDismiss) { androidx.compose.material3.Text("Cancel") }
+            }
+        },
+    )
 }
 
 /**
