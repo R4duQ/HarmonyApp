@@ -1,8 +1,20 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **169**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 168), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **170**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 169), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 170 — Romanian credits, typos, a readable log
+
+- **"cu" credits a guest, as "feat." does.** A song tagged "Agresiv cu Mitza", or titled
+  "… (cu Mitza)", was looked for as one artist of that name, so online mixes never found it
+  and its artist's radio never started. It is now read as Agresiv with Mitza, everywhere
+  Harmony matches songs.
+- **A typo in a song's name no longer hides it.** The name search takes a word one letter
+  off ("minit" for "mint") as the same word, for words of four letters or more; the catalog
+  still confirms every guess by artist, title and length.
+- **The diagnostics log says what happened in words** (`identify=NO_MATCH`,
+  `outcome=NotAvailable`) instead of the codes release builds wrote (`m0`, `Z`).
 
 ## Build 169 — Online mixes find songs by searching their name
 
