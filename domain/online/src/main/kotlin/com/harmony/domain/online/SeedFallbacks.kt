@@ -33,6 +33,9 @@ enum class SeedBasis {
     /** Found by its tags (title, artist, album, length). */
     TAGS,
 
+    /** The tags as they were found nothing; a cleaned reading of them did (the file's name, a rip's notes taken off). */
+    NAME,
+
     /** The tags were not enough; recognised by its sound, then found by what that said. */
     FINGERPRINT,
 
@@ -44,7 +47,7 @@ enum class SeedBasis {
     ;
 
     /** Suggestions follow this exact song (not just its artist or genre). */
-    val exact: Boolean get() = this == KNOWN || this == TAGS || this == FINGERPRINT
+    val exact: Boolean get() = this == KNOWN || this == TAGS || this == NAME || this == FINGERPRINT
 }
 
 /** Where a looser radio starts when the song itself is not found. */

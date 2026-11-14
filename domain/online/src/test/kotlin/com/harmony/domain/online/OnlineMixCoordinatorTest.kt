@@ -464,3 +464,47 @@ class OnlineMixSeedFallbackTest {
         assertEquals(0, asked)
     }
 }
+
+/** Step 1 again with the file's name: a song without tags is found by what its name says. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixSeedReadingTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    private val inTheEnd = song("itheend", "In the End", "Linkin Park", ms = 216_000, album = "Hybrid Theory")
+
+    @Test
+    fun aFileNamedArtistDashTitleIsFoundWithoutItsSound() = runTest {
+        val queries = mutableListOf<String>()
+        var fingerprinted = 0
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val catalog = FakeCatalog({ q -> queries += q; CatalogResult.Ok(if (q == "Linkin Park In the End") listOf(inTheEnd) else emptyList()) },
+            { CatalogResult.Ok(RADIO) })
+        val c = OnlineMixCoordinator(catalog, FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime },
+            fingerprinter = { fingerprinted++; FingerprintResult.NotFound })
+        val untagged = SeedTrack("02 - Linkin Park - In the End (Official Video)", "<unknown>", "<unknown>", 216_500, uri = "content://x/2")
+        c.start(key, MixSource.ONLINE, untagged) { emptySet() }
+        advanceUntilIdle()
+        val seed = c.state.value.seed as SeedStatus.Identified
+        assertEquals(inTheEnd.videoId, seed.videoId)
+        assertEquals(SeedBasis.NAME, seed.basis)
+        assertTrue(SeedBasis.NAME.exact)
+        assertEquals("the raw tags, naming no artist, are not searched", listOf("Linkin Park In the End"), queries)
+        assertEquals(0, fingerprinted)
+    }
+
+    @Test
+    fun anUnknownArtistNeverStartsAnArtistRadio() = runTest {
+        val queries = mutableListOf<String>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val catalog = FakeCatalog({ q -> queries += q; CatalogResult.Ok(listOf(song("unk00000001", "Whatever", "Unknown"))) }, { CatalogResult.Ok(RADIO) })
+        val c = OnlineMixCoordinator(catalog, FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime },
+            fingerprinter = { FingerprintResult.NotFound })
+        c.start(key, MixSource.ONLINE, SeedTrack("Track 05", "<unknown>", null, 200_000, uri = "content://x/5")) { emptySet() }
+        advanceUntilIdle()
+        assertTrue(c.state.value.seed is SeedStatus.NotIdentified)
+        assertFalse("<unknown>" in queries)
+    }
+}

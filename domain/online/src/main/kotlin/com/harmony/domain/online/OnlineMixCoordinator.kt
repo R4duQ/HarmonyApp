@@ -218,23 +218,35 @@ class OnlineMixCoordinator(
             follow(gen, session, seed, known, avoid)
             return
         }
-        val outcome = identify(seed)
-        val match = outcome.result
-        if (!current(gen)) return
-        if (match != null && match.confirmed) {
-            val seedId = match.track!!.videoId
-            apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, match.score, SeedBasis.TAGS)) }
-            log("ONLINE_MIX seed=${session.seedSongId} identify=ok video=$seedId score=${match.score} ms=${clock() - started}")
-            follow(gen, session, seed, seedId, avoid)
-            return
+        // Step 1: the tags as they are, then cleaned readings of them (the file's name split into
+        // artist and title, a rip's notes taken off). A tag that names no artist can't be
+        // matched, so then only the readings are searched.
+        val readings = SeedCleaner.readings(seed)
+        val tries = if (SeedCleaner.isUnknownArtist(seed.artist) && readings.isNotEmpty()) readings else listOf(seed) + readings
+        var outcome: MatchOutcome? = null
+        for (reading in tries) {
+            val attempt = identify(reading)
+            if (!current(gen)) return
+            if (outcome == null) outcome = attempt
+            val found = attempt.result?.takeIf { it.confirmed }
+            if (found != null) {
+                val seedId = found.track!!.videoId
+                val basis = if (reading === seed) SeedBasis.TAGS else SeedBasis.NAME
+                apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, found.score, basis)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=${if (basis == SeedBasis.TAGS) "ok" else "name"} video=$seedId score=${found.score} ms=${clock() - started}")
+                follow(gen, session, reading, seedId, avoid)
+                return
+            }
+            if (attempt.failure != null) {
+                // The catalog could not be asked: nothing below would fare better.
+                apply(gen) { it.copy(seed = SeedStatus.Failed(attempt.failure)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=Failed ${attempt.failure.javaClass.simpleName} ms=${clock() - started}")
+                return
+            }
         }
-        if (outcome.failure != null) {
-            // The catalog could not be asked: nothing below would fare better.
-            apply(gen) { it.copy(seed = SeedStatus.Failed(outcome.failure)) }
-            log("ONLINE_MIX seed=${session.seedSongId} identify=Failed ${outcome.failure.javaClass.simpleName} ms=${clock() - started}")
-            return
-        }
-        log("ONLINE_MIX seed=${session.seedSongId} identify=${match?.verdict ?: MatchVerdict.NO_MATCH} by tags results=${outcome.results}")
+        val first = outcome!!
+        val match = first.result
+        log("ONLINE_MIX seed=${session.seedSongId} identify=${match?.verdict ?: MatchVerdict.NO_MATCH} by tags results=${first.results} readings=${tries.size}")
 
         // Step 2: the tags were not enough; recognise the file by its sound.
         val heard = seed.uri?.let { recognise(it) }
@@ -254,7 +266,8 @@ class OnlineMixCoordinator(
         }
 
         // Step 3: not the song itself; a radio from its artist, else from its genre.
-        val artist = heard?.artist ?: seed.artist
+        // Never "<unknown>": that would start the radio of whoever is called "Unknown".
+        val artist = heard?.artist ?: SeedCleaner.artistOf(seed).orEmpty()
         if (artist.isNotBlank()) {
             val anchor = (ask { catalog.searchSongs(artist, SEARCH_LIMIT) } as? CatalogResult.Ok)?.value
                 ?.let { LooseAnchors.byArtist(artist, it) }
@@ -277,7 +290,7 @@ class OnlineMixCoordinator(
                 return
             }
         }
-        val status = SeedStatus.NotIdentified(match?.verdict ?: MatchVerdict.NO_MATCH, outcome.results,
+        val status = SeedStatus.NotIdentified(match?.verdict ?: MatchVerdict.NO_MATCH, first.results,
             match?.assessments?.count { it.track.kind == CatalogKind.SONG } ?: 0)
         apply(gen) { it.copy(seed = status) }
         log("ONLINE_MIX seed=${session.seedSongId} identify=none ms=${clock() - started}")

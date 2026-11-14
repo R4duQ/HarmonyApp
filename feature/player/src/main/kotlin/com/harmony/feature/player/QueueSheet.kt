@@ -575,6 +575,7 @@ private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette) {
         SeedStatus.Idle, SeedStatus.Identifying -> "Finding this song on YouTube Music…"
         is SeedStatus.Identified -> when (seed.basis) {
             SeedBasis.KNOWN, SeedBasis.TAGS -> "Found on YouTube Music"
+            SeedBasis.NAME -> "Found on YouTube Music from the file's name"
             SeedBasis.FINGERPRINT -> "Recognised by its sound, found on YouTube Music"
             SeedBasis.ARTIST -> "Song not found: looser suggestions from the artist's radio"
             SeedBasis.GENRE -> "Song not found: looser suggestions by genre"
