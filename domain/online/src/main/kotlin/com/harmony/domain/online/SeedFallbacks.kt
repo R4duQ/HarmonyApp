@@ -39,7 +39,7 @@ enum class SeedBasis {
     /** The tags were not enough; recognised by its sound, then found by what that said. */
     FINGERPRINT,
 
-    /** Nothing else found it; an on-device AI guessed it from its names, and the catalog confirmed the guess. */
+    /** Nothing else found it; a search by its name (or the phone's AI) found it, and the catalog confirmed it. */
     GUESS,
 
     /** The song itself was not found: the radio starts from a song by the same artist. */

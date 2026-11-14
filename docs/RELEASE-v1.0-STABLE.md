@@ -1,8 +1,18 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **168**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 167), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **169**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 168), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 169 — Online mixes find songs by searching their name
+
+- **A song nothing else found is searched for by its name, on every phone.** When the
+  tags, the file's name and its sound (Shazam) don't find a song, its cleaned name is now
+  searched as free text on Deezer, then on YouTube Music. Their searches forgive words in
+  another order, a missing or misspelled artist and extra words. Only a recording of the
+  same length whose title words are all in the file's name is used, and the catalog must
+  still confirm it. Free: no account and no key. Phones with Gemini Nano still try the
+  phone's own AI after that.
 
 ## Build 168 — Keep online songs, smarter offline mixes
 

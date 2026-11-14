@@ -480,8 +480,8 @@ fun SettingsScreen(
             subtitle = "\"Mix from this song\" can add songs YouTube Music recommends, played from your " +
                 "library when you have them, otherwise prepared as lossless FLAC through the download engine. " +
                 "No account. When a song's tags aren't enough, a sound fingerprint of 12 seconds of it " +
-                "(never the audio) is sent to Shazam to name it; on phones with Gemini Nano, the phone's own AI " +
-                "guesses from the file's name, without sending anything. Off by default",
+                "(never the audio) is sent to Shazam to name it, and its name is searched for on Deezer and YouTube " +
+                "Music; phones with Gemini Nano also guess from the name with their own AI. Off by default",
             palette = palette,
             trailing = {
                 EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)

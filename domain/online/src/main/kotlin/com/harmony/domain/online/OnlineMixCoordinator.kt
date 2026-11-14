@@ -106,7 +106,7 @@ class OnlineMixCoordinator(
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
     /** Recognises a file by its sound when its tags don't find it (step 2). */
     private val fingerprinter: SongFingerprinter = SongFingerprinter.NONE,
-    /** Guesses the song from its names with an on-device AI, when nothing else found it (step 2b). */
+    /** Guesses the song from its names (a name search, the phone's AI), when nothing else found it (step 2b). */
     private val guesser: SongGuesser = SongGuesser.NONE,
     /** Told of each seed's radio, for the offline mix's taste memory. */
     private val radioObserver: RadioObserver = RadioObserver.NONE,
@@ -270,8 +270,9 @@ class OnlineMixCoordinator(
             }
         }
 
-        // Step 2b: nothing heard either; an AI on the phone reads the names and guesses the
-        // song. Each guess is only a lead: the catalog must have it and SongMatcher confirm it.
+        // Step 2b: nothing heard either; the name is searched as free text (and, on phones with
+        // Gemini Nano, read by the phone's AI). Each guess is only a lead: the catalog must have
+        // it and SongMatcher confirm it.
         val guessed = if (heard == null) guess(seed) else emptyList()
         if (!current(gen)) return
         for (g in guessed) {
@@ -342,7 +343,7 @@ class OnlineMixCoordinator(
         return result as? FingerprintResult.Found
     }
 
-    /** What the on-device AI guesses the seed is (kept per seed). A failure is logged, never thrown. */
+    /** What a search by name (or the phone's AI) guesses the seed is (kept per seed). A failure is logged, never thrown. */
     private suspend fun guess(seed: SeedTrack): List<SongGuess> {
         val key = TrackIdentity.of(seed.title, seed.artist, seed.knownDurationMs ?: 0).key + "|" + seed.uri.orEmpty()
         val found = guesses.getOrLoad(key) {
@@ -351,7 +352,7 @@ class OnlineMixCoordinator(
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                onError("guessing a song with the on-device AI failed", t)
+                onError("guessing a song from its name failed", t)
                 emptyList()
             }
             g to (if (g.isEmpty()) NOT_FOUND_TTL_MS else IDENTIFY_TTL_MS)
