@@ -41,6 +41,19 @@ const FROM_SEED: u8 = 1;
 const FROM_SESSION: u8 = 2;
 const FROM_HABITS: u8 = 4;
 const FROM_RARE: u8 = 8;
+const FROM_TASTE: u8 = 16;
+/// Songs the taste memory brings in as candidates.
+const RADIO_FROM_TASTE: usize = 40;
+/// How much what online radios put with the song the batch follows counts, next to the seed's.
+const TASTE_ANCHOR_SHARE: f32 = 0.5;
+/// An artist's radios count for less than the song's own.
+const TASTE_ARTIST_SHARE: f32 = 0.7;
+/// Taste vouches for a song as habits do: relevance at least this x taste.
+const TASTE_VOUCH: f32 = 0.8;
+/// On top of that, taste adds this x taste to relevance (0 without a taste memory).
+const TASTE_BONUS: f32 = 0.4;
+/// A new song (or one not measured yet) the taste memory vouches for this much passes the gate.
+const TASTE_VOUCHES: f32 = 0.3;
 
 /// Rows of the `k` largest `key` among rows where `keep` holds, best first.
 fn top_rows(n: usize, k: usize, key: impl Fn(usize) -> f32, keep: impl Fn(usize) -> bool) -> Vec<i32> {
@@ -80,6 +93,7 @@ struct RadioCandidate {
     relevance: f32,  // 0..1, cosine with the seed/S_t blend (negative counts as 0)
     transition: f32, // 0..1
     habit: f32,      // 0..1, part of transition
+    taste: f32,      // 0..1, what online radios put with the seed
     preference: f32, // 0..1
     feedback: f32,   // -1..1, this session's
     novelty: f32,    // 0..1
@@ -265,6 +279,44 @@ impl SmartShuffleEngine {
             self.radio.from_habits = mark(&rows, FROM_HABITS);
         }
 
+        // Taste: what YouTube Music's radios, seen while the phone was online, put
+        // with the seed, the song the batch follows, or the seed's artist.
+        // Remembered on the phone, so an offline mix knows what goes together
+        // beyond how it sounds. Noisy-OR, as the habits.
+        let mut taste = vec![0.0f32; n];
+        if !self.taste_songs.is_empty() || !self.taste_artists.is_empty() {
+            let mut add = |r: usize, p: f32| taste[r] = 1.0 - (1.0 - taste[r]) * (1.0 - clamp01(p));
+            let mut from_songs = vec![(seed_id, 1.0f32)];
+            if anchor_row >= 0 && anchor_row != seed_row {
+                from_songs.push((self.ids[anchor_row as usize], TASTE_ANCHOR_SHARE));
+            }
+            for (from, share) in from_songs {
+                let Some(out) = self.taste_songs.get(&from) else { continue };
+                let mut destinations: Vec<(i64, f32)> = out.iter().map(|(&to, &x)| (to, x)).collect();
+                destinations.sort_by_key(|&(to, _)| to);
+                for (to, x) in destinations {
+                    let r = self.row_of(to);
+                    if r >= 0 && !blocked[r as usize] {
+                        add(r as usize, share * x);
+                    }
+                }
+            }
+            let seed_artist = if seed_row >= 0 { self.artist[seed_row as usize] } else { -1 };
+            if let Some(out) = (seed_artist >= 0).then(|| self.taste_artists.get(&seed_artist)).flatten() {
+                for r in 0..n {
+                    let a = self.artist[r];
+                    if blocked[r] || a < 0 {
+                        continue;
+                    }
+                    if let Some(&x) = out.get(&a) {
+                        add(r, TASTE_ARTIST_SHARE * x);
+                    }
+                }
+            }
+            let rows = top_rows(n, RADIO_FROM_TASTE, |r| taste[r], |r| taste[r] > 0.0);
+            self.radio.from_taste = mark(&rows, FROM_TASTE);
+        }
+
         // Rarely heard songs that sound right (Breaking the Loop: what the
         // listener already plays would otherwise take every slot).
         let rare = top_rows(n, RADIO_FROM_RARE, relevance_of, |r| {
@@ -330,14 +382,21 @@ impl SmartShuffleEngine {
             let known = self.quality[r] != VectorQuality::None;
             let acoustic = if known { relevance_of(r) } else { 0.0 };
             c.habit = habit[r];
+            c.taste = taste[r];
             // Co-listening as evidence of belonging: what the listener plays after
             // songs like the seed belongs in its radio even when it sounds different.
-            c.relevance = acoustic.max(w.habit_vouch * history_confidence * c.habit);
+            // So does what online radios put with it (the taste memory), and more than that:
+            // it is what the online mix would play, so it also comes first among its equals.
+            c.relevance = clamp01(
+                acoustic.max(w.habit_vouch * history_confidence * c.habit).max(TASTE_VOUCH * c.taste)
+                    + TASTE_BONUS * c.taste,
+            );
             let smooth = match (&context_now, known) {
                 (Some(ctx), true) => clamp01(dot(ctx, self.vec(row))),
                 _ => acoustic,
             };
-            c.transition = clamp01((1.0 - w_habit) * smooth + w_habit * c.habit);
+            // What online radios put next to the seed fits after it, whatever it sounds like.
+            c.transition = clamp01((1.0 - w_habit) * smooth + w_habit * c.habit).max(TASTE_VOUCH * c.taste);
 
             // Session feedback: sum of attention x likeness x signal, skips heavier.
             let (mut mass, mut sum) = (0.0f32, 0.0f32);
@@ -367,7 +426,11 @@ impl SmartShuffleEngine {
             c.is_new = self.completed[r] + self.skipped[r] == 0;
             c.novelty = 1.0 / (1.0 + comp + skip).sqrt();
             // New to the listener: in only above the gate, unless their own habits vouch for it.
-            c.gated = exploring && c.is_new && (!known || acoustic < w.new_song_gate) && c.habit < HABIT_VOUCHES;
+            c.gated = exploring
+                && c.is_new
+                && (!known || acoustic < w.new_song_gate)
+                && c.habit < HABIT_VOUCHES
+                && c.taste < TASTE_VOUCHES;
             let novelty_head = if exploring && !c.gated { c.novelty } else { 0.0 };
 
             let trust = if known { 1.0 } else { 0.5 };

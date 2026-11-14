@@ -1,8 +1,34 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **167**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 166), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **168**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 167), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 168 — Keep online songs, smarter offline mixes
+
+- **Keep an online song in your library, from the queue.** Every song an online or
+  Combined mix added has a Keep button in the queue (the song playing too), and the mix
+  panel a "Keep all". The file is already on the phone, so keeping it is a copy, not a
+  download: it goes to your download folder with its tags and cover, joins the library
+  and is analysed like any song. Where it still waits in the queue it plays from the
+  library, in its place; the song playing is not interrupted. New setting, off by
+  default: **Keep songs you finish twice**.
+- **Offline mixes learn what goes together.** Each YouTube Music radio an online mix
+  reads is remembered on the phone: which songs and which artists it put with the song.
+  Offline, "Mix from this song" uses that next to how songs sound, so it feels more like
+  the online mix, with the songs you have. Songs you kept from an online mix play in
+  offline mixes right away. Nothing extra is asked online; only names and ids are kept.
+- **Online mixes find songs from messy file names.** A file without tags (named like
+  `01 - Artist - Song (Official Video) [320kbps]`) is now read from its name: track
+  numbers, site names and rip notes are taken off, and "Artist - Topic" or "ArtistVEVO"
+  become the artist. Versions (live, remix) always stay, and every guess must still match
+  the catalog's artist, title and length.
+- **The phone's own AI guesses what nothing else found.** On phones with Gemini Nano
+  (recent Pixels, Galaxy S24 and later, a few others), when neither the tags, the name
+  nor the sound finds a song, the phone's AI guesses it from its name, without sending
+  anything; the guess is used only if the catalog confirms it. Other phones skip this.
+- Fixed: a song whose artist is unknown no longer starts the radio of an artist called
+  "Unknown".
 
 ## Build 167 — Clarity Live, and online mixes that find more songs
 

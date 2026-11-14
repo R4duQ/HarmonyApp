@@ -273,6 +273,15 @@ class PlayerViewModel @Inject constructor(
     /** "Stop mix": back to the shuffle mode from before the mix. */
     fun onStopMix() = queueManager.stopMix()
 
+    /** By video id: online songs being kept in the library, kept, or not. */
+    val keepStatus: StateFlow<Map<String, com.harmony.domain.playback.KeepStatus>> = queueManager.keepStatus
+
+    /** "Keep": an online mix's song is saved to the library (its file is already on the phone). */
+    fun onKeep(song: com.harmony.core.model.Song) = queueManager.keep(listOf(song))
+
+    /** "Keep all": every online song in the queue. */
+    fun onKeepAll() = queueManager.keepAllOnline()
+
     // -- Queue --------------------------------------------------------------
     /** A tap on a queued song: seekTo(index, 0), the queue unchanged. */
     fun onQueueItemClick(index: Int) = queueManager.playQueueItem(index)

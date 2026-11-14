@@ -1220,3 +1220,88 @@ fn update_tracks_matches_a_full_reload() {
     let measured_before = before.quality.iter().filter(|&&q| q == VectorQuality::Real as u8).count();
     assert!(audit.real_tracks as usize > measured_before, "more real vectors after the update");
 }
+
+// ---- The taste memory (what online radios put together) -----------------------------------
+
+/// The gate test's listener: family 2 well known, the other families never played.
+fn knows_family_two(engine: &mut SmartShuffleEngine, s: &StyledLibrary) {
+    let n = s.lib.ids.len();
+    let mut completed = vec![0; n];
+    let mut last = vec![0i64; n];
+    for i in 0..n {
+        if s.lib.family[i] == 2 && s.lib.ids[i] % 100 < 16 {
+            completed[i] = 4;
+            last[i] = NOW - DAY_MS * 10;
+        }
+    }
+    engine.set_track_stats(Some(&completed), Some(&vec![0; n]), Some(&last), Some(&vec![0u8; n]), n);
+}
+
+#[test]
+fn radio_takes_in_what_online_radios_put_with_the_seed() {
+    let s = make_styled_library();
+    let seed = 202_003;
+    let far = [205_001i64, 205_102];
+    let run = |taste: bool| {
+        let mut engine = SmartShuffleEngine::new();
+        load(&mut engine, &s.lib);
+        knows_family_two(&mut engine, &s);
+        if taste {
+            engine.set_taste(&[seed, seed], &far, &[0.8, 0.6], &[], &[], &[]);
+        }
+        engine.on_track_started(seed);
+        engine.on_manual_select(seed);
+        let (mut heard, mut from_taste) = (Vec::new(), 0);
+        for r in 1..=4u64 {
+            heard.extend(radio(&mut engine, seed, seed, 12, &[], &heard.clone(), r));
+            from_taste = from_taste.max(engine.last_radio().from_taste);
+        }
+        (heard, from_taste)
+    };
+    let (without, none) = run(false);
+    assert!(without.iter().all(|id| !far.contains(id)), "new and far from the seed: gated out by sound alone");
+    assert_eq!(none, 0);
+    let (with, from_taste) = run(true);
+    assert!(from_taste >= 1, "the taste memory brought candidates ({from_taste})");
+    assert!(far.iter().all(|id| with.contains(id)), "what online radios put with the seed gets in: {with:?}");
+}
+
+#[test]
+fn radio_takes_in_the_artists_online_radios_put_with_the_seeds() {
+    let s = make_styled_library();
+    let seed = 202_003;
+    let seed_artist = s.lib.artists[s.lib.index_of(seed)];
+    let related = s.lib.artists[s.lib.index_of(204_000)];
+    let mut engine = SmartShuffleEngine::new();
+    load(&mut engine, &s.lib);
+    knows_family_two(&mut engine, &s);
+    engine.set_taste(&[], &[], &[], &[seed_artist], &[related], &[0.9]);
+    engine.on_track_started(seed);
+    engine.on_manual_select(seed);
+    let mut by_related = 0;
+    for r in 1..=4u64 {
+        let mix = radio(&mut engine, seed, seed, 12, &[], &[], r);
+        by_related += mix.iter().filter(|&&id| s.lib.artists[s.lib.index_of(id)] == related).count();
+    }
+    assert!(engine.last_radio().from_taste >= 1);
+    assert!(by_related >= 1, "the related artist's songs get in ({by_related})");
+}
+
+#[test]
+fn an_empty_taste_memory_changes_nothing() {
+    let s = make_styled_library();
+    let seed = 202_003;
+    let run = |set: bool| {
+        let mut engine = SmartShuffleEngine::new();
+        load(&mut engine, &s.lib);
+        knows_family_two(&mut engine, &s);
+        if set {
+            // Nothing usable: a self pair, a zero weight, a NaN.
+            engine.set_taste(&[seed, seed, seed], &[seed, 205_001, 205_002], &[1.0, 0.0, f32::NAN], &[3], &[3], &[1.0]);
+        }
+        engine.on_track_started(seed);
+        engine.on_manual_select(seed);
+        (1..=3u64).flat_map(|r| radio(&mut engine, seed, seed, 12, &[], &[], r)).collect::<Vec<_>>()
+    };
+    assert_eq!(run(false), run(true));
+}

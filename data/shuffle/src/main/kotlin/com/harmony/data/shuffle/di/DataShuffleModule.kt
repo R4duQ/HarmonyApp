@@ -40,5 +40,7 @@ object SmartShuffleDatabaseModule {
     @Provides
     @Singleton
     fun provideSmartShuffleDatabase(@ApplicationContext context: Context): SmartShuffleDatabase =
-        Room.databaseBuilder(context, SmartShuffleDatabase::class.java, SmartShuffleDatabase.FILE_NAME).build()
+        Room.databaseBuilder(context, SmartShuffleDatabase::class.java, SmartShuffleDatabase.FILE_NAME)
+            .addMigrations(*SmartShuffleDatabase.MIGRATIONS)
+            .build()
 }

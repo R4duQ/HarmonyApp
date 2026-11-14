@@ -464,3 +464,152 @@ class OnlineMixSeedFallbackTest {
         assertEquals(0, asked)
     }
 }
+
+/** Step 1 again with the file's name: a song without tags is found by what its name says. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixSeedReadingTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    private val inTheEnd = song("itheend", "In the End", "Linkin Park", ms = 216_000, album = "Hybrid Theory")
+
+    @Test
+    fun aFileNamedArtistDashTitleIsFoundWithoutItsSound() = runTest {
+        val queries = mutableListOf<String>()
+        var fingerprinted = 0
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val catalog = FakeCatalog({ q -> queries += q; CatalogResult.Ok(if (q == "Linkin Park In the End") listOf(inTheEnd) else emptyList()) },
+            { CatalogResult.Ok(RADIO) })
+        val c = OnlineMixCoordinator(catalog, FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime },
+            fingerprinter = { fingerprinted++; FingerprintResult.NotFound })
+        val untagged = SeedTrack("02 - Linkin Park - In the End (Official Video)", "<unknown>", "<unknown>", 216_500, uri = "content://x/2")
+        c.start(key, MixSource.ONLINE, untagged) { emptySet() }
+        advanceUntilIdle()
+        val seed = c.state.value.seed as SeedStatus.Identified
+        assertEquals(inTheEnd.videoId, seed.videoId)
+        assertEquals(SeedBasis.NAME, seed.basis)
+        assertTrue(SeedBasis.NAME.exact)
+        assertEquals("the raw tags, naming no artist, are not searched", listOf("Linkin Park In the End"), queries)
+        assertEquals(0, fingerprinted)
+    }
+
+    @Test
+    fun anUnknownArtistNeverStartsAnArtistRadio() = runTest {
+        val queries = mutableListOf<String>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val catalog = FakeCatalog({ q -> queries += q; CatalogResult.Ok(listOf(song("unk00000001", "Whatever", "Unknown"))) }, { CatalogResult.Ok(RADIO) })
+        val c = OnlineMixCoordinator(catalog, FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime },
+            fingerprinter = { FingerprintResult.NotFound })
+        c.start(key, MixSource.ONLINE, SeedTrack("Track 05", "<unknown>", null, 200_000, uri = "content://x/5")) { emptySet() }
+        advanceUntilIdle()
+        assertTrue(c.state.value.seed is SeedStatus.NotIdentified)
+        assertFalse("<unknown>" in queries)
+    }
+}
+
+/** Each seed's radio is told to the taste memory: the song's own, the artist's, never a genre's. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixRadioObserverTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    private fun TestScope.run(seed: SeedTrack, search: (String) -> List<CatalogTrack>): List<Triple<Long, Boolean, Int>> {
+        val heard = mutableListOf<Triple<Long, Boolean, Int>>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val c = OnlineMixCoordinator(FakeCatalog({ q -> CatalogResult.Ok(search(q)) }, { CatalogResult.Ok(RADIO) }), FakePreparer(),
+            LocalCopies.NONE, scope, clock = { testScheduler.currentTime }, fingerprinter = { FingerprintResult.NotFound },
+            radioObserver = { id, _, same, tracks -> heard += Triple(id, same, tracks.size) })
+        c.start(key, MixSource.ONLINE, seed) { emptySet() }
+        advanceUntilIdle()
+        return heard
+    }
+
+    @Test
+    fun theSeedsOwnRadioIsRememberedSongsOnly() = runTest {
+        val heard = run(SEED) { listOf(SEED_SONG) }
+        assertEquals("one radio, the podcast episode left out", listOf(Triple(7L, true, RADIO.size - 1)), heard)
+    }
+
+    @Test
+    fun anArtistsRadioTeachesArtistsOnlyAndAGenresNothing() = runTest {
+        val byArtist = run(SeedTrack("Unfindable", "Subcarpați", null, 100_000)) { q ->
+            if (q == "Subcarpați") listOf(song("other00001", "Other", "Subcarpați")) else emptyList()
+        }
+        assertEquals(listOf(Triple(7L, false, RADIO.size - 1)), byArtist)
+        val byGenre = run(SeedTrack("Unfindable", "<unknown>", null, 100_000, genre = "Rock")) { q ->
+            if (q == "Rock") listOf(song("rock000001", "Rock Song", "Band")) else emptyList()
+        }
+        assertTrue(byGenre.isEmpty())
+    }
+}
+
+/** Step 2b: the phone's AI guesses from the names; only a guess the catalog confirms is used. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class OnlineMixGuessTest {
+    private val key = MixSessionKey(seedSongId = 7, startedAtMillis = 1, generation = 1)
+    private val scopes = mutableListOf<CoroutineScope>()
+
+    @After fun cancelScopes() = scopes.forEach { it.cancel() }
+
+    private val cryptic = SeedTrack("lp_itend_final_v2", "<unknown>", null, 216_000, uri = "content://x/9")
+    private val inTheEnd = song("itheend", "In the End", "Linkin Park", ms = 216_000, album = "Hybrid Theory")
+    private val numb = song("numb00", "Numb", "Linkin Park", ms = 185_000)
+
+    private fun TestScope.make(heard: FingerprintResult, guesser: SongGuesser, search: (String) -> List<CatalogTrack>): Pair<OnlineMixCoordinator, MutableList<String>> {
+        val radios = mutableListOf<String>()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        val c = OnlineMixCoordinator(FakeCatalog({ q -> CatalogResult.Ok(search(q)) }, { id -> radios += id; CatalogResult.Ok(RADIO) }),
+            FakePreparer(), LocalCopies.NONE, scope, clock = { testScheduler.currentTime },
+            fingerprinter = { heard }, guesser = guesser)
+        return c to radios
+    }
+
+    @Test
+    fun aConfirmedGuessStartsTheSongsOwnRadio() = runTest {
+        var asked = 0
+        val (c, radios) = make(FingerprintResult.NotFound, {
+            asked++
+            listOf(SongGuess("Linkin Park", "In The End (Live)"), SongGuess("Linkin Park", "In the End"))
+        }) { q -> if (q == "Linkin Park In the End") listOf(inTheEnd) else emptyList() }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals("the live guess finds nothing; the second is confirmed",
+            SeedStatus.Identified(inTheEnd.videoId, 80, SeedBasis.GUESS), c.state.value.seed)
+        assertEquals(listOf(inTheEnd.videoId), radios)
+        c.start(key.copy(generation = 2), MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals("the same file is not guessed twice", 1, asked)
+    }
+
+    @Test
+    fun aGuessTheCatalogDoesNotConfirmIsOnlyAnArtistLead() = runTest {
+        val (c, radios) = make(FingerprintResult.NotFound, { listOf(SongGuess("Linkin Park", "Made Up Song")) }) { q ->
+            if (q == "Linkin Park") listOf(numb) else emptyList()
+        }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(SeedStatus.Identified(numb.videoId, 0, SeedBasis.ARTIST), c.state.value.seed)
+        assertEquals(listOf(numb.videoId), radios)
+    }
+
+    @Test
+    fun whatTheSoundSaidIsTrustedOverAGuess() = runTest {
+        var asked = 0
+        val (c, _) = make(FingerprintResult.Found("Numb", "Linkin Park"), { asked++; emptyList() }) { emptyList() }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertEquals(0, asked)
+    }
+
+    @Test
+    fun aGuesserThatThrowsIsNoGuessNotACrash() = runTest {
+        val (c, _) = make(FingerprintResult.NotFound, { throw IllegalStateException("aicore") }) { emptyList() }
+        c.start(key, MixSource.ONLINE, cryptic) { emptySet() }
+        advanceUntilIdle()
+        assertTrue(c.state.value.seed is SeedStatus.NotIdentified)
+    }
+}

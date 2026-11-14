@@ -122,6 +122,7 @@ class SettingsViewModel @Inject constructor(
     fun setExperimentalParallelDownloads(on: Boolean) = launch { settings.setExperimentalParallelDownloads(on) }
     fun setOnlineMixEnabled(on: Boolean) = launch { settings.setOnlineMixEnabled(on) }
     fun setOnlineMixOnMobileData(on: Boolean) = launch { settings.setOnlineMixOnMobileData(on) }
+    fun setOnlineMixAutoKeep(on: Boolean) = launch { settings.setOnlineMixAutoKeep(on) }
 
     /** Combined → Online → Offline → Combined. */
     fun cycleOnlineMixSource(current: String) = launch {
@@ -479,7 +480,8 @@ fun SettingsScreen(
             subtitle = "\"Mix from this song\" can add songs YouTube Music recommends, played from your " +
                 "library when you have them, otherwise prepared as lossless FLAC through the download engine. " +
                 "No account. When a song's tags aren't enough, a sound fingerprint of 12 seconds of it " +
-                "(never the audio) is sent to Shazam to name it. Off by default",
+                "(never the audio) is sent to Shazam to name it; on phones with Gemini Nano, the phone's own AI " +
+                "guesses from the file's name, without sending anything. Off by default",
             palette = palette,
             trailing = {
                 EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)
@@ -507,6 +509,15 @@ fun SettingsScreen(
                 palette = palette,
                 trailing = {
                     EditorialSwitch(state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData, palette)
+                },
+            )
+            EditorialSettingRow(
+                title = "Keep songs you finish twice",
+                subtitle = "An online song you play to the end twice is saved to your library by itself. " +
+                    "Any online song can also be kept from the queue",
+                palette = palette,
+                trailing = {
+                    EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)
                 },
             )
         }

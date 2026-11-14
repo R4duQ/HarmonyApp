@@ -198,6 +198,12 @@ interface SongDao {
 
     data class ShuffleSongRow(val id: Long, val artist: String, val albumId: Long)
 
+    /** The mix's taste memory: who and what each song is (edits applied), to find it by name. */
+    @Query("SELECT id, title, artist FROM songs_effective")
+    suspend fun tasteRows(): List<TasteSongRow>
+
+    data class TasteSongRow(val id: Long, val title: String, val artist: String)
+
     @Query("SELECT COUNT(*) FROM songs")
     suspend fun songCount(): Int
 

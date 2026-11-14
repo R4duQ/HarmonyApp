@@ -49,6 +49,15 @@ object SmartShuffleNative {
     @JvmStatic external fun nativeSetSteering(handle: Long, perTrack: FloatArray?, weight: Float)
     @JvmStatic external fun nativeAddTransitions(handle: Long, from: LongArray, to: LongArray, weight: FloatArray)
     @JvmStatic external fun nativeClearTransitions(handle: Long)
+    @JvmStatic external fun nativeSetTaste(
+        handle: Long,
+        from: LongArray,
+        to: LongArray,
+        weight: FloatArray,
+        artistFrom: IntArray,
+        artistTo: IntArray,
+        artistWeight: FloatArray,
+    )
     @JvmStatic external fun nativeMarkovProbability(handle: Long, from: Long, to: Long): Float
     @JvmStatic external fun nativeSetZoneBandit(handle: Long, pulls: FloatArray, rewards: FloatArray)
     @JvmStatic external fun nativeGetZoneBandit(handle: Long, pulls: FloatArray, rewards: FloatArray)
@@ -160,6 +169,14 @@ class NativeShuffleEngine : Closeable {
         withHandle { SmartShuffleNative.nativeAddTransitions(it, from, to, weight) }
 
     fun clearTransitions() = withHandle { SmartShuffleNative.nativeClearTransitions(it) }
+
+    /**
+     * Replaces the taste memory: what online radios put together, for the
+     * mix. Song pairs by id, artist pairs by the artist ids given to
+     * [setLibrary]; weights 0..1, one per pair.
+     */
+    fun setTaste(from: LongArray, to: LongArray, weight: FloatArray, artistFrom: IntArray, artistTo: IntArray, artistWeight: FloatArray) =
+        withHandle { SmartShuffleNative.nativeSetTaste(it, from, to, weight, artistFrom, artistTo, artistWeight) }
 
     fun markovProbability(from: Long, to: Long): Float =
         withHandle { SmartShuffleNative.nativeMarkovProbability(it, from, to) }

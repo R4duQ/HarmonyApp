@@ -12,10 +12,14 @@ import com.harmony.domain.online.CatalogTrack
 import com.harmony.domain.online.LocalCopies
 import com.harmony.domain.online.OnlineMixCoordinator
 import com.harmony.domain.online.OnlineMixFeed
+import com.harmony.domain.online.SeedCleaner
+import com.harmony.data.shuffle.TasteMemory
 import com.harmony.domain.online.UrlConnectionTransport
 import com.harmony.domain.online.YtMusicClient
 import com.harmony.feature.downloads.FileFingerprinter
 import com.harmony.feature.downloads.OnlineMixPreparer
+import com.harmony.feature.downloads.OnlineSongKeeperImpl
+import com.harmony.domain.playback.OnlineSongKeeper
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -41,12 +45,19 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object OnlineMixModule {
+    /** "Keep" for online mix songs: their prepared file, copied into the library. */
+    @Provides
+    @Singleton
+    fun onlineSongKeeper(keeper: OnlineSongKeeperImpl): OnlineSongKeeper = keeper
+
     @Provides
     @Singleton
     fun onlineMixFeed(
         preparer: OnlineMixPreparer,
         local: LibraryLocalCopies,
         fingerprinter: FileFingerprinter,
+        taste: TasteMemory,
+        guesser: GeminiNanoGuesser,
     ): OnlineMixFeed {
         val country = Locale.getDefault().country.takeIf { it.length == 2 }
         return OnlineMixCoordinator(
@@ -59,6 +70,17 @@ object OnlineMixModule {
             local = local,
             // Tags not enough: the file is recognised by its sound (only a fingerprint is sent).
             fingerprinter = fingerprinter,
+            // Nothing else found it: Gemini Nano on the phone guesses from the names (nothing is sent).
+            guesser = guesser,
+            // What each radio puts together, remembered for the offline mix (names and ids only).
+            radioObserver = { seedSongId, seed, sameSong, tracks ->
+                taste.record(
+                    seedSongId = seedSongId,
+                    seedArtist = SeedCleaner.artistOf(seed).orEmpty(),
+                    sameSong = sameSong,
+                    tracks = tracks.map { TasteMemory.Track(it.title, it.artists.firstOrNull().orEmpty()) },
+                )
+            },
             // Nothing that goes wrong online may take the app down: it is logged, and the
             // coordinator reports it as the mix's state (the library's mix plays on).
             scope = CoroutineScope(

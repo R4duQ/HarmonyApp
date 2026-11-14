@@ -105,7 +105,7 @@ users, and a small attention over this session's feedback.
 
 | Stage | YouTube Music | Harmony's mix |
 |---|---|---|
-| 1. Candidates | Several retrieval sources merged | Up to 80 closest to the seed, 40 closest to S_t, 40 from habits (what was played after the seed, after the song the batch follows, and after the 12 songs that sound most like the seed; noisy-OR `1 − Π(1 − w·P)`), 24 rarely heard songs (≤ 2 plays) that sound right (cosine ≥ 0.40). Union, duplicates removed. |
+| 1. Candidates | Several retrieval sources merged | Up to 80 closest to the seed, 40 closest to S_t, 40 from habits (what was played after the seed, after the song the batch follows, and after the 12 songs that sound most like the seed; noisy-OR `1 − Π(1 − w·P)`), 24 rarely heard songs (≤ 2 plays) that sound right (cosine ≥ 0.40), 40 from the taste memory (below). Union, duplicates removed. |
 | 2. Ranking | Transformer over the action sequence and the current context | `RadioWeights` (below). Session feedback goes through an attention: an event counts `0.85^age × (0.35 + 0.65 × cos(context then, context now))`, times a sharp likeness kernel `exp((cos − 1)/0.15)`, a fast skip 1.5 times a full play. |
 | 3. Filtering | Business rules, diversity | Queue, excluded and session-played songs out; the same artist at least 3 songs apart; songs new to the listener only above an acoustic gate, and no more of them than a quarter of the batch (or the share of new songs among the seed's own closest matches, when that is higher). |
 
@@ -115,8 +115,8 @@ These weights are Harmony's choices, not YouTube Music's (which publishes
 none). Each head is 0..1.
 
 ```
-relevance  = max(cos(0.7·seed + 0.3·S_t, v),  0.8 × historyConfidence × habit)
-transition = (1 − 0.6·h)·cos(song before, v) + 0.6·h·habit           h = historyConfidence
+relevance  = max(cos(0.7·seed + 0.3·S_t, v),  0.8 × historyConfidence × habit,  0.75 × taste)
+transition = max((1 − 0.6·h)·cos(song before, v) + 0.6·h·habit,  0.75 × taste)   h = historyConfidence
 preference = s·(0.5 + 0.5·feedback) + (1 − s)·(c + 1)/(c + 1.5·k + 2)  s = session evidence for v
 novelty    = 1/√(1 + plays), only once there is history, never below the gate
 
@@ -136,6 +136,18 @@ w_pref = 0.20 × max(historyConfidence, sessionConfidence);  w_rel = 0.50 + (0.2
 - **Songs without a 24-D vector** use the cold-start approximation from the
   older analysis (`FALLBACK`, trusted at 0.85). Songs with nothing measured
   (`NONE`) take part only through habits or as the last fill, and say so.
+- **The taste memory** (`set_taste`, filled by `TasteMemory` in `data/shuffle`).
+  Each YouTube Music radio an online mix reads is remembered on the phone:
+  the seed song with every recording of its radio (`0.6 × rank` per radio,
+  rank 1 at the top down to 0.4 at the bottom, noisy-OR as radios repeat it),
+  and the seed's artist with every other artist of it (`0.25 × rank` per
+  appearance). An offline mix reads it as co-listening it could not learn
+  alone: `taste = 1 − Π(1 − w)` over the seed's links, the links of the song
+  the batch follows (× 0.5) and the seed artist's links to each song's artist
+  (× 0.7). It vouches for relevance and fit as habits do, and a song with
+  taste ≥ 0.3 passes the gate for new songs (or songs not measured yet: a song
+  just kept from an online mix). With no taste memory, every mix is exactly as
+  before.
 - The Diagnostic Brain audits each batch as it audits Smart Shuffle's
   (integrity, clumping, jerk), repairing only from the mix's own candidates;
   a habitual jump is kept, as for Smart Shuffle.

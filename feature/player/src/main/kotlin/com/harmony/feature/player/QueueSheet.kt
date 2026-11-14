@@ -21,10 +21,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -65,6 +69,9 @@ import com.harmony.domain.online.OnlineMixState
 import com.harmony.domain.online.SeedBasis
 import com.harmony.domain.online.SeedStatus
 import com.harmony.core.model.PlayerState
+import com.harmony.core.model.Song
+import com.harmony.domain.playback.KeepStatus
+import com.harmony.domain.playback.OnlineSongs
 import com.harmony.core.ui.component.Artwork
 import com.harmony.core.ui.component.formatDuration
 
@@ -123,7 +130,11 @@ fun QueueSheet(viewModel: PlayerViewModel) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     val mix by viewModel.mix.collectAsStateWithLifecycle()
     val online by viewModel.onlineMix.collectAsStateWithLifecycle()
+    val keepStatus by viewModel.keepStatus.collectAsStateWithLifecycle()
     QueueSheetContent(
+        keepStatus = keepStatus,
+        onKeep = viewModel::onKeep,
+        onKeepAll = viewModel::onKeepAll,
         online = online,
         state = state,
         onPlay = viewModel::onQueueItemClick,
@@ -152,6 +163,9 @@ internal fun QueueSheetContent(
     onStartMix: () -> Unit = {},
     onStopMix: () -> Unit = {},
     online: OnlineMixState = OnlineMixState(),
+    keepStatus: Map<String, KeepStatus> = emptyMap(),
+    onKeep: (Song) -> Unit = {},
+    onKeepAll: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val palette = playerPalette()
@@ -245,6 +259,9 @@ internal fun QueueSheetContent(
                 artist = nowPlaying.artist,
                 artworkUri = nowPlaying.artworkUri,
                 palette = palette,
+                trailing = if (OnlineSongs.isOnline(nowPlaying)) {
+                    { KeepButton(nowPlaying, keepStatus.of(nowPlaying), palette, onKeep) }
+                } else null,
             )
         }
 
@@ -256,7 +273,9 @@ internal fun QueueSheetContent(
             MixBar(mix = mix, palette = palette, onStart = onStartMix, onStop = onStopMix)
         }
         if (mix != null && mix.source != MixSource.OFFLINE) {
-            OnlineMixPanel(online, palette)
+            // "Keep all" while an online song of the queue is not in the library yet.
+            val unkept = state.queue.count { OnlineSongs.isOnline(it) && keepStatus.of(it) !is KeepStatus.Kept }
+            OnlineMixPanel(online, palette, unkept = unkept, onKeepAll = onKeepAll)
         }
 
         if (upcoming.isEmpty()) {
@@ -308,6 +327,9 @@ internal fun QueueSheetContent(
                         onMoveUp = { commitMove(upcoming, rel, rel - 1, firstUpcoming) },
                         onMoveDown = { commitMove(upcoming, rel, rel + 1, firstUpcoming) },
                         onMeasured = { height -> if (height > 0) rowHeightPx = height.toFloat() },
+                        trailing = if (OnlineSongs.isOnline(song)) {
+                            { KeepButton(song, keepStatus.of(song), palette, onKeep) }
+                        } else null,
                         modifier = Modifier
                             // Non-dragged rows slide out of the way; the dragged
                             // one is positioned by its own translation instead.
@@ -439,6 +461,7 @@ private fun NowPlayingCard(
     artist: String,
     artworkUri: String?,
     palette: PlayerPalette,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         Modifier
@@ -493,6 +516,7 @@ private fun NowPlayingCard(
                 modifier = Modifier.padding(start = 1.dp),
             )
         }
+        trailing?.invoke()
     }
 }
 
@@ -570,12 +594,14 @@ private fun MixBar(
  * queue only once it is ready.
  */
 @Composable
-private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette) {
+private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette, unkept: Int = 0, onKeepAll: () -> Unit = {}) {
     val seedLine = when (val seed = online.seed) {
         SeedStatus.Idle, SeedStatus.Identifying -> "Finding this song on YouTube Music…"
         is SeedStatus.Identified -> when (seed.basis) {
             SeedBasis.KNOWN, SeedBasis.TAGS -> "Found on YouTube Music"
+            SeedBasis.NAME -> "Found on YouTube Music from the file's name"
             SeedBasis.FINGERPRINT -> "Recognised by its sound, found on YouTube Music"
+            SeedBasis.GUESS -> "Guessed from its name by the phone's AI, found on YouTube Music"
             SeedBasis.ARTIST -> "Song not found: looser suggestions from the artist's radio"
             SeedBasis.GENRE -> "Song not found: looser suggestions by genre"
         }
@@ -603,7 +629,30 @@ private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette) {
             .background(palette.control)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        Text(seedLine, fontSize = 11.5.sp, lineHeight = 15.sp, color = palette.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                seedLine,
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                color = palette.muted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (unkept > 0) {
+                Text(
+                    if (unkept == 1) "Keep" else "Keep all $unkept",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.accent,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button, onClickLabel = "Keep the online songs of the queue in your library", onClick = onKeepAll)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+            }
+        }
         shown.forEach { c ->
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -682,6 +731,7 @@ private fun QueueRow(
     onMeasured: (Int) -> Unit,
     modifier: Modifier = Modifier,
     dragModifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -752,6 +802,7 @@ private fun QueueRow(
                 modifier = Modifier.padding(start = 1.dp),
             )
         }
+        trailing?.invoke()
         IconButton(onClick = onRemove, modifier = Modifier.size(48.dp)) {
             Icon(
                 Icons.Rounded.Close,
@@ -759,6 +810,39 @@ private fun QueueRow(
                 tint = palette.muted,
                 modifier = Modifier.size(19.dp),
             )
+        }
+    }
+}
+
+/** How keeping [song] stands, when it is an online song. */
+private fun Map<String, KeepStatus>.of(song: Song): KeepStatus? =
+    OnlineSongs.keyOf(song.uri)?.let(OnlineSongs::videoIdOf)?.let(::get)
+
+/**
+ * "Keep": an online mix's song saved to the library. Its file is already on
+ * the phone, so this is a copy, not a download. Kept, it shows a tick; a
+ * failure shows why when tapped again (and tries again).
+ */
+@Composable
+private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, onKeep: (Song) -> Unit) {
+    val label = when (status) {
+        null -> "Keep ${song.title} in your library"
+        KeepStatus.Keeping -> "Keeping ${song.title}"
+        is KeepStatus.Kept -> "${song.title} is in your library"
+        is KeepStatus.Failed -> "Not kept: ${status.reason}. Try again"
+    }
+    IconButton(
+        onClick = { onKeep(song) },
+        enabled = status == null || status is KeepStatus.Failed,
+        modifier = Modifier
+            .size(48.dp)
+            .semantics { contentDescription = label },
+    ) {
+        when (status) {
+            KeepStatus.Keeping -> CircularProgressIndicator(Modifier.size(18.dp), color = palette.accent, strokeWidth = 2.dp)
+            is KeepStatus.Kept -> Icon(Icons.Rounded.DownloadDone, contentDescription = null, tint = palette.accent, modifier = Modifier.size(20.dp))
+            is KeepStatus.Failed -> Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = palette.muted, modifier = Modifier.size(20.dp))
+            null -> Icon(Icons.Rounded.Download, contentDescription = null, tint = palette.ink, modifier = Modifier.size(20.dp))
         }
     }
 }

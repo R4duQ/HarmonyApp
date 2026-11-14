@@ -106,6 +106,10 @@ class OnlineMixCoordinator(
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
     /** Recognises a file by its sound when its tags don't find it (step 2). */
     private val fingerprinter: SongFingerprinter = SongFingerprinter.NONE,
+    /** Guesses the song from its names with an on-device AI, when nothing else found it (step 2b). */
+    private val guesser: SongGuesser = SongGuesser.NONE,
+    /** Told of each seed's radio, for the offline mix's taste memory. */
+    private val radioObserver: RadioObserver = RadioObserver.NONE,
 ) : OnlineMixFeed {
     private val _state = MutableStateFlow(OnlineMixState())
     override val state: StateFlow<OnlineMixState> = _state.asStateFlow()
@@ -122,6 +126,7 @@ class OnlineMixCoordinator(
     private val identified = ExpiringCache<String, MatchOutcome>(200, clock)
     private val radios = ExpiringCache<String, CatalogResult<List<CatalogTrack>>>(50, clock)
     private val fingerprints = ExpiringCache<String, FingerprintResult>(200, clock)
+    private val guesses = ExpiringCache<String, List<SongGuess>>(200, clock)
     @Volatile private var pausedUntil = 0L
 
     /** The result of identifying a seed: a confirmed id, or why not. */
@@ -218,23 +223,35 @@ class OnlineMixCoordinator(
             follow(gen, session, seed, known, avoid)
             return
         }
-        val outcome = identify(seed)
-        val match = outcome.result
-        if (!current(gen)) return
-        if (match != null && match.confirmed) {
-            val seedId = match.track!!.videoId
-            apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, match.score, SeedBasis.TAGS)) }
-            log("ONLINE_MIX seed=${session.seedSongId} identify=ok video=$seedId score=${match.score} ms=${clock() - started}")
-            follow(gen, session, seed, seedId, avoid)
-            return
+        // Step 1: the tags as they are, then cleaned readings of them (the file's name split into
+        // artist and title, a rip's notes taken off). A tag that names no artist can't be
+        // matched, so then only the readings are searched.
+        val readings = SeedCleaner.readings(seed)
+        val tries = if (SeedCleaner.isUnknownArtist(seed.artist) && readings.isNotEmpty()) readings else listOf(seed) + readings
+        var outcome: MatchOutcome? = null
+        for (reading in tries) {
+            val attempt = identify(reading)
+            if (!current(gen)) return
+            if (outcome == null) outcome = attempt
+            val found = attempt.result?.takeIf { it.confirmed }
+            if (found != null) {
+                val seedId = found.track!!.videoId
+                val basis = if (reading === seed) SeedBasis.TAGS else SeedBasis.NAME
+                apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, found.score, basis)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=${if (basis == SeedBasis.TAGS) "ok" else "name"} video=$seedId score=${found.score} ms=${clock() - started}")
+                follow(gen, session, reading, seedId, avoid)
+                return
+            }
+            if (attempt.failure != null) {
+                // The catalog could not be asked: nothing below would fare better.
+                apply(gen) { it.copy(seed = SeedStatus.Failed(attempt.failure)) }
+                log("ONLINE_MIX seed=${session.seedSongId} identify=Failed ${attempt.failure.javaClass.simpleName} ms=${clock() - started}")
+                return
+            }
         }
-        if (outcome.failure != null) {
-            // The catalog could not be asked: nothing below would fare better.
-            apply(gen) { it.copy(seed = SeedStatus.Failed(outcome.failure)) }
-            log("ONLINE_MIX seed=${session.seedSongId} identify=Failed ${outcome.failure.javaClass.simpleName} ms=${clock() - started}")
-            return
-        }
-        log("ONLINE_MIX seed=${session.seedSongId} identify=${match?.verdict ?: MatchVerdict.NO_MATCH} by tags results=${outcome.results}")
+        val first = outcome!!
+        val match = first.result
+        log("ONLINE_MIX seed=${session.seedSongId} identify=${match?.verdict ?: MatchVerdict.NO_MATCH} by tags results=${first.results} readings=${tries.size}")
 
         // Step 2: the tags were not enough; recognise the file by its sound.
         val heard = seed.uri?.let { recognise(it) }
@@ -253,8 +270,25 @@ class OnlineMixCoordinator(
             }
         }
 
+        // Step 2b: nothing heard either; an AI on the phone reads the names and guesses the
+        // song. Each guess is only a lead: the catalog must have it and SongMatcher confirm it.
+        val guessed = if (heard == null) guess(seed) else emptyList()
+        if (!current(gen)) return
+        for (g in guessed) {
+            val byGuess = SeedTrack(g.title, g.artist, null, seed.knownDurationMs, explicit = seed.explicit)
+            val attempt = identify(byGuess)
+            if (!current(gen)) return
+            val found = attempt.result?.takeIf { it.confirmed } ?: continue
+            val seedId = found.track!!.videoId
+            apply(gen) { it.copy(seed = SeedStatus.Identified(seedId, found.score, SeedBasis.GUESS)) }
+            log("ONLINE_MIX seed=${session.seedSongId} identify=guess video=$seedId score=${found.score} ms=${clock() - started}")
+            follow(gen, session, byGuess, seedId, avoid)
+            return
+        }
+
         // Step 3: not the song itself; a radio from its artist, else from its genre.
-        val artist = heard?.artist ?: seed.artist
+        // Never "<unknown>": that would start the radio of whoever is called "Unknown".
+        val artist = heard?.artist ?: SeedCleaner.artistOf(seed) ?: guessed.firstOrNull()?.artist.orEmpty()
         if (artist.isNotBlank()) {
             val anchor = (ask { catalog.searchSongs(artist, SEARCH_LIMIT) } as? CatalogResult.Ok)?.value
                 ?.let { LooseAnchors.byArtist(artist, it) }
@@ -277,7 +311,7 @@ class OnlineMixCoordinator(
                 return
             }
         }
-        val status = SeedStatus.NotIdentified(match?.verdict ?: MatchVerdict.NO_MATCH, outcome.results,
+        val status = SeedStatus.NotIdentified(match?.verdict ?: MatchVerdict.NO_MATCH, first.results,
             match?.assessments?.count { it.track.kind == CatalogKind.SONG } ?: 0)
         apply(gen) { it.copy(seed = status) }
         log("ONLINE_MIX seed=${session.seedSongId} identify=none ms=${clock() - started}")
@@ -306,6 +340,24 @@ class OnlineMixCoordinator(
             is FingerprintResult.Failed -> "failed (${result.reason})"
         })
         return result as? FingerprintResult.Found
+    }
+
+    /** What the on-device AI guesses the seed is (kept per seed). A failure is logged, never thrown. */
+    private suspend fun guess(seed: SeedTrack): List<SongGuess> {
+        val key = TrackIdentity.of(seed.title, seed.artist, seed.knownDurationMs ?: 0).key + "|" + seed.uri.orEmpty()
+        val found = guesses.getOrLoad(key) {
+            val g = try {
+                guesser.guess(seed).take(SongGuessPrompt.MAX_GUESSES)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                onError("guessing a song with the on-device AI failed", t)
+                emptyList()
+            }
+            g to (if (g.isEmpty()) NOT_FOUND_TTL_MS else IDENTIFY_TTL_MS)
+        }
+        log("ONLINE_MIX guess=${found.size}")
+        return found
     }
 
     /** From the seed's confirmed id: its radio, the plan, then preparing the candidates one by one. */
@@ -358,6 +410,7 @@ class OnlineMixCoordinator(
                 return _state.value.candidates.isNotEmpty()
             }
         }
+        if (limit == RADIO_LIMIT) remember(session, seed, tracks)
         val existing = _state.value.candidates
         val context = PlannerContext(
             seed = seed,
@@ -388,6 +441,21 @@ class OnlineMixCoordinator(
             "turned=${batch.turnedAway.size} ms=${clock() - started}")
         if (withLocal.any { it.ready }) _ready.tryEmit(session)
         return true
+    }
+
+    /** The seed's radio, for the taste memory: the song's own radio, or its artist's (never a genre's). */
+    private suspend fun remember(session: MixSessionKey, seed: SeedTrack, tracks: List<CatalogTrack>) {
+        val basis = (_state.value.seed as? SeedStatus.Identified)?.basis ?: return
+        if (basis == SeedBasis.GENRE) return
+        val songs = tracks.filter { it.kind == CatalogKind.SONG }
+        if (songs.isEmpty()) return
+        try {
+            radioObserver.onRadio(session.seedSongId, seed, basis.exact, songs)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            onError("remembering a radio failed", t)
+        }
     }
 
     private suspend fun prepareOne(gen: Long, candidate: OnlineCandidate) {

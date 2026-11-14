@@ -9,6 +9,7 @@ import com.harmony.core.dsp.SmartShuffleNative
 import com.harmony.core.model.SessionEvent
 import com.harmony.core.model.VectorQuality
 import com.harmony.domain.analysis.repository.AcousticVectorStore
+import com.harmony.domain.library.discovery.TrackIdentity
 import com.harmony.domain.shuffle.brain.MixRequest
 import com.harmony.domain.shuffle.brain.QueuePlan
 import com.harmony.domain.shuffle.brain.QueueRequest
@@ -67,20 +68,27 @@ class NativeShuffleBrain @Inject constructor(
     private var rowOf: HashMap<Long, Int> = HashMap()
     private var rowQuality: ByteArray = ByteArray(0)
 
+    /** For the taste memory: library song ids by recording ([TrackIdentity] key), engine artist ids by lead credit. */
+    private var idsByRecording: HashMap<String, LongArray> = HashMap()
+    private var artistIdsByLead: HashMap<String, IntArray> = HashMap()
+
     /** How often the library was loaded in full and refreshed incrementally (tests). */
     internal var fullLoads = 0
     internal var refreshes = 0
 
+    /** Song and artist pairs of the taste memory last handed to the engine (tests). */
+    internal var tastePairs = 0 to 0
+
     /** Tests: the next [prepare] loads everything, as after [RELOAD_AFTER_MS]. */
     internal suspend fun forceFullReload() = loadLock.withLock { snapshot = null }
 
-    private data class SnapshotKey(val songs: Int, val vectors: AcousticVectorDao.Stamp, val analyses: Int)
+    private data class SnapshotKey(val songs: Int, val vectors: AcousticVectorDao.Stamp, val analyses: Int, val taste: TasteDao.Stamp)
 
     override suspend fun prepare() {
         val e = engine ?: return
         loadLock.withLock {
             val key = withContext(dispatchers.io) {
-                SnapshotKey(songDao.songCount(), database.acousticVectors().stamp(), analysisDao.count())
+                SnapshotKey(songDao.songCount(), database.acousticVectors().stamp(), analysisDao.count(), database.taste().stamp())
             }
             val previous = snapshot
             when {
@@ -153,6 +161,7 @@ class NativeShuffleBrain @Inject constructor(
                 applySteering(e)
             }
         }
+        if (key.taste != previous.taste) applyTaste(e)
         snapshot = key
         refreshes++
     }
@@ -168,6 +177,7 @@ class NativeShuffleBrain @Inject constructor(
                 transitions = database.markov().all(),
                 bandit = database.bandit().all(),
                 perceptual = analysisDao.perceptualRows().associateTo(HashMap()) { it.songId to it.toArray() },
+                names = songDao.tasteRows(),
             )
         }
         withContext(dispatchers.default) {
@@ -228,10 +238,52 @@ class NativeShuffleBrain @Inject constructor(
             e.setZoneBandit(pulls, rewards)
             perceptual = data.perceptual
             applySteering(e)
+
+            val byRecording = HashMap<String, MutableList<Long>>()
+            data.names.forEach { byRecording.getOrPut(TrackIdentity.of(it.title, it.artist).key) { ArrayList(1) } += it.id }
+            idsByRecording = byRecording.mapValuesTo(HashMap()) { it.value.toLongArray() }
+            val byLead = HashMap<String, MutableList<Int>>()
+            artistIds.forEach { (name, id) -> byLead.getOrPut(TrackIdentity.primaryArtist(name)) { ArrayList(1) } += id }
+            artistIdsByLead = byLead.mapValuesTo(HashMap()) { it.value.toIntArray() }
         }
+        applyTaste(e)
         snapshot = key
         loadedAt = System.currentTimeMillis()
         fullLoads++
+    }
+
+    /**
+     * The taste memory ([TasteMemory]) in the engine's terms: a seed song's
+     * links to the library's recordings of what its radios played, and the
+     * artist links between the library's artists. What the library doesn't
+     * have is left out; it counts the day it does (a song kept, say).
+     */
+    private suspend fun applyTaste(e: NativeShuffleEngine) {
+        val edges = withContext(dispatchers.io) { database.taste().all() }
+        withContext(dispatchers.default) {
+            val from = ArrayList<Long>()
+            val to = ArrayList<Long>()
+            val weight = ArrayList<Float>()
+            val artistFrom = ArrayList<Int>()
+            val artistTo = ArrayList<Int>()
+            val artistWeight = ArrayList<Float>()
+            for (edge in edges) {
+                when (edge.kind) {
+                    TasteEdgeEntity.SONG -> {
+                        val seed = edge.fromKey.removePrefix("id:").toLongOrNull() ?: continue
+                        idsByRecording[edge.toKey]?.forEach { id -> from += seed; to += id; weight += edge.weight }
+                    }
+                    TasteEdgeEntity.ARTIST -> {
+                        val a = artistIdsByLead[edge.fromKey] ?: continue
+                        val b = artistIdsByLead[edge.toKey] ?: continue
+                        for (x in a) for (y in b) { artistFrom += x; artistTo += y; artistWeight += edge.weight }
+                    }
+                }
+            }
+            tastePairs = from.size to artistFrom.size
+            e.setTaste(from.toLongArray(), to.toLongArray(), weight.toFloatArray(),
+                artistFrom.toIntArray(), artistTo.toIntArray(), artistWeight.toFloatArray())
+        }
     }
 
     override suspend fun applyConfig(config: ShuffleConfig) {
@@ -368,6 +420,7 @@ class NativeShuffleBrain @Inject constructor(
         val transitions: List<MarkovTransitionEntity>,
         val bandit: List<ZoneBanditEntity>,
         val perceptual: HashMap<Long, FloatArray>,
+        val names: List<SongDao.TasteSongRow>,
     )
 
     private fun AnalysisDao.ColdStartRow.toColdStart(): FloatArray =
