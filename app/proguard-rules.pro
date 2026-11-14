@@ -22,3 +22,9 @@
 # youtubedl-android README.
 -keep class com.yausername.** { *; }
 -keep class org.apache.commons.compress.archivers.zip.** { *; }
+
+# The diagnostics log names the online mix's verdicts and outcomes (identify=NO_MATCH,
+# outcome=NotAvailable). Without these the release build writes them as "m0" or "Z".
+-keepclassmembernames enum com.harmony.domain.online.** { <fields>; }
+-keepnames class com.harmony.domain.online.PrepareOutcome$*
+-keepnames class com.harmony.domain.online.FingerprintResult$*
