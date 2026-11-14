@@ -6,8 +6,8 @@ data class SongGuess(val artist: String, val title: String)
 /**
  * Guesses which song a file is from what its names say (title and artist
  * tags, album, the file's name when it has no tags), for when neither the
- * tags, nor a cleaned reading of them, nor its sound found it. On the phone:
- * nothing is sent anywhere. A guess is only a lead: it is searched for and
+ * tags, nor a cleaned reading of them, nor its sound found it: a free name
+ * search ([NameSearch]) or the phone's own AI. A guess is only a lead: it is searched for and
  * [SongMatcher] must confirm it (artist, title and length), as for the tags.
  */
 fun interface SongGuesser {
@@ -16,6 +16,21 @@ fun interface SongGuesser {
 
     companion object {
         val NONE = SongGuesser { emptyList() }
+
+        /** Asks [guessers] in order and takes the first that has a guess; one that fails is skipped. */
+        fun firstOf(vararg guessers: SongGuesser) = SongGuesser { seed ->
+            for (g in guessers) {
+                val found = try {
+                    g.guess(seed)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                if (found.isNotEmpty()) return@SongGuesser found
+            }
+            emptyList()
+        }
     }
 }
 

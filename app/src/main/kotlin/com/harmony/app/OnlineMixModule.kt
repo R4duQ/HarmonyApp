@@ -12,7 +12,9 @@ import com.harmony.domain.online.CatalogTrack
 import com.harmony.domain.online.LocalCopies
 import com.harmony.domain.online.OnlineMixCoordinator
 import com.harmony.domain.online.OnlineMixFeed
+import com.harmony.domain.online.NameSearch
 import com.harmony.domain.online.SeedCleaner
+import com.harmony.domain.online.SongGuesser
 import com.harmony.data.shuffle.TasteMemory
 import com.harmony.domain.online.UrlConnectionTransport
 import com.harmony.domain.online.YtMusicClient
@@ -60,18 +62,21 @@ object OnlineMixModule {
         guesser: GeminiNanoGuesser,
     ): OnlineMixFeed {
         val country = Locale.getDefault().country.takeIf { it.length == 2 }
+        val transport = UrlConnectionTransport()
+        val catalog = YtMusicClient(
+            transport,
+            location = country,
+            onError = { what, error -> DiagnosticsLog.error("ONLINE_MIX", what, error) },
+        )
         return OnlineMixCoordinator(
-            catalog = YtMusicClient(
-                UrlConnectionTransport(),
-                location = country,
-                onError = { what, error -> DiagnosticsLog.error("ONLINE_MIX", what, error) },
-            ),
+            catalog = catalog,
             preparer = preparer,
             local = local,
             // Tags not enough: the file is recognised by its sound (only a fingerprint is sent).
             fingerprinter = fingerprinter,
-            // Nothing else found it: Gemini Nano on the phone guesses from the names (nothing is sent).
-            guesser = guesser,
+            // Nothing else found it: the name searched as free text on Deezer, then on YouTube Music
+            // (free, no account), then Gemini Nano on the phones that have it.
+            guesser = SongGuesser.firstOf(NameSearch.deezer(transport), NameSearch.catalog(catalog), guesser),
             // What each radio puts together, remembered for the offline mix (names and ids only).
             radioObserver = { seedSongId, seed, sameSong, tracks ->
                 taste.record(
