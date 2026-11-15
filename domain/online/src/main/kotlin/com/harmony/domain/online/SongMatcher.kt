@@ -104,7 +104,8 @@ object SongMatcher {
     val DIFFERENT_RECORDING: Set<TrackVersion> = TrackVersion.entries.toSet() - TrackVersion.REMASTER
 
     // Credit separators, as TrackIdentity splits them (not "/" nor "and").
-    private val artistSplit = Regex("\\s+(feat\\.?|ft\\.?|featuring|with|x|vs\\.?)\\s+|\\s*[,&;]\\s*", RegexOption.IGNORE_CASE)
+    // "cu": Romanian for "with" ("Agresiv cu Mitza"), as in TrackIdentity.
+    private val artistSplit = Regex("\\s+(feat\\.?|ft\\.?|featuring|with|cu|x|vs\\.?)\\s+|\\s*[,&;]\\s*", RegexOption.IGNORE_CASE)
     private val albumNoise = Regex("[(\\[{][^)\\]}]*[)\\]}]")
 
     fun match(seed: SeedTrack, results: List<CatalogTrack>): MatchResult {
@@ -192,7 +193,7 @@ object SongMatcher {
     fun credits(artist: String): List<String> =
         artist.split(artistSplit).map(TrackIdentity::normalize).filter { it.isNotBlank() && it !in CREDIT_WORDS }
 
-    private val CREDIT_WORDS = setOf("feat", "ft", "featuring", "with", "x", "vs")
+    private val CREDIT_WORDS = setOf("feat", "ft", "featuring", "with", "cu", "x", "vs")
 
     /** An album name without its bracketed edition notes ("(Remastered)", "[Deluxe]"), normalized. */
     fun album(value: String?): String? =
