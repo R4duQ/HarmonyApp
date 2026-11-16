@@ -1,8 +1,18 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **170**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 169), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **171**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 170), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 171 — Online mixes play online songs only
+
+- **An Online mix is online songs only.** The queue used to fill up with songs from your
+  library whenever no online song was ready, so the two played mixed. Now an Online mix
+  queues only the songs YouTube Music recommends, each the moment it is ready (from your
+  library when you already have that very recording); if the song playing ends first, the
+  next one starts as soon as it is ready. Your library fills in only when nothing online
+  can come: the song was not found, there is no connection, or every recommendation was
+  turned down or waits for Wi-Fi. Combined is unchanged.
 
 ## Build 170 — Romanian credits, typos, a readable log
 
