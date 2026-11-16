@@ -20,6 +20,8 @@ import com.harmony.domain.online.OnlineMixFeed
 import com.harmony.domain.online.OnlineMixState
 import com.harmony.domain.online.ReadyPick
 import com.harmony.domain.online.SeedTrack
+import com.harmony.domain.online.CandidateStage
+import com.harmony.domain.online.SeedStatus
 import com.harmony.domain.playback.KeepStatus
 import com.harmony.domain.playback.OnlineSongKeeper
 import com.harmony.domain.playback.OnlineSongs
@@ -112,8 +114,12 @@ import kotlin.random.Random
  * own [MixSessionKey], and picks of another one are never taken. While an
  * online mix runs the lookahead is shorter ([ONLINE_QUEUE_TARGET]), so a
  * prepared recommendation is heard within a few songs. COMBINED: about one
- * song in three is online. ONLINE: online songs first, the library's mix
- * filling what is not ready yet, so playback never waits on the network.
+ * song in three is online. ONLINE: online songs only, each joining the queue
+ * the moment it is ready (from the library when it has the recording); if
+ * the song playing ends before the next one is ready, it starts as soon as it
+ * is. The library fills in only when nothing online can come ([onlineCanDeliver]:
+ * the song was not found, the network failed, every recommendation was turned
+ * down or waits for Wi-Fi).
  *
  * **Telemetry.** [telemetry] carries S_t, the last audit and the reason for
  * every upcoming pick, for ShuffleBrainDebugOverlay; each queue update is
@@ -522,7 +528,11 @@ class SmartQueueManager @Inject constructor(
         val current = state.currentSong ?: return@withLock
         val index = state.queueIndex
         val infos = state.infos()
-        val from = (index + 1 + maxOf(1, state.playNextCount)).coerceAtMost(state.queue.size)
+        // The next song stays (it may be loading for a crossfade), except in an ONLINE mix that
+        // can deliver: there only online songs follow, the user's own entries kept.
+        val onlineOnly = _mix.value?.source == MixSource.ONLINE && onlineCanDeliver()
+        val keepNext = if (onlineOnly) state.playNextCount else maxOf(1, state.playNextCount)
+        val from = (index + 1 + keepNext).coerceAtMost(state.queue.size)
         val tail = (from until state.queue.size)
         val freePick = { i: Int -> infos[i].origin == QueueOrigin.AUTO && !infos[i].isProtected }
         val replaced = tail.filter(freePick).map { state.queue[it].id }
@@ -1070,8 +1080,16 @@ class SmartQueueManager @Inject constructor(
             if (songs.isEmpty()) return
             songs.forEach { generated.add(it.id) }
             mutateQueue { playback.addToQueueAll(songs, QueueOrigin.AUTO) }
+            // An ONLINE mix that ran dry (the last song ended while this one was prepared): go on.
+            val ranDry = ahead == 0 && !state.isPlaying && state.durationMs > 0 &&
+                state.positionMs >= state.durationMs - ENDED_SLACK_MS
+            if (ranDry) {
+                playback.skipToQueueItem(state.queueIndex + 1)
+                playback.play()
+            }
             publish(lastEvent = null)
-            brainLog.write(listOf("MIX online seed=${current.seedSongId} appended=${songs.size} ahead=${ahead + songs.size}"))
+            brainLog.write(listOf("MIX online seed=${current.seedSongId} appended=${songs.size} ahead=${ahead + songs.size}" +
+                if (ranDry) " resumed" else ""))
         }
     }
 
@@ -1190,12 +1208,36 @@ class SmartQueueManager @Inject constructor(
         if (need <= 0) return emptyList<Song>() to QueuePlan.EMPTY
         val mix = _mix.value
         if (mix == null || mix.source == MixSource.OFFLINE) return pickLocal(current, prefixIds, need, exclude, replacedTail)
+        // ONLINE: online songs only, as they become ready; the library only when none can come.
+        if (mix.source == MixSource.ONLINE && onlineCanDeliver()) {
+            return takeOnlinePicks(mix, need, prefixIds, exclude).take(need) to QueuePlan.EMPTY
+        }
         // Online picks ready now; the library's mix fills the rest, so playback never waits.
         val onlineMax = if (mix.source == MixSource.ONLINE) need else maxOf(1, need / 3)
         val fromOnline = takeOnlinePicks(mix, onlineMax, prefixIds, exclude)
         val (local, plan) = pickLocal(current, prefixIds, need - fromOnline.size, exclude, replacedTail)
         val merged = if (mix.source == MixSource.ONLINE) fromOnline + local else interleave(local, fromOnline)
         return merged.take(need) to plan
+    }
+
+    /**
+     * Whether online songs can still come for the running mix: the song is
+     * being looked up, or was found and a recommendation is ready, being
+     * prepared, waiting its turn or to be tried again. Not when the song was
+     * not found or the network failed, nor when every recommendation was
+     * turned down or is held (waiting for Wi-Fi, no space): then an ONLINE mix
+     * lets the library fill in rather than fall silent.
+     */
+    private fun onlineCanDeliver(): Boolean {
+        val s = online.state.value
+        return when (s.seed) {
+            SeedStatus.Idle, SeedStatus.Identifying -> true
+            is SeedStatus.NotIdentified, is SeedStatus.Failed -> false
+            is SeedStatus.Identified -> s.candidates.isEmpty() || s.candidates.any { c ->
+                c.ready || c.stage == CandidateStage.FOUND || c.stage == CandidateStage.PREPARING ||
+                    (c.stage == CandidateStage.RETRY_LATER && c.retryAtMillis != null)
+            }
+        }
     }
 
     /** COMBINED: one library song, then an online one every third place, the rest in order. */
@@ -1412,6 +1454,9 @@ class SmartQueueManager @Inject constructor(
          * prepared now is heard within a few songs instead of a dozen.
          */
         const val ONLINE_QUEUE_TARGET = 5
+
+        /** A song paused this close to its end has ended (the queue ran out). */
+        const val ENDED_SLACK_MS = 1_500L
         const val ONLINE_REFILL_BELOW = 4
 
         /** How far past its target the queue may grow for an online pick that just became ready. */

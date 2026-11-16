@@ -35,6 +35,8 @@ import com.harmony.domain.online.OnlineMixState
 import com.harmony.domain.online.PreparedAudio
 import com.harmony.domain.online.ReadyPick
 import com.harmony.domain.online.SeedTrack
+import com.harmony.domain.online.MatchVerdict
+import com.harmony.domain.online.SeedStatus
 import com.harmony.domain.playback.OnlineSongs
 import com.harmony.domain.playback.PlayOutcome
 import com.harmony.domain.playback.PlaybackController
@@ -87,12 +89,17 @@ private class FakePlayback : PlaybackController {
     val outcomes = MutableSharedFlow<PlayOutcome>(extraBufferCapacity = 8)
     override val playOutcomes: Flow<PlayOutcome> = outcomes
 
+    /** The last song played to its end and the player stopped there (the queue ran out). */
+    var endedAtLast = false
+    var plays = 0
+
     fun sync(automatic: Boolean = false) {
         val cur = q.getOrNull(idx)
         val pn = if (cur?.id == anchor) run.coerceIn(0, (q.size - idx - 1).coerceAtLeast(0)) else 0
         _s.value = PlayerState(currentSong = cur, queue = q.toList(), queueIndex = idx, shuffleMode = mode,
             playNextCount = pn, advancedAutomatically = automatic, queueGeneration = generation,
-            entries = shadow.align(q.map { it.id.toString() }))
+            entries = shadow.align(q.map { it.id.toString() }),
+            positionMs = if (endedAtLast) 1000 else 0, durationMs = if (endedAtLast) 1000 else 0)
     }
 
     /** Skips to the next entry after [heardFraction] of the song, as the real player reports it. */
@@ -156,7 +163,7 @@ private class FakePlayback : PlaybackController {
         q.add(move.to, q.removeAt(move.from)); sync()
         return true
     }
-    override fun play() {}
+    override fun play() { plays++ }
     override fun pause() {}
     override fun seekTo(positionMs: Long) {}
     override fun skipToNext() {}
@@ -172,6 +179,7 @@ private class FakePlayback : PlaybackController {
     override fun skipToQueueItem(index: Int) {
         val left = q[idx]
         val back = index < idx
+        endedAtLast = false
         idx = index
         anchor = null; run = 0
         sync()
@@ -1121,26 +1129,53 @@ class SmartQueueManagerQueueTest {
         assertEquals(online.id, c.mix.value?.seedSongId)
         assertEquals("its YouTube Music id is handed over: nothing to search for", "vidINTHEEND", feed.seeds.last().videoId)
         assertEquals("the brain is not told of a song it has no vector for", manualBefore, brain.manual.size)
-        assertTrue("the queue still fills", ids(p).size > p.idx + 1)
+        assertTrue("an ONLINE mix queues no library song while online songs can come",
+            ids(p).drop(p.idx + 1).none { it in mixPool || it in pickPool })
+        feed.offer(prepared("vidNEXTSONG")); advanceUntilIdle()
+        assertEquals("the next online song joins as soon as it is ready", onlineId("vidNEXTSONG"), ids(p)[p.idx + 1])
         // A computer's song still can't seed a mix.
         assertFalse(c.canMixFrom(song(1).copy(id = -5, uri = "harmony-remote://media/pc%3Adesk%3A5")))
     }
 
     @Test
-    fun aFastSkipOfAnOnlineSongIsToldAndOnlineModeNeverRunsDry() = runTest(UnconfinedTestDispatcher()) {
+    fun anOnlineMixQueuesOnlyOnlineSongsAndAFastSkipIsTold() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1), song(2)), 0, true)
+        c.startMix(MixSource.ONLINE); advanceUntilIdle()
+        assertEquals("nothing ready yet: no library song fills in, not even the next one", listOf(1L), ids(p))
+        feed.offer(prepared("vidSKIP0001")); advanceUntilIdle()
+        feed.offer(prepared("vidSKIP0002")); advanceUntilIdle()
+        assertEquals(listOf(1L, onlineId("vidSKIP0001"), onlineId("vidSKIP0002")), ids(p))
+        p.skipAfter(0.95f); advanceUntilIdle()
+        p.skipAfter(0.05f); advanceUntilIdle()
+        assertEquals("the online song skipped fast is told", listOf("vidSKIP0001"), feed.skips)
+        assertTrue("still only online songs after the top-ups", ids(p).none { it in mixPool || it in pickPool })
+    }
+
+    @Test
+    fun anOnlineMixThatRanDryGoesOnWhenTheNextSongIsReady() = runTest(UnconfinedTestDispatcher()) {
         val feed = FakeFeed()
         val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
         p.setQueue(listOf(song(1)), 0, true)
         c.startMix(MixSource.ONLINE); advanceUntilIdle()
-        // Nothing online is ready yet: the library's mix keeps the queue going.
+        p.endedAtLast = true; p.sync(); advanceUntilIdle()
+        feed.offer(prepared("vidLATE0001")); advanceUntilIdle()
+        assertEquals(listOf(1L, onlineId("vidLATE0001")), ids(p))
+        assertEquals("playback goes on into it", 1, p.idx)
+        assertEquals(1, p.plays)
+    }
+
+    @Test
+    fun whenNothingOnlineCanComeTheLibraryFillsIn() = runTest(UnconfinedTestDispatcher()) {
+        val feed = FakeFeed()
+        val (p, c, _) = build(this, FakeBrain(pickPool, mixPool = mixPool), feed)
+        p.setQueue(listOf(song(1)), 0, true)
+        feed.state.value = OnlineMixState(seed = SeedStatus.NotIdentified(MatchVerdict.NO_MATCH, 10, 0))
+        c.startMix(MixSource.ONLINE); advanceUntilIdle()
+        assertEquals("the song wasn't found online: the library's mix plays on",
+            1 + SmartQueueManager.ONLINE_QUEUE_TARGET, ids(p).size)
         assertTrue(ids(p).drop(1).all { it in mixPool })
-        assertEquals(1 + SmartQueueManager.ONLINE_QUEUE_TARGET, ids(p).size)
-        feed.offer(prepared("vidSKIP0001")); advanceUntilIdle()
-        val at = ids(p).indexOf(onlineId("vidSKIP0001"))
-        assertTrue(at > 0)
-        while (p.idx < at) { p.skipAfter(0.95f); advanceUntilIdle() }
-        p.skipAfter(0.05f); advanceUntilIdle()
-        assertEquals(listOf("vidSKIP0001"), feed.skips)
     }
 }
 
