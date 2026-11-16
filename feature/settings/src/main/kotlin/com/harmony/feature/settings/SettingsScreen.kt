@@ -496,7 +496,7 @@ fun SettingsScreen(
                     else -> "Combined"
                 },
                 subtitle = when (state.onlineMixSource) {
-                    "ONLINE" -> "Recommendations from YouTube Music; your library fills in while they are prepared"
+                    "ONLINE" -> "Only songs YouTube Music recommends, each as soon as it is ready; your library only if none can come"
                     "OFFLINE" -> "Your library only. Nothing is asked online"
                     else -> "Your library's mix with about one online song in three"
                 } + ". Tap to change",
