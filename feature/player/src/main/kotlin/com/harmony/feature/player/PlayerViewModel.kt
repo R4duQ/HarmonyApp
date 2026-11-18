@@ -300,10 +300,10 @@ class PlayerViewModel @Inject constructor(
     /** By video id: online songs being kept in the library, kept, or not. */
     val keepStatus: StateFlow<Map<String, com.harmony.domain.playback.KeepStatus>> = queueManager.keepStatus
 
-    /** "Keep": an online mix's song is saved to the library (its file is already on the phone). */
+    /** "Save to library": an online mix's song is saved to the library (its file is already on the phone). */
     fun onKeep(song: com.harmony.core.model.Song) = queueManager.keep(listOf(song))
 
-    /** "Keep all": every online song in the queue. */
+    /** "Save all to library": every online song in the queue. */
     fun onKeepAll() = queueManager.keepAllOnline()
 
     // -- Queue --------------------------------------------------------------

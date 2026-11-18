@@ -508,9 +508,9 @@ fun SettingsScreen(
                 },
             )
             EditorialSettingRow(
-                title = "Keep songs you finish twice",
+                title = "Save songs you finish twice",
                 subtitle = "An online song you play to the end twice is saved to your library by itself. " +
-                    "Any online song can also be kept from the queue",
+                    "Any online song can also be saved from the queue",
                 palette = palette,
                 trailing = {
                     EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)

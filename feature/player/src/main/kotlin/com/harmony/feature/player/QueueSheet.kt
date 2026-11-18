@@ -273,7 +273,7 @@ internal fun QueueSheetContent(
                 artworkUri = nowPlaying.artworkUri,
                 palette = palette,
                 trailing = if (OnlineSongs.isOnline(nowPlaying)) {
-                    { KeepButton(nowPlaying, keepStatus.of(nowPlaying), palette, onKeep) }
+                    { KeepButton(nowPlaying, keepStatus.of(nowPlaying), palette, onKeep, withLabel = true) }
                 } else null,
             )
         }
@@ -286,7 +286,7 @@ internal fun QueueSheetContent(
             MixBar(mix = mix, choice = mixChoice, palette = palette, onStart = onStartMix, onStop = onStopMix, onChoose = onChooseMixSource)
         }
         if (mix != null && mix.source != MixSource.OFFLINE) {
-            // "Keep all" while an online song of the queue is not in the library yet.
+            // "Save all to library" while an online song of the queue is not in the library yet.
             val unkept = state.queue.count { OnlineSongs.isOnline(it) && keepStatus.of(it) !is KeepStatus.Kept }
             OnlineMixPanel(online, mix.source, upcomingEmpty = queueUpcoming.isEmpty(), palette, unkept = unkept, onKeepAll = onKeepAll)
         }
@@ -966,24 +966,59 @@ private fun Map<String, KeepStatus>.of(song: Song): KeepStatus? =
     OnlineSongs.keyOf(song.uri)?.let(OnlineSongs::videoIdOf)?.let(::get)
 
 /**
- * "Keep": an online mix's song saved to the library. Its file is already on
- * the phone, so this is a copy, not a download. Kept, it shows a tick; a
- * failure shows why when tapped again (and tries again).
+ * "Save to library": an online mix's song saved to the library. Its file is
+ * already on the phone, so this is a copy, not a download. With [withLabel]
+ * (the song playing) it is a text button that turns into "In library ✓";
+ * in a queue row an icon that turns into a tick. A failure says why to a
+ * screen reader and tries again on a tap.
  */
 @Composable
-private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, onKeep: (Song) -> Unit) {
-    val label = when (status) {
-        null -> "Keep ${song.title} in your library"
-        KeepStatus.Keeping -> "Keeping ${song.title}"
+private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, onKeep: (Song) -> Unit, withLabel: Boolean = false) {
+    val description = when (status) {
+        null -> "Save ${song.title} to your library"
+        KeepStatus.Keeping -> "Saving ${song.title} to your library"
         is KeepStatus.Kept -> "${song.title} is in your library"
-        is KeepStatus.Failed -> "Not kept: ${status.reason}. Try again"
+        is KeepStatus.Failed -> "Not saved: ${status.reason}. Tap to try again"
+    }
+    val enabled = status == null || status is KeepStatus.Failed
+    if (withLabel) {
+        Row(
+            Modifier
+                .padding(start = 8.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = description) { onKeep(song) }
+                .semantics { contentDescription = description }
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when (status) {
+                KeepStatus.Keeping -> CircularProgressIndicator(Modifier.size(14.dp), color = palette.accent, strokeWidth = 2.dp)
+                is KeepStatus.Kept -> Icon(Icons.Rounded.Check, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
+                is KeepStatus.Failed -> Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = palette.muted, modifier = Modifier.size(16.dp))
+                null -> Icon(Icons.Rounded.Download, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
+            }
+            Text(
+                when (status) {
+                    null -> "Save to library"
+                    KeepStatus.Keeping -> "Saving…"
+                    is KeepStatus.Kept -> "In library"
+                    is KeepStatus.Failed -> "Try again"
+                },
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (status is KeepStatus.Failed) palette.muted else palette.accent,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 5.dp),
+            )
+        }
+        return
     }
     IconButton(
         onClick = { onKeep(song) },
-        enabled = status == null || status is KeepStatus.Failed,
+        enabled = enabled,
         modifier = Modifier
             .size(48.dp)
-            .semantics { contentDescription = label },
+            .semantics { contentDescription = description },
     ) {
         when (status) {
             KeepStatus.Keeping -> CircularProgressIndicator(Modifier.size(18.dp), color = palette.accent, strokeWidth = 2.dp)
