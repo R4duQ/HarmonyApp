@@ -57,6 +57,10 @@ any cloud in between.
 - Smart Shuffle and Smart Mix; online mixes that play online songs only.
 - FLAC check: spectrum view of whether a FLAC looks genuinely lossless, with rate and depth.
 - Themes: light, dark, follow system, true black, wallpaper colors on Android 12+.
+- Now Playing keeps its Vinyl mode (confirmed 18 Nov 2026): the record stays the central
+  element, visible in portrait and landscape, with its existing animation and gestures.
+  Its size and position may change so the title, progress and controls stay reachable on
+  small phones. Details in `DESIGN.md` → Components → Vinyl.
 - Android 10+ (minSdk 29), arm64-v8a only for phone releases.
 - Online features run only when the user uses them; the privacy policy
   (`docs/PRIVACY.md`) lists exactly what each one sends.

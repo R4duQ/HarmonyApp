@@ -1,0 +1,1239 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-18T17:51:32Z",
+  "title": "Design System: Harmony (Android)",
+  "extensions": {
+    "colorMeta": {
+      "player-field-light": {
+        "role": "neutral",
+        "displayName": "Lavender Field",
+        "canonical": "#DCD7FA",
+        "oklch": "oklch(89.4% 0.048 292.0)",
+        "tonalRamp": [
+          "#0B0914",
+          "#221F2E",
+          "#3D3A4E",
+          "#5E5974",
+          "#807C99",
+          "#A4A1BA",
+          "#CAC8DC",
+          "#EEECFC"
+        ]
+      },
+      "player-field-dark": {
+        "role": "neutral",
+        "displayName": "Aubergine Night",
+        "canonical": "#15121F",
+        "oklch": "oklch(19.3% 0.026 294.4)",
+        "tonalRamp": [
+          "#0B0A10",
+          "#222028",
+          "#3D3B47",
+          "#5E5B6A",
+          "#817E8E",
+          "#A5A2B0",
+          "#CBC9D4",
+          "#EFEDF6"
+        ]
+      },
+      "player-ink-light": {
+        "role": "neutral",
+        "displayName": "Player Ink Light",
+        "canonical": "#17142B",
+        "oklch": "oklch(20.8% 0.045 287.8)",
+        "tonalRamp": [
+          "#0B0A13",
+          "#21202E",
+          "#3C3B4E",
+          "#5C5A74",
+          "#7E7D98",
+          "#A3A2BA",
+          "#C9C8DC",
+          "#EDEDFC"
+        ]
+      },
+      "player-ink-dark": {
+        "role": "neutral",
+        "displayName": "Player Ink Dark",
+        "canonical": "#F1EEFF",
+        "oklch": "oklch(95.6% 0.023 294.1)",
+        "tonalRamp": [
+          "#0B0A0F",
+          "#222028",
+          "#3D3C45",
+          "#5E5C68",
+          "#817E8C",
+          "#A5A3AF",
+          "#CBC9D3",
+          "#EFEDF5"
+        ]
+      },
+      "player-muted-light": {
+        "role": "neutral",
+        "displayName": "Player Muted Light",
+        "canonical": "#5D5878",
+        "oklch": "oklch(47.8% 0.051 291.5)",
+        "tonalRamp": [
+          "#0B0914",
+          "#221F2F",
+          "#3D3A50",
+          "#5E5976",
+          "#807C9B",
+          "#A4A1BC",
+          "#CAC7DE",
+          "#EEECFD"
+        ]
+      },
+      "player-muted-dark": {
+        "role": "neutral",
+        "displayName": "Player Muted Dark",
+        "canonical": "#9E98BF",
+        "oklch": "oklch(69.8% 0.057 291.9)",
+        "tonalRamp": [
+          "#0B0915",
+          "#221F31",
+          "#3D3952",
+          "#5E5979",
+          "#807B9E",
+          "#A5A0BE",
+          "#CAC7E0",
+          "#EEECFF"
+        ]
+      },
+      "player-control-light": {
+        "role": "neutral",
+        "displayName": "Tonal Circle",
+        "canonical": "#E8E4FD",
+        "oklch": "oklch(93.0% 0.034 293.1)",
+        "tonalRamp": [
+          "#0B0A11",
+          "#22202B",
+          "#3D3B49",
+          "#5E5B6E",
+          "#817D92",
+          "#A5A2B4",
+          "#CBC8D7",
+          "#EEEDF8"
+        ]
+      },
+      "player-control-dark": {
+        "role": "neutral",
+        "displayName": "Player Control Dark",
+        "canonical": "#232032",
+        "oklch": "oklch(25.6% 0.034 291.5)",
+        "tonalRamp": [
+          "#0B0A11",
+          "#22202B",
+          "#3D3B49",
+          "#5D5B6E",
+          "#807D92",
+          "#A4A2B4",
+          "#CAC8D7",
+          "#EEEDF8"
+        ]
+      },
+      "player-control-edge-light": {
+        "role": "neutral",
+        "displayName": "Player Control Edge Light",
+        "canonical": "#17142B14",
+        "oklch": "oklch(20.8% 0.045 287.8)",
+        "tonalRamp": [
+          "#0B0A13",
+          "#21202E",
+          "#3C3B4E",
+          "#5C5A74",
+          "#7E7D98",
+          "#A3A2BA",
+          "#C9C8DC",
+          "#EDEDFC"
+        ]
+      },
+      "player-control-edge-dark": {
+        "role": "neutral",
+        "displayName": "Player Control Edge Dark",
+        "canonical": "#FFFFFF1A",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3D3D3D",
+          "#5D5D5D",
+          "#808080",
+          "#A4A4A4",
+          "#CACACA",
+          "#EEEEEE"
+        ]
+      },
+      "player-primary-control-light": {
+        "role": "neutral",
+        "displayName": "Player Primary Control Light",
+        "canonical": "#FFFFFF",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3D3D3D",
+          "#5D5D5D",
+          "#808080",
+          "#A4A4A4",
+          "#CACACA",
+          "#EEEEEE"
+        ]
+      },
+      "player-primary-control-dark": {
+        "role": "neutral",
+        "displayName": "Player Primary Control Dark",
+        "canonical": "#EDE9FF",
+        "oklch": "oklch(94.4% 0.030 294.2)",
+        "tonalRamp": [
+          "#0B0A10",
+          "#222029",
+          "#3E3B48",
+          "#5E5B6C",
+          "#817D90",
+          "#A5A2B2",
+          "#CBC8D5",
+          "#EFEDF7"
+        ]
+      },
+      "player-accent-light": {
+        "role": "primary",
+        "displayName": "Record Violet",
+        "canonical": "#6C4BE8",
+        "oklch": "oklch(54.3% 0.224 285.9)",
+        "tonalRamp": [
+          "#0D0033",
+          "#22085C",
+          "#3C218D",
+          "#5B3DC7",
+          "#7B63F4",
+          "#9D91FF",
+          "#C3BDFF",
+          "#E8E5FF"
+        ]
+      },
+      "player-accent-dark": {
+        "role": "primary",
+        "displayName": "Record Violet (dark)",
+        "canonical": "#9B85FF",
+        "oklch": "oklch(69.1% 0.174 289.3)",
+        "tonalRamp": [
+          "#0D0129",
+          "#23134E",
+          "#3E2B7B",
+          "#5E48AF",
+          "#806BD9",
+          "#A395F3",
+          "#C8BFFF",
+          "#ECE7FF"
+        ]
+      },
+      "player-track-light": {
+        "role": "neutral",
+        "displayName": "Player Track Light",
+        "canonical": "#B4ACDD",
+        "oklch": "oklch(76.8% 0.070 292.2)",
+        "tonalRamp": [
+          "#0C0817",
+          "#221E34",
+          "#3E3856",
+          "#5E577F",
+          "#8179A4",
+          "#A59FC4",
+          "#CBC6E4",
+          "#EEEBFF"
+        ]
+      },
+      "player-track-dark": {
+        "role": "neutral",
+        "displayName": "Player Track Dark",
+        "canonical": "#393452",
+        "oklch": "oklch(34.4% 0.052 291.0)",
+        "tonalRamp": [
+          "#0B0914",
+          "#221F2F",
+          "#3D3A50",
+          "#5D5977",
+          "#807C9C",
+          "#A4A1BC",
+          "#CAC7DE",
+          "#EEECFE"
+        ]
+      },
+      "vinyl-black-light": {
+        "role": "neutral",
+        "displayName": "Pressing Black",
+        "canonical": "#17151C",
+        "oklch": "oklch(20.1% 0.014 298.2)",
+        "tonalRamp": [
+          "#0B0B0E",
+          "#222125",
+          "#3E3C42",
+          "#5E5C64",
+          "#817F87",
+          "#A5A3AB",
+          "#CBC9CF",
+          "#EFEEF2"
+        ]
+      },
+      "vinyl-black-dark": {
+        "role": "neutral",
+        "displayName": "Vinyl Black Dark",
+        "canonical": "#0B0A10",
+        "oklch": "oklch(14.9% 0.013 292.4)",
+        "tonalRamp": [
+          "#0B0B0D",
+          "#222125",
+          "#3D3C42",
+          "#5E5C64",
+          "#807F87",
+          "#A4A4AA",
+          "#CACACF",
+          "#EEEEF2"
+        ]
+      },
+      "vinyl-groove-light": {
+        "role": "neutral",
+        "displayName": "Vinyl Groove Light",
+        "canonical": "#FFFFFF1F",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3D3D3D",
+          "#5D5D5D",
+          "#808080",
+          "#A4A4A4",
+          "#CACACA",
+          "#EEEEEE"
+        ]
+      },
+      "vinyl-groove-dark": {
+        "role": "neutral",
+        "displayName": "Vinyl Groove Dark",
+        "canonical": "#FFFFFF14",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3D3D3D",
+          "#5D5D5D",
+          "#808080",
+          "#A4A4A4",
+          "#CACACA",
+          "#EEEEEE"
+        ]
+      },
+      "sleeve-shadow-light": {
+        "role": "neutral",
+        "displayName": "Sleeve Shadow Light",
+        "canonical": "#2A2350",
+        "oklch": "oklch(29.0% 0.079 287.5)",
+        "tonalRamp": [
+          "#0B0819",
+          "#201E37",
+          "#3B385A",
+          "#5B5784",
+          "#7D79AA",
+          "#A29FC9",
+          "#C8C6E9",
+          "#ECEBFF"
+        ]
+      },
+      "glass-obsidian": {
+        "role": "neutral",
+        "displayName": "Obsidian",
+        "canonical": "#0B0F17",
+        "oklch": "oklch(16.8% 0.018 263.9)",
+        "tonalRamp": [
+          "#090B0F",
+          "#1F2227",
+          "#393D44",
+          "#595E67",
+          "#7B808B",
+          "#A0A5AE",
+          "#C7CBD2",
+          "#ECEEF4"
+        ]
+      },
+      "glass-obsidian-deep": {
+        "role": "neutral",
+        "displayName": "Glass Obsidian Deep",
+        "canonical": "#0E131F",
+        "oklch": "oklch(18.8% 0.026 266.6)",
+        "tonalRamp": [
+          "#090B10",
+          "#1E2229",
+          "#383D48",
+          "#575E6B",
+          "#7A808F",
+          "#9FA5B2",
+          "#C6CAD5",
+          "#EBEEF7"
+        ]
+      },
+      "glass-pearl": {
+        "role": "neutral",
+        "displayName": "Pearl",
+        "canonical": "#F4F7FC",
+        "oklch": "oklch(97.5% 0.007 260.7)",
+        "tonalRamp": [
+          "#0A0B0D",
+          "#202224",
+          "#3B3D40",
+          "#5B5E61",
+          "#7E8084",
+          "#A2A5A8",
+          "#C9CACD",
+          "#EDEEF1"
+        ]
+      },
+      "glass-pearl-deep": {
+        "role": "neutral",
+        "displayName": "Glass Pearl Deep",
+        "canonical": "#E8EEF7",
+        "oklch": "oklch(94.7% 0.014 258.3)",
+        "tonalRamp": [
+          "#0A0B0E",
+          "#1F2226",
+          "#3A3D43",
+          "#595E65",
+          "#7C8188",
+          "#A1A5AB",
+          "#C7CBD0",
+          "#ECEFF3"
+        ]
+      },
+      "glass-card-dark": {
+        "role": "neutral",
+        "displayName": "Glass Card Dark",
+        "canonical": "#111827",
+        "oklch": "oklch(21.0% 0.032 264.7)",
+        "tonalRamp": [
+          "#080B11",
+          "#1D222B",
+          "#373D4A",
+          "#565E6E",
+          "#778093",
+          "#9DA5B4",
+          "#C4CBD8",
+          "#EAEFF9"
+        ]
+      },
+      "glass-card-light": {
+        "role": "neutral",
+        "displayName": "Glass Card Light",
+        "canonical": "#FFFFFF",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3D3D3D",
+          "#5D5D5D",
+          "#808080",
+          "#A4A4A4",
+          "#CACACA",
+          "#EEEEEE"
+        ]
+      },
+      "glass-recessed-dark": {
+        "role": "neutral",
+        "displayName": "Glass Recessed Dark",
+        "canonical": "#1A2333",
+        "oklch": "oklch(25.5% 0.033 261.6)",
+        "tonalRamp": [
+          "#080B12",
+          "#1C222B",
+          "#363D4A",
+          "#545E6F",
+          "#768193",
+          "#9CA5B5",
+          "#C3CBD8",
+          "#E9EFF9"
+        ]
+      },
+      "glass-recessed-light": {
+        "role": "neutral",
+        "displayName": "Glass Recessed Light",
+        "canonical": "#EDF1F8",
+        "oklch": "oklch(95.7% 0.010 261.8)",
+        "tonalRamp": [
+          "#0A0B0D",
+          "#202225",
+          "#3B3D41",
+          "#5B5E63",
+          "#7D8086",
+          "#A2A5AA",
+          "#C8CBCF",
+          "#EDEEF2"
+        ]
+      },
+      "glass-cyan-dark": {
+        "role": "secondary",
+        "displayName": "Electric Cyan",
+        "canonical": "#00E5FF",
+        "oklch": "oklch(84.4% 0.146 209.3)",
+        "tonalRamp": [
+          "#00111A",
+          "#002B38",
+          "#004A5B",
+          "#006F85",
+          "#0095AC",
+          "#34B7CA",
+          "#82DBEA",
+          "#BBFCFF"
+        ]
+      },
+      "glass-cyan-light": {
+        "role": "secondary",
+        "displayName": "Electric Cyan (pearl)",
+        "canonical": "#0E7490",
+        "oklch": "oklch(52.0% 0.094 223.1)",
+        "tonalRamp": [
+          "#000E18",
+          "#002735",
+          "#004458",
+          "#116880",
+          "#3B8CA6",
+          "#71AFC6",
+          "#A3D3E6",
+          "#D1F6FF"
+        ]
+      },
+      "glass-mint-dark": {
+        "role": "secondary",
+        "displayName": "Mint",
+        "canonical": "#00F5D4",
+        "oklch": "oklch(86.8% 0.160 178.2)",
+        "tonalRamp": [
+          "#00130B",
+          "#002E22",
+          "#004F3D",
+          "#00765E",
+          "#009B81",
+          "#2DBDA5",
+          "#80DFCB",
+          "#BAFFEF"
+        ]
+      },
+      "glass-mint-light": {
+        "role": "secondary",
+        "displayName": "Glass Mint Light",
+        "canonical": "#0D9488",
+        "oklch": "oklch(60.0% 0.104 184.7)",
+        "tonalRamp": [
+          "#00110E",
+          "#002B25",
+          "#004A42",
+          "#006E64",
+          "#249387",
+          "#66B5AB",
+          "#9CD8D0",
+          "#CCF9F2"
+        ]
+      },
+      "glass-violet-dark": {
+        "role": "secondary",
+        "displayName": "Neon Violet",
+        "canonical": "#8B5CF6",
+        "oklch": "oklch(60.6% 0.219 292.7)",
+        "tonalRamp": [
+          "#100030",
+          "#280658",
+          "#441E88",
+          "#6639C0",
+          "#885FEC",
+          "#AA8DFF",
+          "#CDBAFF",
+          "#F0E3FF"
+        ]
+      },
+      "glass-violet-light": {
+        "role": "secondary",
+        "displayName": "Glass Violet Light",
+        "canonical": "#7C3AED",
+        "oklch": "oklch(54.1% 0.247 293.0)",
+        "tonalRamp": [
+          "#120034",
+          "#29005F",
+          "#471291",
+          "#692ECC",
+          "#8B56F9",
+          "#AB88FF",
+          "#CFB7FF",
+          "#F1E1FF"
+        ]
+      },
+      "glass-purple-dark": {
+        "role": "secondary",
+        "displayName": "Neon Purple",
+        "canonical": "#A855F7",
+        "oklch": "oklch(62.7% 0.233 303.9)",
+        "tonalRamp": [
+          "#16002E",
+          "#310055",
+          "#521084",
+          "#792BBB",
+          "#9D52E6",
+          "#BD84FE",
+          "#DEB3FF",
+          "#FEDDFF"
+        ]
+      },
+      "glass-purple-light": {
+        "role": "secondary",
+        "displayName": "Glass Purple Light",
+        "canonical": "#9333EA",
+        "oklch": "oklch(55.8% 0.252 302.3)",
+        "tonalRamp": [
+          "#160031",
+          "#31005A",
+          "#52038B",
+          "#7920C4",
+          "#9D4CF1",
+          "#BD81FF",
+          "#DEB1FF",
+          "#FDDCFF"
+        ]
+      },
+      "glass-text-dark": {
+        "role": "neutral",
+        "displayName": "Glass Text Dark",
+        "canonical": "#FFFFFF",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3D3D3D",
+          "#5D5D5D",
+          "#808080",
+          "#A4A4A4",
+          "#CACACA",
+          "#EEEEEE"
+        ]
+      },
+      "glass-text-light": {
+        "role": "neutral",
+        "displayName": "Glass Text Light",
+        "canonical": "#0B1220",
+        "oklch": "oklch(18.3% 0.031 263.4)",
+        "tonalRamp": [
+          "#080B11",
+          "#1D222B",
+          "#373D49",
+          "#555E6E",
+          "#778192",
+          "#9DA5B4",
+          "#C4CBD7",
+          "#EAEFF8"
+        ]
+      },
+      "glass-text-secondary-dark": {
+        "role": "neutral",
+        "displayName": "Glass Text Secondary Dark",
+        "canonical": "#94A3B8",
+        "oklch": "oklch(71.1% 0.035 256.8)",
+        "tonalRamp": [
+          "#070B12",
+          "#1B222C",
+          "#343E4B",
+          "#525F70",
+          "#748194",
+          "#9AA6B6",
+          "#C2CBD9",
+          "#E8EFF9"
+        ]
+      },
+      "glass-text-secondary-light": {
+        "role": "neutral",
+        "displayName": "Glass Text Secondary Light",
+        "canonical": "#475569",
+        "oklch": "oklch(44.6% 0.037 257.3)",
+        "tonalRamp": [
+          "#070B12",
+          "#1B222C",
+          "#343E4C",
+          "#525F71",
+          "#738195",
+          "#99A6B7",
+          "#C1CBDA",
+          "#E7EFFA"
+        ]
+      },
+      "mini-record": {
+        "role": "neutral",
+        "displayName": "Mini Record",
+        "canonical": "#0D0D10",
+        "oklch": "oklch(16.0% 0.006 285.7)",
+        "tonalRamp": [
+          "#0B0B0C",
+          "#212123",
+          "#3D3D3F",
+          "#5D5D61",
+          "#808084",
+          "#A4A4A7",
+          "#CACACD",
+          "#EEEEF0"
+        ]
+      },
+      "editorial-field-light": {
+        "role": "neutral",
+        "displayName": "Pale Ice Field",
+        "canonical": "#F4FDFF",
+        "oklch": "oklch(98.8% 0.010 212.5)",
+        "tonalRamp": [
+          "#090C0C",
+          "#1F2223",
+          "#393E3F",
+          "#585F61",
+          "#7A8283",
+          "#9FA6A7",
+          "#C6CCCD",
+          "#EBEFF0"
+        ]
+      },
+      "editorial-ink-light": {
+        "role": "neutral",
+        "displayName": "Slate Ink",
+        "canonical": "#16232B",
+        "oklch": "oklch(24.8% 0.024 236.0)",
+        "tonalRamp": [
+          "#070C0F",
+          "#1B2327",
+          "#353F45",
+          "#536068",
+          "#74838C",
+          "#9AA7AF",
+          "#C2CCD3",
+          "#E8F0F5"
+        ]
+      },
+      "editorial-muted-light": {
+        "role": "neutral",
+        "displayName": "Editorial Muted Light",
+        "canonical": "#16232B99",
+        "oklch": "oklch(24.8% 0.024 236.0)",
+        "tonalRamp": [
+          "#070C0F",
+          "#1B2327",
+          "#353F45",
+          "#536068",
+          "#74838C",
+          "#9AA7AF",
+          "#C2CCD3",
+          "#E8F0F5"
+        ]
+      },
+      "editorial-line-light": {
+        "role": "neutral",
+        "displayName": "Editorial Line Light",
+        "canonical": "#16232B29",
+        "oklch": "oklch(24.8% 0.024 236.0)",
+        "tonalRamp": [
+          "#070C0F",
+          "#1B2327",
+          "#353F45",
+          "#536068",
+          "#74838C",
+          "#9AA7AF",
+          "#C2CCD3",
+          "#E8F0F5"
+        ]
+      },
+      "editorial-field-dark": {
+        "role": "neutral",
+        "displayName": "Editorial Field Dark",
+        "canonical": "#15121F",
+        "oklch": "oklch(19.3% 0.026 294.4)",
+        "tonalRamp": [
+          "#0B0A10",
+          "#222028",
+          "#3D3B47",
+          "#5E5B6A",
+          "#817E8E",
+          "#A5A2B0",
+          "#CBC9D4",
+          "#EFEDF6"
+        ]
+      },
+      "editorial-ink-dark": {
+        "role": "neutral",
+        "displayName": "Editorial Ink Dark",
+        "canonical": "#F1EEFF",
+        "oklch": "oklch(95.6% 0.023 294.1)",
+        "tonalRamp": [
+          "#0B0A0F",
+          "#222028",
+          "#3D3C45",
+          "#5E5C68",
+          "#817E8C",
+          "#A5A3AF",
+          "#CBC9D3",
+          "#EFEDF5"
+        ]
+      },
+      "editorial-muted-dark": {
+        "role": "neutral",
+        "displayName": "Editorial Muted Dark",
+        "canonical": "#9E98BF",
+        "oklch": "oklch(69.8% 0.057 291.9)",
+        "tonalRamp": [
+          "#0B0915",
+          "#221F31",
+          "#3D3952",
+          "#5E5979",
+          "#807B9E",
+          "#A5A0BE",
+          "#CAC7E0",
+          "#EEECFF"
+        ]
+      },
+      "editorial-line-dark": {
+        "role": "neutral",
+        "displayName": "Editorial Line Dark",
+        "canonical": "#F1EEFF29",
+        "oklch": "oklch(95.6% 0.023 294.1)",
+        "tonalRamp": [
+          "#0B0A0F",
+          "#222028",
+          "#3D3C45",
+          "#5E5C68",
+          "#817E8C",
+          "#A5A3AF",
+          "#CBC9D3",
+          "#EFEDF5"
+        ]
+      },
+      "accent-amber": {
+        "role": "tertiary",
+        "displayName": "Home Amber",
+        "canonical": "#F3A311",
+        "oklch": "oklch(77.5% 0.162 73.3)",
+        "tonalRamp": [
+          "#1C0300",
+          "#3B1600",
+          "#612E00",
+          "#8D4B00",
+          "#B56E00",
+          "#D39741",
+          "#F2C181",
+          "#FFE8B8"
+        ]
+      },
+      "accent-green-light": {
+        "role": "tertiary",
+        "displayName": "Playlist Green",
+        "canonical": "#1E9153",
+        "oklch": "oklch(58.0% 0.137 153.8)",
+        "tonalRamp": [
+          "#001201",
+          "#002C0D",
+          "#004C22",
+          "#00713B",
+          "#33965C",
+          "#6DB886",
+          "#A1DBB2",
+          "#CFFBDC"
+        ]
+      },
+      "accent-green-dark": {
+        "role": "secondary",
+        "displayName": "Accent Green Dark",
+        "canonical": "#3FBF77",
+        "oklch": "oklch(71.7% 0.154 154.5)",
+        "tonalRamp": [
+          "#001200",
+          "#002D0B",
+          "#004D1F",
+          "#007337",
+          "#189858",
+          "#62BA83",
+          "#9ADDB0",
+          "#CBFDDA"
+        ]
+      },
+      "accent-blue-light": {
+        "role": "tertiary",
+        "displayName": "Equalizer Blue",
+        "canonical": "#2C87CE",
+        "oklch": "oklch(60.5% 0.137 246.7)",
+        "tonalRamp": [
+          "#000B23",
+          "#002345",
+          "#00406E",
+          "#04619F",
+          "#3486C7",
+          "#6CABE3",
+          "#9FD0FE",
+          "#CEF3FF"
+        ]
+      },
+      "accent-blue-dark": {
+        "role": "secondary",
+        "displayName": "Accent Blue Dark",
+        "canonical": "#4FA3E3",
+        "oklch": "oklch(69.1% 0.125 244.1)",
+        "tonalRamp": [
+          "#000C21",
+          "#002442",
+          "#00416A",
+          "#0E6398",
+          "#3987C0",
+          "#6EABDD",
+          "#A1D1F9",
+          "#CFF4FF"
+        ]
+      },
+      "accent-stone-light": {
+        "role": "tertiary",
+        "displayName": "Settings Stone",
+        "canonical": "#6E6A5F",
+        "oklch": "oklch(52.5% 0.018 90.3)",
+        "tonalRamp": [
+          "#0C0B08",
+          "#23211C",
+          "#403D36",
+          "#615D54",
+          "#848075",
+          "#A8A49B",
+          "#CDCAC3",
+          "#F0EEE9"
+        ]
+      },
+      "accent-stone-dark": {
+        "role": "secondary",
+        "displayName": "Accent Stone Dark",
+        "canonical": "#E6DDCB",
+        "oklch": "oklch(90.0% 0.026 84.6)",
+        "tonalRamp": [
+          "#0D0B06",
+          "#252119",
+          "#423C32",
+          "#645D4F",
+          "#877F70",
+          "#AAA497",
+          "#CFCABF",
+          "#F2EEE6"
+        ]
+      },
+      "accent-coral-light": {
+        "role": "tertiary",
+        "displayName": "Discover Coral",
+        "canonical": "#DA4A31",
+        "oklch": "oklch(60.6% 0.184 32.2)",
+        "tonalRamp": [
+          "#250000",
+          "#490000",
+          "#740F00",
+          "#A72811",
+          "#D34E37",
+          "#F0806A",
+          "#FFAF9C",
+          "#FFDBCB"
+        ]
+      },
+      "accent-coral-dark": {
+        "role": "secondary",
+        "displayName": "Accent Coral Dark",
+        "canonical": "#E9573F",
+        "oklch": "oklch(64.7% 0.185 31.7)",
+        "tonalRamp": [
+          "#250000",
+          "#490000",
+          "#750E00",
+          "#A72713",
+          "#D34E38",
+          "#F0806B",
+          "#FFAF9D",
+          "#FFDACC"
+        ]
+      },
+      "accent-teal-light": {
+        "role": "tertiary",
+        "displayName": "Downloads Teal",
+        "canonical": "#128F8A",
+        "oklch": "oklch(58.8% 0.098 190.4)",
+        "tonalRamp": [
+          "#00100F",
+          "#002A28",
+          "#004946",
+          "#006D69",
+          "#2A918D",
+          "#69B4AF",
+          "#9ED8D3",
+          "#CDF9F5"
+        ]
+      },
+      "accent-teal-dark": {
+        "role": "secondary",
+        "displayName": "Accent Teal Dark",
+        "canonical": "#3FBFB6",
+        "oklch": "oklch(73.4% 0.110 188.3)",
+        "tonalRamp": [
+          "#00110F",
+          "#002B28",
+          "#004A45",
+          "#006F68",
+          "#08948C",
+          "#5FB6AF",
+          "#98D9D3",
+          "#C9FAF5"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "player-title": {
+        "displayName": "Player title",
+        "purpose": "Song title on Now Playing (21sp centred in landscape)."
+      },
+      "sheet-title": {
+        "displayName": "Sheet title",
+        "purpose": "\"Queue\" header."
+      },
+      "mini-title": {
+        "displayName": "Mini title",
+        "purpose": "Title - Artist on the mini player, marquee."
+      },
+      "row-title": {
+        "displayName": "Row title",
+        "purpose": "Queue rows."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Artist line; Material bodyMedium."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Times, output, audio summary."
+      },
+      "overline": {
+        "displayName": "Overline",
+        "purpose": "Queue section labels."
+      },
+      "micro-overline": {
+        "displayName": "Micro overline",
+        "purpose": "NOW PLAYING FROM."
+      },
+      "badge": {
+        "displayName": "Badge",
+        "purpose": "LOSSLESS, shuffle mode pill."
+      }
+    },
+    "shadows": [
+      {
+        "name": "sleeve",
+        "value": "elevation 22dp, rounded 12dp, ambient/spot #2A2350 (light) or #000 (dark)",
+        "purpose": "Only shadow on Now Playing, under the album sleeve."
+      },
+      {
+        "name": "neon-chrome",
+        "value": "elevation 18dp, ambient violet, spot cyan",
+        "purpose": "Mini-player card."
+      },
+      {
+        "name": "record",
+        "value": "elevation 16dp, circle, ambient violet, spot cyan",
+        "purpose": "Mini-player disc."
+      }
+    ],
+    "motion": [
+      {
+        "name": "record-turn",
+        "value": "360deg / 9000ms linear, looping",
+        "purpose": "VinylArtwork and mini Disc while playing; holds angle on pause."
+      },
+      {
+        "name": "record-tuck",
+        "value": "-18dp, spring DampingRatioLowBouncy",
+        "purpose": "Record slides into the sleeve when not playing."
+      },
+      {
+        "name": "artwork-breathe",
+        "value": "scale 0.97 paused, spring StiffnessLow",
+        "purpose": "Whole record block while paused."
+      },
+      {
+        "name": "artwork-change",
+        "value": "in fade+scale 0.92 350ms / out fade+scale 1.04 250ms",
+        "purpose": "Track change on Now Playing."
+      },
+      {
+        "name": "swipe-skip",
+        "value": "threshold 22% of width, exit 160ms, else MediumBouncy spring back",
+        "purpose": "Swipe the record to skip."
+      },
+      {
+        "name": "dismiss",
+        "value": "drag > 20% of height closes; swipe up > 80dp opens Queue",
+        "purpose": "Now Playing vertical gestures."
+      },
+      {
+        "name": "title-change",
+        "value": "slide 1/6 + fade, 300ms in / 200ms out",
+        "purpose": "Title block on track change."
+      },
+      {
+        "name": "play-morph",
+        "value": "scale 0.6 + fade, 160ms in / 120ms out",
+        "purpose": "Play/pause icon."
+      },
+      {
+        "name": "progress-glide",
+        "value": "linear 560ms between 500ms ticks; spring NoBouncy/MediumLow on jumps",
+        "purpose": "Waveform playhead."
+      },
+      {
+        "name": "mini-entrance",
+        "value": "spring damping 0.62, stiffness 210",
+        "purpose": "Mini player arrives, record spins in."
+      },
+      {
+        "name": "mini-skip-turn",
+        "value": "+200deg 650ms FastOutSlowIn; pause coast +24deg 700ms; scale 0.93",
+        "purpose": "Mini Disc reactions."
+      },
+      {
+        "name": "palette-crossfade",
+        "value": "260ms tween on every palette colour",
+        "purpose": "Section changes carry the chrome."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "portrait-max-content",
+        "value": "600dp"
+      },
+      {
+        "name": "landscape-max-content",
+        "value": "1040dp"
+      },
+      {
+        "name": "mini-spectrum-row",
+        "value": "228dp"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Tonal Circle Button",
+      "kind": "button",
+      "refersTo": "player-circle-button",
+      "description": "Every secondary control on Now Playing.",
+      "html": "<button class=\"ds-pcircle\" aria-label=\"Previous\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M6 6h2v12H6zm3.5 6 8.5 6V6z\"/></svg></button>",
+      "css": ".ds-pcircle{width:46px;height:46px;border-radius:50%;background:#E8E4FD;color:#17142B;border:1px solid rgba(23,20,43,.08);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s}.ds-pcircle:hover{background:#DFDAFB}.ds-pcircle:focus-visible{outline:2px solid #6C4BE8;outline-offset:2px}.ds-pcircle:active{transform:scale(.96)}"
+    },
+    {
+      "name": "Play Button",
+      "kind": "button",
+      "refersTo": "player-play-button",
+      "description": "The one raised control on Now Playing.",
+      "html": "<button class=\"ds-pplay\" aria-label=\"Pause\"><svg width=\"30\" height=\"30\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M6 19h4V5H6zm8-14v14h4V5z\"/></svg></button>",
+      "css": ".ds-pplay{width:72px;height:72px;border-radius:50%;background:#FFFFFF;color:#17142B;border:1px solid rgba(23,20,43,.08);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .16s}.ds-pplay:hover{transform:scale(1.03)}.ds-pplay:focus-visible{outline:2px solid #6C4BE8;outline-offset:3px}"
+    },
+    {
+      "name": "Lossless Badge",
+      "kind": "chip",
+      "refersTo": "lossless-badge",
+      "description": "Shown before the audio summary when the file is lossless.",
+      "html": "<span class=\"ds-lossless\">LOSSLESS</span><span class=\"ds-qsum\">FLAC · 1411 kbps · 96 kHz</span>",
+      "css": ".ds-lossless{display:inline-block;padding:3px 7px;border-radius:999px;background:rgba(108,75,232,.13);border:1px solid rgba(108,75,232,.36);color:#6C4BE8;font:700 8px Roboto,sans-serif;letter-spacing:.45px}.ds-qsum{margin-left:8px;color:#5D5878;font:600 11px Roboto,sans-serif}"
+    },
+    {
+      "name": "Vinyl Hero",
+      "kind": "custom",
+      "refersTo": "player-field-light",
+      "description": "Sleeve at 70% width with the record the same size peeking right, turning every 9 s.",
+      "html": "<div class=\"ds-vinyl\"><div class=\"ds-rec\"><i></i></div><div class=\"ds-sleeve\"></div></div>",
+      "css": ".ds-vinyl{position:relative;width:280px;height:202px;background:#DCD7FA;padding:0}.ds-sleeve{position:absolute;left:0;top:3px;width:196px;height:196px;border-radius:12px;background:linear-gradient(135deg,#E07A2E,#7A3B12);box-shadow:0 14px 30px rgba(42,35,80,.35)}.ds-rec{position:absolute;right:0;top:3px;width:196px;height:196px;border-radius:50%;background:repeating-radial-gradient(circle,#17151C 0 3px,#2a2730 3px 4px);animation:ds-spin 9s linear infinite}.ds-rec i{position:absolute;left:50%;top:50%;width:66px;height:66px;margin:-33px;border-radius:50%;background:#B85A1E}.ds-rec i:after{content:\"\";position:absolute;left:50%;top:50%;width:9px;height:9px;margin:-4.5px;border-radius:50%;background:#DCD7FA}@keyframes ds-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ds-rec{animation:none}}"
+    },
+    {
+      "name": "Mini Player Card",
+      "kind": "card",
+      "refersTo": "mini-player-card",
+      "description": "Cyber-Glass card with the record half outside its left edge.",
+      "html": "<div class=\"ds-mini\"><div class=\"ds-mdisc\"></div><div class=\"ds-mcard\"><span class=\"ds-dev\">PHONE SPEAKER</span><b>9 - Calinacho</b><small>LIVE SPECTRAL EQ</small><div class=\"ds-mbar\"><span></span></div></div></div>",
+      "css": ".ds-mini{position:relative;width:340px;padding-left:48px;font-family:Roboto,sans-serif}.ds-mcard{border-radius:28px;background:rgba(17,24,39,.92);border:1px solid #8B5CF6;box-shadow:0 10px 30px rgba(139,92,246,.35);padding:12px 14px 14px 60px;color:#fff;display:flex;flex-direction:column;gap:4px}.ds-dev{align-self:flex-start;background:#162A3A;color:#E2E8F0;border-radius:999px;padding:4px 12px;font-size:11.5px;letter-spacing:.6px}.ds-mcard b{font-size:18px}.ds-mcard small{color:rgba(0,229,255,.78);font-size:10.5px;letter-spacing:.9px;font-weight:600}.ds-mbar{height:4px;border-radius:2px;background:rgba(56,189,248,.12);margin-top:8px}.ds-mbar span{display:block;width:35%;height:100%;border-radius:2px;background:linear-gradient(90deg,#8B5CF6,#00E5FF,#00F5D4)}.ds-mdisc{position:absolute;left:0;top:50%;width:96px;height:96px;margin-top:-48px;border-radius:50%;background:#0D0D10;border:2px solid #00E5FF;box-shadow:0 0 18px rgba(139,92,246,.5)}.ds-mcard:focus-within{outline:2px solid #00E5FF}"
+    },
+    {
+      "name": "Queue Row",
+      "kind": "custom",
+      "refersTo": "queue-row",
+      "description": "48dp handle, 42dp cover, title/artist, 48dp remove.",
+      "html": "<div class=\"ds-qrow\"><span class=\"ds-h\">=</span><span class=\"ds-art\"></span><span class=\"ds-t\"><b>Slow Weather</b><small>The Paper Coast · 3:13</small></span><button aria-label=\"Remove\">✕</button></div>",
+      "css": ".ds-qrow{display:flex;align-items:center;font-family:Roboto,sans-serif;background:transparent;border-radius:12px;padding-right:4px}.ds-qrow:hover{background:#E8E4FD}.ds-h{width:48px;text-align:center;color:#5D5878;font-size:20px}.ds-art{width:42px;height:42px;border-radius:8px;background:linear-gradient(#7B6CF0,#3A2A8C)}.ds-t{flex:1;display:flex;flex-direction:column;margin-left:12px}.ds-t b{font-size:14.5px;color:#17142B;font-weight:600}.ds-t small{font-size:12px;color:#5D5878}.ds-qrow button{width:48px;height:48px;border:0;background:none;color:#5D5878;cursor:pointer}.ds-qrow button:focus-visible{outline:2px solid #6C4BE8}"
+    },
+    {
+      "name": "Glass Nav Pill",
+      "kind": "nav",
+      "refersTo": "glass-card-dark",
+      "description": "Floating frosted capsule with the selected destination in a smaller capsule.",
+      "html": "<nav class=\"ds-nav\"><a class=\"on\">Home</a><a>Library</a><a>Playlists</a><a>Discover</a><a>Downloads</a></nav>",
+      "css": ".ds-nav{display:flex;gap:4px;padding:6px;border-radius:999px;background:rgba(19,27,46,.9);border:1px solid rgba(56,189,248,.25);font:500 12px Roboto,sans-serif}.ds-nav a{padding:10px 12px;border-radius:999px;color:#94A3B8;cursor:pointer}.ds-nav a.on{color:#00E5FF;background:rgba(0,229,255,.12)}.ds-nav a:hover{color:#E2E8F0}.ds-nav a:focus-visible{outline:2px solid #00E5FF}"
+    },
+    {
+      "name": "Editorial Card",
+      "kind": "card",
+      "refersTo": "editorial-card",
+      "description": "Hairline-outlined card, fill = field.",
+      "html": "<div class=\"ds-ecard\"><b>Crossfade</b><small>4 s</small></div>",
+      "css": ".ds-ecard{border-radius:18px;background:#F4FDFF;border:1px solid rgba(22,35,43,.16);padding:14px 16px;font-family:Roboto,sans-serif;display:flex;flex-direction:column}.ds-ecard b{color:#16232B;font-size:16px}.ds-ecard small{color:rgba(22,35,43,.6)}.ds-ecard:hover{border-color:#F3A311}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Listening Room",
+    "overview": "Harmony is a quiet room where one object matters: the record. On Now Playing the sleeve sits on a soft lavender (dark: aubergine-black) field with the disc drawn halfway out, turning while the music plays. Everything else on that screen is low-contrast and tonal, so the eye goes to the record, then the title, then the one white play button. Around the room is the hi-fi gear: the Cyber-Glass mini player and navigation pill, glass panels with cyan and violet neon rims, and the Library in obsidian (dark) or pearl (light) glass. The pages you pass through (Home, playlists, Settings, Equalizer, Discover) are calm Editorial pages on one shared field, where each section says who it is with a single accent colour.\n\nThese three looks coexist on purpose, and the code says so in comments: the player owns its palette and opts out of Material dynamic colour [code: `PlayerLook.kt`]; Cyber-Glass \"dresses the library, the floating mini player and the navigation pill, in both themes\" [code: `CyberGlassColors.kt`]; Editorial pages share one field and colour only their controls [code: `EditorialLook.kt`]. The record is the thread through all three: the full sleeve-and-disc on Now Playing, a spinning round disc on the mini player, and a static sleeve-and-disc on album grids (`VinylAlbumCover`).\n\nDensity is relaxed on the player and the mini player, denser in the Queue (a list you reorder, not browse). Motion is physical and continuous: the record coasts to a stop instead of snapping, drags follow the finger, and every gesture has a visible \"not far enough, spring back\" state.",
+    "keyCharacteristics": [
+      "One hero per screen; on Now Playing it is always the record.",
+      "The player palette ignores wallpaper colours but follows light/dark/AMOLED.",
+      "The record is a dark object in both themes.",
+      "Neon and glow belong to the chrome (mini player, nav, Library, Downloads), never to the player field.",
+      "Section identity lives in one accent, not in a coloured background.",
+      "No brand font on Android: Roboto, with hand-set sizes."
+    ],
+    "rules": [
+      {
+        "name": "The Player Owns Its Light Rule",
+        "body": "Now Playing, the Queue sheet and the Smart Shuffle sheet use `playerPalette()` only. Material dynamic colour never repaints them; light/dark/AMOLED still apply.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dark Record Rule",
+        "body": "The record (`VinylArtwork`, the mini player `Disc`, `VinylDisc`, `VinylAlbumCover`) is near-black in both themes. A coverless mini-player record gets a dark label in light mode too.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Coloured Thing Rule",
+        "body": "On the player field, colour means state: if it is violet, it is on, played, or the current track.",
+        "section": "colors"
+      },
+      {
+        "name": "The Hand-Set Scale Rule",
+        "body": "Sizes are set per component in `sp`, not taken from Material type roles (except `bodyMedium`, `titleSmall`, `bodyLarge`). Everything is in `sp`, so it follows the system font size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Quiet Field Rule",
+        "body": "On the player, depth is one shadow (the sleeve) plus tonal circles with hairlines. No glows, no glass, no gradients on the player field.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep the record as Now Playing's centre in both orientations: sleeve at 70% of the block, record the same size peeking right, 9 s turn, 18dp tuck, 0.97 breathe, swipe-to-skip on the record.",
+      "**Do** change the record block's size and vertical position when a phone is short, so the title, waveform and transport stay fully on screen.",
+      "**Do** use `playerPalette()` for anything that opens over Now Playing.",
+      "**Do** keep the record near-black in light and dark.",
+      "**Do** use violet on the player only for state (on, played, current).",
+      "**Do** keep Cyber-Glass neon to the chrome, Library and Downloads, with `Glow` softened on pearl.",
+      "**Do** give every Editorial section one accent and leave the field neutral.",
+      "**Do** keep the mini player and Now Playing reporting the same audio format (shared resolver)."
+    ],
+    "donts": [
+      "**Don't** remove, hide, or flatten the Now Playing record, or put it behind a setting.",
+      "**Don't** let Material dynamic colour reach the player field or its sheets' content.",
+      "**Don't** add glows, glass or gradients to the Now Playing field.",
+      "**Don't** make a page-wide horizontal gesture on Now Playing; it would fight the seek bar.",
+      "**Don't** colour an Editorial page's background with its section accent; that was tried and removed.",
+      "**Don't** fix the player's height by hard-coding a smaller record for everyone; the 411dp-and-up phones fit today."
+    ]
+  }
+}
