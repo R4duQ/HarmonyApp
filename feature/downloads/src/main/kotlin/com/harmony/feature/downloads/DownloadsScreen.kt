@@ -1,5 +1,6 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.material3.MaterialTheme
@@ -401,7 +402,7 @@ fun DownloadsScreen(
                     if (state.showErrorDetails) {
                         Text(
                             state.errorDetails.orEmpty(),
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             lineHeight = 14.sp,
                             color = Color(0xFFB3261E),
                             modifier = Modifier.padding(top = 8.dp),
@@ -495,7 +496,7 @@ fun DownloadsScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SpotiFlacDownloadsLayout(
+internal fun SpotiFlacDownloadsLayout(
     state: DownloadsViewModel.State,
     palette: EditorialPalette,
     context: Context,
@@ -525,114 +526,210 @@ private fun SpotiFlacDownloadsLayout(
         ?: "Tidal"
     val verificationPending = challenge?.pending == true && challenge.authenticated != true
 
-    Spacer(Modifier.height(18.dp))
-    EditorialSectionLabel(
-        "Provider verification",
-        palette,
-        Modifier.padding(start = 22.dp, bottom = 8.dp),
-    )
-    GlassCard(
-        palette = palette,
-        modifier = Modifier.padding(horizontal = 20.dp),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                when {
-                    state.isCheckingSpotiFlacVerification -> "Checking $providerName verification…"
-                    // A download can stop on another provider's challenge while
-                    // the primary one is ready; that challenge wins.
-                    verificationPending -> "Verification pending for downloads"
-                    state.spotiFlacPreflightReady && challenge?.authenticated == true -> "Verification complete"
-                    state.spotiFlacPreflightReady -> "Provider ready"
-                    else -> "Verify SpotiFLAC before metadata"
-                },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (verificationPending) Color(0xFF8A6D1F) else palette.ink,
+    // The provider check needs you only while it isn't ready; when it is,
+    // it is one line, and the search is the first thing on the screen.
+    val providerReady = state.spotiFlacPreflightReady && !verificationPending && !state.isCheckingSpotiFlacVerification
+    val waitingForVerificationNow = state.spotiFlacVerificationChallenge?.let { it.pending && !it.authenticated } == true
+    // What a download is doing comes first; with nothing to report there is nothing to show.
+    if (state.spotiFlacTransfer != null || state.error != null || waitingForVerificationNow) {
+        Spacer(Modifier.height(18.dp))
+        EditorialSectionLabel(
+            "Download status",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
+        state.spotiFlacTransfer?.let { transfer ->
+            SpotiFlacTransferCard(
+                transfer = transfer,
+                canCancel = state.isSpotiFlacDownloading,
+                palette = palette,
+                onCancel = onCancelDownload,
             )
-            Text(
-                when {
-                    state.isCheckingSpotiFlacVerification ->
-                        "Harmony is checking whether the primary lossless provider is ready for downloading. Metadata search remains available."
-                    verificationPending && verificationUrl != null ->
-                        "The official $providerName verification is still needed before downloading. You can search and select a track now."
-                    verificationPending ->
-                        "$providerName requires verification before downloading. Refresh the challenge to obtain the current verification page; metadata search remains available."
-                    state.spotiFlacPreflightReady && challenge?.authenticated == true ->
-                        "$providerName reports an authenticated session. Downloads are ready."
-                    state.spotiFlacPreflightReady ->
-                        "$providerName does not currently require an interactive challenge. Downloads are ready."
-                    else ->
-                        "Harmony is checking provider readiness for downloads. Use Check verification if the automatic check did not start."
-                },
-                fontSize = 11.sp,
-                lineHeight = 16.sp,
-                color = palette.muted,
-                modifier = Modifier.padding(top = 5.dp),
-            )
-            challenge?.instructions
-                ?.takeIf { verificationPending && it.isNotBlank() }
-                ?.let { instructions ->
-                    Text(
-                        instructions,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 7.dp),
-                    )
-                }
-            state.error
-                ?.takeIf { !state.spotiFlacPreflightReady || verificationPending }
-                ?.let { error ->
-                    Text(
-                        error,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        color = Color(0xFFB3261E),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-            if (state.isCheckingSpotiFlacVerification) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
+        } ?: GlassCard(
+            palette = palette,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                val waitingForVerification = state.spotiFlacVerificationChallenge?.let { challenge ->
+                    challenge.pending && !challenge.authenticated
+                } == true
+                Text(
+                    when {
+                        waitingForVerification -> "Waiting for provider verification"
+                        state.error != null -> "Download failed"
+                        state.identifiedTrack != null -> "Ready to download"
+                        else -> "No download started"
+                    },
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (state.error != null && !waitingForVerification) Color(0xFFB3261E) else palette.ink,
                 )
-            } else if (!state.spotiFlacPreflightReady || verificationPending) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    if (verificationUrl != null) {
-                        TextButton(
-                            onClick = {
-                                if (openProviderVerificationBrowser(context, verificationUrl)) {
-                                    onVerificationOpened()
-                                } else {
-                                    onVerificationLaunchFailed()
-                                }
-                            },
-                        ) {
-                            Text("Verify $providerName")
+                Text(
+                    when {
+                        waitingForVerification -> "Complete the provider verification below. Harmony resumes the selected track when it returns."
+                        state.error != null -> state.error
+                        state.identifiedTrack != null -> "The selected track is ready. Press Download in Results to fetch a verified lossless source and produce ${state.spotiFlacOutputFormat.label}."
+                        else -> "Select a metadata result above. Transfer progress will appear here after you press Download."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.muted,
+                    modifier = Modifier.padding(top = 5.dp),
+                )
+                state.message
+                    ?.takeIf { it.isNotBlank() && !waitingForVerification }
+                    ?.let { message ->
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 7.dp),
+                        )
+                    }
+                if (state.error != null && state.errorDetails != null && !waitingForVerification) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onToggleErrorDetails) {
+                            Text(if (state.showErrorDetails) "Hide details" else "Details")
                         }
                     }
-                    if (providerId != null) {
-                        TextButton(onClick = onRefreshVerification) {
-                            Text("Refresh")
+                    if (state.showErrorDetails) {
+                        Text(
+                            state.errorDetails,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFB3261E),
+                            maxLines = 18,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (providerReady) {
+        Row(
+            Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
+            Text(
+                "$providerName ready for downloads",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.muted,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+    } else {
+        Spacer(Modifier.height(18.dp))
+        EditorialSectionLabel(
+            "Provider verification",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
+        GlassCard(
+            palette = palette,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    when {
+                        state.isCheckingSpotiFlacVerification -> "Checking $providerName verification…"
+                        // A download can stop on another provider's challenge while
+                        // the primary one is ready; that challenge wins.
+                        verificationPending -> "Verification pending for downloads"
+                        state.spotiFlacPreflightReady && challenge?.authenticated == true -> "Verification complete"
+                        state.spotiFlacPreflightReady -> "Provider ready"
+                        else -> "Verify SpotiFLAC before metadata"
+                    },
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (verificationPending) Color(0xFF8A6D1F) else palette.ink,
+                )
+                Text(
+                    when {
+                        state.isCheckingSpotiFlacVerification ->
+                            "Harmony is checking whether the primary lossless provider is ready for downloading. Metadata search remains available."
+                        verificationPending && verificationUrl != null ->
+                            "The official $providerName verification is still needed before downloading. You can search and select a track now."
+                        verificationPending ->
+                            "$providerName requires verification before downloading. Refresh the challenge to obtain the current verification page; metadata search remains available."
+                        state.spotiFlacPreflightReady && challenge?.authenticated == true ->
+                            "$providerName reports an authenticated session. Downloads are ready."
+                        state.spotiFlacPreflightReady ->
+                            "$providerName does not currently require an interactive challenge. Downloads are ready."
+                        else ->
+                            "Harmony is checking provider readiness for downloads. Use Check verification if the automatic check did not start."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.muted,
+                    modifier = Modifier.padding(top = 5.dp),
+                )
+                challenge?.instructions
+                    ?.takeIf { verificationPending && it.isNotBlank() }
+                    ?.let { instructions ->
+                        Text(
+                            instructions,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 7.dp),
+                        )
+                    }
+                state.error
+                    ?.takeIf { !state.spotiFlacPreflightReady || verificationPending }
+                    ?.let { error ->
+                        Text(
+                            error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFB3261E),
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                if (state.isCheckingSpotiFlacVerification) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                    )
+                } else if (!state.spotiFlacPreflightReady || verificationPending) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        if (verificationUrl != null) {
+                            TextButton(
+                                onClick = {
+                                    if (openProviderVerificationBrowser(context, verificationUrl)) {
+                                        onVerificationOpened()
+                                    } else {
+                                        onVerificationLaunchFailed()
+                                    }
+                                },
+                            ) {
+                                Text("Verify $providerName")
+                            }
                         }
-                        TextButton(onClick = onCheckVerificationAndRetry) {
-                            Text("Check & continue")
-                        }
-                    } else {
-                        TextButton(onClick = onPrepareVerification) {
-                            Text("Check verification")
+                        if (providerId != null) {
+                            TextButton(onClick = onRefreshVerification) {
+                                Text("Refresh")
+                            }
+                            TextButton(onClick = onCheckVerificationAndRetry) {
+                                Text("Check & continue")
+                            }
+                        } else {
+                            TextButton(onClick = onPrepareVerification) {
+                                Text("Check verification")
+                            }
                         }
                     }
                 }
             }
         }
+
+        Spacer(Modifier.height(18.dp))
     }
 
     Spacer(Modifier.height(18.dp))
@@ -654,7 +751,7 @@ private fun SpotiFlacDownloadsLayout(
             )
             Text(
                 if (state.spotiFlacPreflightReady) {
-                    "Provider ready. Search by artist and title, select the exact result, then start the download."
+                    "Search by artist and title, select the exact result, then start the download."
                 } else {
                     "Search by artist and title now. Provider verification is required only when you start downloading."
                 },
@@ -679,13 +776,13 @@ private fun SpotiFlacDownloadsLayout(
                         selected = state.spotiFlacOutputFormat == format,
                         onClick = { if (!state.isSpotiFlacDownloading) onOutputFormatChange(format) },
                         enabled = !state.isSpotiFlacDownloading,
-                        label = { Text(format.label, fontSize = 10.sp) },
+                        label = { Text(format.label, fontSize = 11.sp) },
                     )
                 }
             }
             Text(
                 state.spotiFlacOutputFormat.summary,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 lineHeight = 14.sp,
                 color = palette.muted,
                 modifier = Modifier.padding(top = 4.dp),
@@ -734,331 +831,261 @@ private fun SpotiFlacDownloadsLayout(
         }
     }
 
-    Spacer(Modifier.height(18.dp))
-    EditorialSectionLabel(
-        "Results",
-        palette,
-        Modifier.padding(start = 22.dp, bottom = 8.dp),
-    )
-    GlassCard(
-        palette = palette,
-        modifier = Modifier.padding(horizontal = 20.dp),
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            when {
-                state.isIdentifying && state.spotiFlacSearchResults.isEmpty() -> {
-                    Text(
-                        "Searching SpotiFLAC…",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.ink,
-                    )
-                    Text(
-                        "Metadata matches will appear here.",
-                        fontSize = 11.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-                state.spotiFlacSearchResults.isEmpty() -> {
-                    Text(
-                        "No results yet",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.ink,
-                    )
-                    Text(
-                        "Search above, then select the exact track before starting a lossless-provider download.",
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-                else -> {
-                    Text(
-                        "${state.spotiFlacSearchResults.size} metadata match${if (state.spotiFlacSearchResults.size == 1) "" else "es"}",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.ink,
-                    )
-                    Text(
-                        "Select one result. The Download button appears only after Harmony resolves that selection.",
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-                    )
-                    state.spotiFlacSearchResults.forEachIndexed { index, candidate ->
-                        if (index > 0) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 10.dp)
-                                    .height(1.dp)
-                                    .background(palette.muted.copy(alpha = 0.18f)),
-                            )
-                        }
-                        val selected = candidate.metadataId == state.selectedSpotiFlacMetadataId
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    candidate.title,
-                                    fontSize = 15.sp,
-                                    lineHeight = 19.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = palette.ink,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
+    if (state.isIdentifying || state.spotiFlacSearchResults.isNotEmpty() || state.identifiedTrack != null || state.query.isNotBlank()) {
+        Spacer(Modifier.height(18.dp))
+        EditorialSectionLabel(
+            "Results",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
+        GlassCard(
+            palette = palette,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                when {
+                    state.isIdentifying && state.spotiFlacSearchResults.isEmpty() -> {
+                        Text(
+                            "Searching SpotiFLAC…",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.ink,
+                        )
+                        Text(
+                            "Metadata matches will appear here.",
+                            fontSize = 11.sp,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    state.spotiFlacSearchResults.isEmpty() -> {
+                        Text(
+                            "No results yet",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.ink,
+                        )
+                        Text(
+                            "Search above, then select the exact track before starting a lossless-provider download.",
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    else -> {
+                        Text(
+                            "${state.spotiFlacSearchResults.size} metadata match${if (state.spotiFlacSearchResults.size == 1) "" else "es"}",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.ink,
+                        )
+                        Text(
+                            "Select one result. The Download button appears only after Harmony resolves that selection.",
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                        )
+                        state.spotiFlacSearchResults.forEachIndexed { index, candidate ->
+                            if (index > 0) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 10.dp)
+                                        .height(1.dp)
+                                        .background(palette.muted.copy(alpha = 0.18f)),
                                 )
-                                Text(
-                                    candidate.artist,
-                                    fontSize = 12.sp,
-                                    color = palette.muted,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (candidate.album.isNotBlank()) {
+                            }
+                            val selected = candidate.metadataId == state.selectedSpotiFlacMetadataId
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        candidate.album,
-                                        fontSize = 10.sp,
+                                        candidate.title,
+                                        fontSize = 15.sp,
+                                        lineHeight = 19.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = palette.ink,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        candidate.artist,
+                                        fontSize = 12.sp,
                                         color = palette.muted,
                                         modifier = Modifier.padding(top = 2.dp),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    if (candidate.album.isNotBlank()) {
+                                        Text(
+                                            candidate.album,
+                                            fontSize = 11.sp,
+                                            color = palette.muted,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Text(
+                                        buildString {
+                                            append(candidate.matchScore)
+                                            append("% match")
+                                            if (candidate.source != "Deezer") append(" · via ${candidate.source}")
+                                            if (candidate.durationMs > 0L) {
+                                                append(" · ")
+                                                append(formatTrackDuration(candidate.durationMs))
+                                            }
+                                        },
+                                        fontSize = 11.sp,
+                                        color = if (candidate.matchScore >= 90) palette.ink else palette.muted,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    )
                                 }
-                                Text(
-                                    buildString {
-                                        append(candidate.matchScore)
-                                        append("% match")
-                                        if (candidate.source != "Deezer") append(" · via ${candidate.source}")
-                                        if (candidate.durationMs > 0L) {
-                                            append(" · ")
-                                            append(formatTrackDuration(candidate.durationMs))
-                                        }
-                                    },
-                                    fontSize = 10.sp,
-                                    color = if (candidate.matchScore >= 90) palette.ink else palette.muted,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
-                            }
-                            TextButton(
-                                enabled = !state.isIdentifying && !state.isSpotiFlacDownloading,
-                                onClick = { onSelect(candidate) },
-                            ) {
-                                Text(if (selected) "Selected" else "Select")
+                                TextButton(
+                                    enabled = !state.isIdentifying && !state.isSpotiFlacDownloading,
+                                    onClick = { onSelect(candidate) },
+                                ) {
+                                    Text(if (selected) "Selected" else "Select")
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if (state.isIdentifying && state.spotiFlacSearchResults.isNotEmpty()) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                )
-                Text(
-                    "Resolving the selected metadata result…",
-                    fontSize = 10.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 5.dp),
-                )
-            }
-
-            state.identifiedTrack?.let { track ->
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp)
-                        .height(1.dp)
-                        .background(palette.muted.copy(alpha = 0.18f)),
-                )
-                Text(
-                    "Selected for download",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.muted,
-                )
-                Text(
-                    track.title,
-                    fontSize = 18.sp,
-                    lineHeight = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.ink,
-                    modifier = Modifier.padding(top = 3.dp),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (track.artist.isNotBlank()) {
-                    Text(
-                        track.artist,
-                        fontSize = 12.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-                Text(
-                    "Output: ${state.spotiFlacOutputFormat.label}",
-                    fontSize = 10.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    EditorialPill(
-                        text = if (state.isSpotiFlacDownloading) "Downloading…" else "Download ${if (state.spotiFlacOutputFormat.isLosslessOutput) "FLAC" else "MP3"}",
-                        icon = Icons.Rounded.Download,
-                        onClick = { if (!state.isSpotiFlacDownloading) onDownload() },
-                        palette = palette,
-                    )
-                }
-            }
-        }
-    }
-
-    Spacer(Modifier.height(18.dp))
-    EditorialSectionLabel(
-        "Download status",
-        palette,
-        Modifier.padding(start = 22.dp, bottom = 8.dp),
-    )
-    state.spotiFlacTransfer?.let { transfer ->
-        SpotiFlacTransferCard(
-            transfer = transfer,
-            canCancel = state.isSpotiFlacDownloading,
-            palette = palette,
-            onCancel = onCancelDownload,
-        )
-    } ?: GlassCard(
-        palette = palette,
-        modifier = Modifier.padding(horizontal = 20.dp),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            val waitingForVerification = state.spotiFlacVerificationChallenge?.let { challenge ->
-                challenge.pending && !challenge.authenticated
-            } == true
-            Text(
-                when {
-                    waitingForVerification -> "Waiting for provider verification"
-                    state.error != null -> "Download failed"
-                    state.identifiedTrack != null -> "Ready to download"
-                    else -> "No download started"
-                },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (state.error != null && !waitingForVerification) Color(0xFFB3261E) else palette.ink,
-            )
-            Text(
-                when {
-                    waitingForVerification -> "Complete the verification card above. Harmony will resume the selected track after the signed callback returns."
-                    state.error != null -> state.error
-                    state.identifiedTrack != null -> "The selected track is ready. Press Download in Results to fetch a verified lossless source and produce ${state.spotiFlacOutputFormat.label}."
-                    else -> "Select a metadata result above. Transfer progress will appear here after you press Download."
-                },
-                fontSize = 11.sp,
-                lineHeight = 16.sp,
-                color = palette.muted,
-                modifier = Modifier.padding(top = 5.dp),
-            )
-            state.message
-                ?.takeIf { it.isNotBlank() && !waitingForVerification }
-                ?.let { message ->
-                    Text(
-                        message,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 7.dp),
-                    )
-                }
-            if (state.error != null && state.errorDetails != null && !waitingForVerification) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onToggleErrorDetails) {
-                        Text(if (state.showErrorDetails) "Hide details" else "Details")
-                    }
-                }
-                if (state.showErrorDetails) {
-                    Text(
-                        state.errorDetails,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        color = Color(0xFFB3261E),
-                        maxLines = 18,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-    }
-
-    Spacer(Modifier.height(18.dp))
-    EditorialSectionLabel(
-        if (state.spotiFlacOutputFormat.isLosslessOutput) "FLAC checker" else "MP3 checker",
-        palette,
-        Modifier.padding(start = 22.dp, bottom = 8.dp),
-    )
-    val spotiFlacReport = state.report
-    if (spotiFlacReport != null) {
-        SpectralResultCard(spotiFlacReport, palette)
-    } else {
-        GlassCard(
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                val checkerStage = state.spotiFlacTransfer?.stage
-                val checking = state.isSpotiFlacQualityChecking ||
-                    checkerStage == SpotiFlacStage.VALIDATING ||
-                    checkerStage == SpotiFlacStage.IMPORTING
-                Text(
-                    if (checking) {
-                        if (state.spotiFlacOutputFormat.isLosslessOutput) "Checking FLAC…" else "Checking MP3…"
-                    } else {
-                        "Waiting for a completed SpotiFLAC download"
-                    },
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.ink,
-                )
-                Text(
-                    if (checking) {
-                        if (state.spotiFlacOutputFormat.isLosslessOutput) {
-                            "Harmony is validating the native FLAC and running the spectral lossless check."
-                        } else {
-                            "Harmony is validating the MPEG audio container and checking the spectral content of the selected 320 kbps MP3 output."
-                        }
-                    } else {
-                        if (state.spotiFlacOutputFormat.isLosslessOutput) {
-                            "After a SpotiFLAC download completes, its FLAC validation and spectral result will appear here."
-                        } else {
-                            "MP3 is intentionally lossy. Harmony verifies the MP3 container and shows its spectral quality instead of pretending it is lossless."
-                        }
-                    },
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 5.dp),
-                )
-                if (checking) {
+                if (state.isIdentifying && state.spotiFlacSearchResults.isNotEmpty()) {
                     LinearProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 12.dp),
                     )
+                    Text(
+                        "Resolving the selected metadata result…",
+                        fontSize = 11.sp,
+                        color = palette.muted,
+                        modifier = Modifier.padding(top = 5.dp),
+                    )
+                }
+
+                state.identifiedTrack?.let { track ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp)
+                            .height(1.dp)
+                            .background(palette.muted.copy(alpha = 0.18f)),
+                    )
+                    Text(
+                        "Selected for download",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.muted,
+                    )
+                    Text(
+                        track.title,
+                        fontSize = 18.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.ink,
+                        modifier = Modifier.padding(top = 3.dp),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (track.artist.isNotBlank()) {
+                        Text(
+                            track.artist,
+                            fontSize = 12.sp,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    Text(
+                        "Output: ${state.spotiFlacOutputFormat.label}",
+                        fontSize = 11.sp,
+                        color = palette.muted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        EditorialPill(
+                            text = if (state.isSpotiFlacDownloading) "Downloading…" else "Download ${if (state.spotiFlacOutputFormat.isLosslessOutput) "FLAC" else "MP3"}",
+                            icon = Icons.Rounded.Download,
+                            onClick = { if (!state.isSpotiFlacDownloading) onDownload() },
+                            palette = palette,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // The checker speaks once a file exists to check; before that it was a
+    // card promising a result, below everything else, on every visit.
+    val checkerStage = state.spotiFlacTransfer?.stage
+    if (state.report != null || state.isSpotiFlacQualityChecking ||
+        checkerStage == SpotiFlacStage.VALIDATING || checkerStage == SpotiFlacStage.IMPORTING
+    ) {
+        Spacer(Modifier.height(18.dp))
+        EditorialSectionLabel(
+            if (state.spotiFlacOutputFormat.isLosslessOutput) "FLAC checker" else "MP3 checker",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
+        val spotiFlacReport = state.report
+        if (spotiFlacReport != null) {
+            SpectralResultCard(spotiFlacReport, palette)
+        } else {
+            GlassCard(
+                palette = palette,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    val checking = state.isSpotiFlacQualityChecking ||
+                        checkerStage == SpotiFlacStage.VALIDATING ||
+                        checkerStage == SpotiFlacStage.IMPORTING
+                    Text(
+                        if (checking) {
+                            if (state.spotiFlacOutputFormat.isLosslessOutput) "Checking FLAC…" else "Checking MP3…"
+                        } else {
+                            "Waiting for a completed SpotiFLAC download"
+                        },
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.ink,
+                    )
+                    Text(
+                        if (checking) {
+                            if (state.spotiFlacOutputFormat.isLosslessOutput) {
+                                "Harmony is validating the native FLAC and running the spectral lossless check."
+                            } else {
+                                "Harmony is validating the MPEG audio container and checking the spectral content of the selected 320 kbps MP3 output."
+                            }
+                        } else {
+                            if (state.spotiFlacOutputFormat.isLosslessOutput) {
+                                "After a SpotiFLAC download completes, its FLAC validation and spectral result will appear here."
+                            } else {
+                                "MP3 is intentionally lossy. Harmony verifies the MP3 container and shows its spectral quality instead of pretending it is lossless."
+                            }
+                        },
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        color = palette.muted,
+                        modifier = Modifier.padding(top = 5.dp),
+                    )
+                    if (checking) {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                        )
+                    }
                 }
             }
         }
@@ -1066,7 +1093,7 @@ private fun SpotiFlacDownloadsLayout(
 }
 
 @Composable
-private fun SoulseekDownloadsLayout(
+internal fun SoulseekDownloadsLayout(
     state: DownloadsViewModel.State,
     palette: EditorialPalette,
     onUsernameChange: (String) -> Unit,
@@ -1089,39 +1116,22 @@ private fun SoulseekDownloadsLayout(
 ) {
     val connected = state.soulseekConnection.status == SoulseekConnectionStatus.CONNECTED
 
-    Spacer(Modifier.height(18.dp))
-    EditorialSectionLabel(
-        "Soulseek login",
-        palette,
-        Modifier.padding(start = 22.dp, bottom = 8.dp),
-    )
+    Spacer(Modifier.height(14.dp))
     if (connected) {
-        GlassCard(
+        // Signed in: one line, not a card. The session is a precondition,
+        // not the task; the search below is.
+        SessionStrip(
+            username = state.soulseekConnection.username,
+            onDisconnect = onDisconnect,
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    "Login details",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.ink,
-                )
-                Text(
-                    "Your Soulseek session is active. Search becomes available only while this session is connected.",
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
-                )
-                SessionStrip(
-                    username = state.soulseekConnection.username,
-                    onDisconnect = onDisconnect,
-                    palette = palette,
-                )
-            }
-        }
+        )
     } else {
+        EditorialSectionLabel(
+            "Soulseek login",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
         SoulseekConnectCard(
             connection = state.soulseekConnection,
             username = state.soulseekUsername,
@@ -1131,6 +1141,23 @@ private fun SoulseekDownloadsLayout(
             onConnect = onConnect,
             palette = palette,
             modifier = Modifier.padding(horizontal = 20.dp),
+        )
+    }
+
+    // A running download comes first: it is what you came back to check.
+    if (connected) state.soulseekTransfer?.let { transfer ->
+        Spacer(Modifier.height(18.dp))
+        EditorialSectionLabel(
+            "Download status",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
+        SoulseekTransferCard(
+            transfer = transfer,
+            sourceAttempt = state.soulseekSourceAttempt,
+            sourceTotal = state.soulseekSourceTotal,
+            palette = palette,
+            onCancel = onCancelDownload,
         )
     }
 
@@ -1200,7 +1227,7 @@ private fun SoulseekDownloadsLayout(
                     } else {
                         "Balanced cleans noisy queries, tries safe variants and ranks diverse peers. Recommended."
                     },
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     lineHeight = 14.sp,
                     color = palette.muted,
                     modifier = Modifier.padding(top = 5.dp),
@@ -1235,7 +1262,7 @@ private fun SoulseekDownloadsLayout(
                 }
                 Text(
                     state.soulseekFormatPreference.summary,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     lineHeight = 14.sp,
                     color = palette.muted,
                     modifier = Modifier.padding(top = 5.dp),
@@ -1263,132 +1290,120 @@ private fun SoulseekDownloadsLayout(
             }
         }
 
-        Spacer(Modifier.height(18.dp))
-        EditorialSectionLabel(
-            "Results",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        GlassCard(
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        ) {
-            Column(Modifier.padding(14.dp)) {
-                when {
-                    state.isSoulseekSearching && state.soulseekResults.isEmpty() -> {
-                        Text(
-                            "Searching Soulseek…",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = palette.ink,
-                        )
-                        Text(
-                            "Results will appear here as peers answer.",
-                            fontSize = 11.sp,
-                            color = palette.muted,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp),
-                        )
-                    }
-                    state.soulseekResults.isEmpty() -> {
-                        Text(
-                            "No results yet",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = palette.ink,
-                        )
-                        Text(
-                            "Run a search above. Harmony will rank matching FLAC sources by track accuracy, quality, queue and peer speed.",
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp,
-                            color = palette.muted,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    else -> {
-                        Text(
-                            "Top ${state.soulseekResults.size} sources",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = palette.ink,
-                        )
-                        state.soulseekResults.forEachIndexed { index, candidate ->
-                            if (index > 0) {
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 10.dp)
-                                        .height(1.dp)
-                                        .background(palette.muted.copy(alpha = 0.18f)),
-                                )
-                            }
-                            SoulseekResultRow(
-                                rank = index + 1,
-                                candidate = candidate,
-                                isDownloading = state.soulseekDownloadingId == candidate.id,
-                                downloadsBusy = state.soulseekDownloadingId != null,
-                                activeTransferStatus = if (state.soulseekDownloadingId == candidate.id) {
-                                    state.soulseekTransfer?.status
-                                } else {
-                                    null
-                                },
-                                palette = palette,
-                                onDownload = { onDownload(candidate) },
+        if (state.isSoulseekSearching || state.soulseekResults.isNotEmpty() || state.query.isNotBlank()) {
+            Spacer(Modifier.height(18.dp))
+            EditorialSectionLabel(
+                "Results",
+                palette,
+                Modifier.padding(start = 22.dp, bottom = 8.dp),
+            )
+            GlassCard(
+                palette = palette,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    when {
+                        state.isSoulseekSearching && state.soulseekResults.isEmpty() -> {
+                            Text(
+                                "Searching Soulseek…",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.ink,
+                            )
+                            Text(
+                                "Results will appear here as peers answer.",
+                                fontSize = 11.sp,
+                                color = palette.muted,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
                             )
                         }
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp),
-                            horizontalArrangement = Arrangement.End,
-                        ) {
-                            EditorialPill(
-                                text = if (state.soulseekDownloadingId != null) {
-                                    soulseekResultActionLabel(state.soulseekTransfer?.status)
-                                } else {
-                                    "Download best"
-                                },
-                                icon = Icons.Rounded.Download,
-                                onClick = { if (state.soulseekDownloadingId == null) onDownloadBest() },
-                                palette = palette,
+                        state.soulseekResults.isEmpty() -> {
+                            Text(
+                                "No results yet",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.ink,
                             )
+                            Text(
+                                "Run a search above. Harmony will rank matching FLAC sources by track accuracy, quality, queue and peer speed.",
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                                color = palette.muted,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                        else -> {
+                            Text(
+                                "Top ${state.soulseekResults.size} sources",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.ink,
+                            )
+                            state.soulseekResults.forEachIndexed { index, candidate ->
+                                if (index > 0) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 10.dp)
+                                            .height(1.dp)
+                                            .background(palette.muted.copy(alpha = 0.18f)),
+                                    )
+                                }
+                                SoulseekResultRow(
+                                    rank = index + 1,
+                                    candidate = candidate,
+                                    isDownloading = state.soulseekDownloadingId == candidate.id,
+                                    downloadsBusy = state.soulseekDownloadingId != null,
+                                    activeTransferStatus = if (state.soulseekDownloadingId == candidate.id) {
+                                        state.soulseekTransfer?.status
+                                    } else {
+                                        null
+                                    },
+                                    palette = palette,
+                                    onDownload = { onDownload(candidate) },
+                                )
+                            }
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                EditorialPill(
+                                    text = if (state.soulseekDownloadingId != null) {
+                                        soulseekResultActionLabel(state.soulseekTransfer?.status)
+                                    } else {
+                                        "Download best"
+                                    },
+                                    icon = Icons.Rounded.Download,
+                                    onClick = { if (state.soulseekDownloadingId == null) onDownloadBest() },
+                                    palette = palette,
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        state.soulseekTransfer?.let { transfer ->
+        if (state.report != null || state.soulseekTransfer != null) {
             Spacer(Modifier.height(18.dp))
             EditorialSectionLabel(
-                "Download status",
+                "FLAC checker",
                 palette,
                 Modifier.padding(start = 22.dp, bottom = 8.dp),
             )
-            SoulseekTransferCard(
-                transfer = transfer,
-                sourceAttempt = state.soulseekSourceAttempt,
-                sourceTotal = state.soulseekSourceTotal,
+            SoulseekFlacCheckerCard(
+                report = state.report,
+                transfer = state.soulseekTransfer,
                 palette = palette,
-                onCancel = onCancelDownload,
             )
         }
-
-        Spacer(Modifier.height(18.dp))
-        EditorialSectionLabel(
-            "FLAC checker",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        SoulseekFlacCheckerCard(
-            report = state.report,
-            transfer = state.soulseekTransfer,
-            palette = palette,
-        )
 
         Spacer(Modifier.height(18.dp))
         EditorialSectionLabel(
@@ -1418,7 +1433,7 @@ private fun SoulseekDownloadsLayout(
                 )
                 Text(
                     "Choose a writable folder for files you download from Soulseek or SpotiFLAC.",
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     lineHeight = 14.sp,
                     color = palette.muted,
                     modifier = Modifier.padding(top = 6.dp),
@@ -1497,7 +1512,7 @@ private fun SoulseekResultRow(
         )
         Text(
             "${candidate.username} · ${if (candidate.freeUploadSlot) "free slot" else "busy"} · ${formatPeerSpeed(candidate.averageSpeedBytesPerSecond)} · queue ${candidate.queueLength}",
-            fontSize = 10.sp,
+            fontSize = 11.sp,
             lineHeight = 14.sp,
             color = palette.muted,
             modifier = Modifier.padding(top = 3.dp),
@@ -1507,7 +1522,7 @@ private fun SoulseekResultRow(
         if (candidate.recommendation.isNotBlank()) {
             Text(
                 candidate.recommendation,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 color = palette.muted,
                 modifier = Modifier.padding(top = 3.dp),
             )
@@ -1720,7 +1735,7 @@ private fun SoulseekResultCard(
                     )
                     Text(
                         "${candidate.username} · ${if (candidate.freeUploadSlot) "free slot" else "busy"} · ${formatPeerSpeed(candidate.averageSpeedBytesPerSecond)} · queue ${candidate.queueLength}",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         lineHeight = 14.sp,
                         color = palette.muted,
                         modifier = Modifier.padding(top = 3.dp),
@@ -1729,7 +1744,7 @@ private fun SoulseekResultCard(
                     )
                     Text(
                         candidate.recommendation,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         color = palette.muted,
                         modifier = Modifier.padding(top = 3.dp),
                     )
@@ -1788,7 +1803,7 @@ private fun SpotiFlacTransferCard(
                 Text(
                     "${(transfer.fraction * 100).toInt()}%" +
                         if (transfer.totalBytes > 0) " · ${formatBytes(transfer.downloadedBytes)} / ${formatBytes(transfer.totalBytes)}" else "",
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     color = palette.muted,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -1835,7 +1850,7 @@ private fun SoulseekTransferCard(
                 Column(Modifier.weight(1f)) {
                     Text(
                         "DOWNLOAD STATUS",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = palette.muted,
                     )
@@ -1870,7 +1885,7 @@ private fun SoulseekTransferCard(
             )
             Text(
                 "Soulseek · Peer: ${transfer.username}",
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 color = palette.muted,
                 modifier = Modifier.padding(top = 2.dp),
             )
@@ -1912,7 +1927,7 @@ private fun SoulseekTransferCard(
                 ) {
                     Text(
                         "IN QUEUE",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = palette.muted,
                     )
@@ -1952,7 +1967,7 @@ private fun SoulseekTransferCard(
                     if (sinceUpdate != null) {
                         Text(
                             "Position checked ${formatQueueWait(sinceUpdate)} ago · rechecks up to every 10s",
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             color = palette.muted,
                             modifier = Modifier.padding(top = 4.dp),
                         )
@@ -1997,7 +2012,7 @@ private fun SoulseekTransferCard(
                             append(it)
                         }
                     },
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     color = palette.muted,
                     modifier = Modifier.padding(top = 3.dp),
                 )
@@ -2005,7 +2020,7 @@ private fun SoulseekTransferCard(
 
             Text(
                 transfer.status,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 lineHeight = 14.sp,
                 color = palette.muted,
                 modifier = Modifier.padding(top = 7.dp),
