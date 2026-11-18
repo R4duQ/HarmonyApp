@@ -1,8 +1,43 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **172**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 171), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **173**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 172), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 173 — One look, the player in reach, every screen to its task
+
+- **One look across the app.** One background, near-black text, blue for what you can
+  act on and red only for what is playing now; one typeface (Archivo) on one type scale,
+  nothing under 11sp. Screens no longer change colour from tab to tab, and nothing is
+  see-through: the mini player is a solid block and the navigation bar a standard
+  Android bar with a highlighted current tab. Light and dark keep the same hierarchy.
+- **Now Playing keeps the record in the middle.** On a small phone the record gives way
+  so the title, progress and controls stay on screen (they used to run off it); in
+  landscape the format card no longer gets cut off. Under the controls: **Queue** (with
+  how many songs are coming), **Mix**, where the music plays (blue while a computer plays
+  it) and **Equalizer**, instead of the ⋮ menu or a long-press. The format card shows
+  format, lossless or not, bit depth and sample rate, bitrate.
+- **Mixes say what they are doing, on the player too.** While an online or combined mix
+  works, the line under the controls and under the mini player's title says it: the song
+  being prepared, that it starts by itself, Wi-Fi only, or that your library plays on.
+- **Your picks stay findable.** Songs added with Play next show as **Your pick** under
+  **Your picks**, and the queue says Smart Shuffle keeps them first. A song dragged while
+  an online song joins the queue lands where you dropped it instead of jumping back.
+  Saving an online song says **In library**.
+- **Library filed like a record crate.** Songs, albums and artists have letter tabs; the
+  letter you are in stays at the top. Album pages show the first tracks on a small phone;
+  artist pages have Back, **Play all** and **Shuffle**.
+- **Downloads: what is happening first.** A running download sits above the search; the
+  provider check and a signed-in Soulseek session are one line when nothing is needed;
+  empty "No results yet" cards are gone. A search result downloads in one tap (it is
+  still verified first). The album queue says "Downloading song 4 of 7"; queued albums
+  are no longer red; "24D Indexed" is now **Ready for mixes**.
+- **YT Converter and Spotify import.** **Convert and save** sits right under the link and
+  needs one; the Spotify button says what it does ("Download 4 missing songs with
+  SpotiFLAC") and starts without a second confirmation.
+- **Settings regrouped:** Smart Shuffle & mixes, Library, Downloads, Tools, Privacy (with
+  what online mixes send). The equalizer names what is active; Discover's song actions
+  have labels.
 
 ## Build 172 — Clearer mixes, "Save to library", Clarity Live in plain words
 
