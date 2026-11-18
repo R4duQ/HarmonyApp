@@ -1,5 +1,8 @@
 package com.harmony.app.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -418,6 +421,7 @@ fun HarmonyApp(
             ) {
                 com.harmony.feature.library.ArtistDetailScreen(
                     onAlbumClick = { navController.navigate("album/$it") },
+                    onBack = { navController.popBackStack() },
                 )
             }
             page(Routes.PLAYLISTS) {
@@ -571,6 +575,13 @@ fun HarmonyApp(
                     with(density) { chromeHeight = it.height.toDp() + 8.dp }
                 }
                 .fillMaxWidth()
+                // The dock: an opaque band in the page's colour under the
+                // mini player and the navigation bar, from a hairline at its
+                // top down through the gesture area. Pages end at that line
+                // (they reserve chromeHeight), so nothing reads through the
+                // controls, which is what a glance from the driver's seat needs.
+                .background(palette.field)
+                .drawBehind { drawLine(palette.line, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1.dp.toPx()) }
                 .windowInsetsPadding(WindowInsets.navigationBars),
         ) {
             // Above the mini player so a running download stays visible on
@@ -603,7 +614,7 @@ fun HarmonyApp(
                 // things sitting near each other, which is what they
                 // actually are — nothing ties the mini player's visibility
                 // to the nav bar's.
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(2.dp))
             }
             if (!wide && topLevelIndex >= 0) {
                 LiquidGlassNavBar(

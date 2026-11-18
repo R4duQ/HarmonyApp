@@ -1,5 +1,11 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -94,7 +100,8 @@ internal fun YtConverterLayout(
                 Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 EditorialPill(
                     text = "Paste",
@@ -106,17 +113,32 @@ internal fun YtConverterLayout(
                     },
                     palette = palette,
                 )
-                EditorialPill(
-                    text = if (state.isIdentifying) identity.searchingLabel else identity.searchActionLabel,
-                    icon = Icons.Rounded.Link,
+                // Checking the title first is optional: a quiet text action.
+                TextButton(
                     onClick = { if (!state.isIdentifying && !busy) onIdentify() },
-                    palette = palette,
-                )
+                    enabled = hasUrl && !state.isIdentifying && !busy,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(if (state.isIdentifying) identity.searchingLabel else "Check the title first", color = palette.accent)
+                }
+            }
+            // The screen's one primary action, under the link it acts on, and
+            // only enabled once there is a link (it used to do nothing, silently).
+            Button(
+                onClick = onConvert,
+                enabled = hasUrl && !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = palette.accent, contentColor = palette.onAccent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .heightIn(min = 52.dp),
+            ) {
+                Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(if (busy) "Converting…" else identity.downloadActionLabel, modifier = Modifier.padding(start = 8.dp))
             }
             Text(
                 identity.queryFooter,
-                fontSize = 10.sp,
-                lineHeight = 14.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = palette.muted,
                 modifier = Modifier.padding(top = 10.dp),
             )
@@ -130,128 +152,115 @@ internal fun YtConverterLayout(
         }
     }
 
-    Spacer(Modifier.height(18.dp))
-    EditorialSectionLabel(
-        "Conversion",
-        palette,
-        Modifier.padding(start = 22.dp, bottom = 8.dp),
-    )
-    GlassCard(palette = palette, modifier = Modifier.padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            val track = state.identifiedTrack
-            when {
-                busy -> {
-                    Text(
-                        "Converting…",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.ink,
-                    )
-                    // yt-dlp's own stage text, passed straight through: the
-                    // interesting failures happen inside yt-dlp and FFmpeg,
-                    // and paraphrasing them into "Working…" would hide the
-                    // only signal there is while a long convert runs.
-                    Text(
-                        state.conversionStatus.ifBlank { "Starting yt-dlp + FFmpeg…" },
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        color = palette.muted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 5.dp),
-                    )
-                    LinearProgressIndicator(
-                        progress = { state.conversionProgress.coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                    )
-                }
-
-                track != null -> {
-                    Text(
-                        track.displayName,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.ink,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        identity.resultBadge,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-
-                else -> {
-                    Text(
-                        if (hasUrl) "Ready to convert" else "No link yet",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.ink,
-                    )
-                    Text(
-                        if (hasUrl) {
-                            "Identify the link first if you want to check the title, or convert it straight away."
-                        } else {
-                            "Paste a YouTube link above to begin."
-                        },
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 5.dp),
-                    )
-                }
-            }
-
-            state.error?.let { error ->
-                Text(
-                    error,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    color = Color(0xFFB3261E),
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-                state.errorDetails?.let { details ->
-                    TextButton(onClick = onToggleErrorDetails) {
-                        Text(if (state.showErrorDetails) "Hide details" else "Show details")
-                    }
-                    if (state.showErrorDetails) {
+    // What the converter is doing, or what went wrong; nothing while there is
+    // nothing to report (it used to say "No link yet" on every visit).
+    if (busy || state.identifiedTrack != null || state.error != null || state.message != null) {
+        Spacer(Modifier.height(18.dp))
+        EditorialSectionLabel(
+            "Conversion",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
+        GlassCard(palette = palette, modifier = Modifier.padding(horizontal = 20.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                val track = state.identifiedTrack
+                when {
+                    busy -> {
                         Text(
-                            details,
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp,
+                            "Converting…",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.ink,
+                        )
+                        // yt-dlp's own stage text, passed straight through: the
+                        // interesting failures happen inside yt-dlp and FFmpeg,
+                        // and paraphrasing them into "Working…" would hide the
+                        // only signal there is while a long convert runs.
+                        Text(
+                            state.conversionStatus.ifBlank { "Starting yt-dlp + FFmpeg…" },
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
                             color = palette.muted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 5.dp),
+                        )
+                        LinearProgressIndicator(
+                            progress = { state.conversionProgress.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                        )
+                    }
+
+                    track != null -> {
+                        Text(
+                            track.displayName,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.ink,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            identity.resultBadge,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+
+                    else -> {
+                        Text(
+                            "Ready to convert",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.ink,
+                        )
+                        Text(
+                            "Convert it straight away, or check the title first.",
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = palette.muted,
+                            modifier = Modifier.padding(top = 5.dp),
                         )
                     }
                 }
-            }
 
-            state.message?.let { message ->
-                Text(
-                    message,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-            }
+                state.error?.let { error ->
+                    Text(
+                        error,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                    state.errorDetails?.let { details ->
+                        TextButton(onClick = onToggleErrorDetails) {
+                            Text(if (state.showErrorDetails) "Hide details" else "Show details")
+                        }
+                        if (state.showErrorDetails) {
+                            Text(
+                                details,
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                color = palette.muted,
+                            )
+                        }
+                    }
+                }
 
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 14.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                EditorialPill(
-                    text = if (busy) "Converting…" else identity.downloadActionLabel,
-                    icon = Icons.Rounded.Download,
-                    onClick = { if (!busy && hasUrl) onConvert() },
-                    palette = palette,
-                )
+                state.message?.let { message ->
+                    Text(
+                        message,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        color = palette.muted,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+
             }
         }
     }

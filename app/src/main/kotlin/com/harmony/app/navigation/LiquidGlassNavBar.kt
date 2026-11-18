@@ -1,5 +1,7 @@
 package com.harmony.app.navigation
 
+import androidx.compose.material3.MaterialTheme
+import com.harmony.core.ui.theme.Catalog
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -46,51 +49,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.harmony.core.ui.component.EditorialPalette
-import com.harmony.core.ui.theme.CyberGlassColors
 import kotlin.math.roundToInt
 
-/**
- * The floating capsule that carries the bar, and the smaller capsule that
- * marks the selected destination inside it. iOS uses a fully-rounded pill
- * for both; a percentage radius keeps that true at any bar height.
- */
-private val Capsule = RoundedCornerShape(percent = 50)
+/** Height of the bar's interior: the indicator, the label, and their padding. */
+private val BarHeight = 68.dp
 
-/** Height of the bar's interior — icon stack plus breathing room. */
-private val BarHeight = 62.dp
-
-/** How far the bar floats in from the screen edges. */
-private val BarInset = 16.dp
+/** Material 3's active indicator: a 64 x 32 pill behind the selected icon. */
+private val IndicatorWidth = 56.dp
+private val IndicatorHeight = 30.dp
 
 /**
- * The app's bottom navigation, restyled as an iOS-style floating glass bar.
+ * The app's bottom navigation: a Material 3 navigation bar in the catalogue's
+ * colours. Flat and opaque, part of the dock the shell draws under the mini
+ * player; the selected destination carries the standard active indicator, a
+ * catalogue-blue pill behind its icon, and its label in full ink.
  *
- * This is a drop-in replacement for [EditorialNavBar]: same parameters, same
- * swipe behaviour, different skin. Three things make it read as iOS rather
- * than Material:
- *
- * The bar floats. Instead of a full-bleed strip welded to the bottom of the
- * screen, it is a capsule inset from all three edges, so the page's field
- * colour runs underneath and around it. That gap is what sells the "glass
- * sitting on top of content" illusion — without it the translucency has
- * nothing to be translucent against.
- *
- * The surface is frosted, not opaque: Cyber-Glass nav glass (obsidian in
- * dark theme, pearl in light) held below full alpha, with a top-lit cyan
- * rim. Real backdrop blur needs a library (see the note at the bottom of
- * this file); the fill plus rim gets most of the way there and costs
- * nothing. [palette] stays in the signature so the bar remains a drop-in
- * for [EditorialNavBar]; the glass no longer tints to it.
- *
- * The selection is a cyan glow that slides. It travels on a spring between
- * destinations rather than cutting, and the selected item's icon scales up
- * very slightly as it lands — iOS leans on that little bit of physics to
- * make the bar feel responsive under the thumb.
- *
- * The swipe gesture is carried over unchanged: dragging horizontally walks
- * the selection through destinations, one per item-width of travel, with a
- * haptic tick at each crossing, and a fast flick can cross several items in
- * one motion.
+ * The swipe gesture is kept: dragging horizontally walks the selection
+ * through destinations, one per item-width of travel, with a haptic tick at
+ * each crossing. [palette] supplies the ink and structure colour.
  */
 @Composable
 fun LiquidGlassNavBar(
@@ -102,178 +78,88 @@ fun LiquidGlassNavBar(
 ) {
     if (items.isEmpty()) return
     val haptics = LocalHapticFeedback.current
+    val catalog = Catalog
 
     // The gesture must read the LIVE selection and callback without
-    // restarting pointerInput every time selection changes — restarting
+    // restarting pointerInput every time selection changes: restarting
     // mid-drag would cancel the gesture the moment it did anything.
     val currentIndex by rememberUpdatedState(selectedIndex)
     val select by rememberUpdatedState(onSelect)
 
-    // Cyber-Glass, in either theme's scheme: dense frost (labels stay crisp
-    // over the list), a top-lit cyan rim, and the selection as a cyan glow.
-    val cyber = CyberGlassColors
-    val glass = cyber.NavGlass.copy(alpha = cyber.NAV_ALPHA)
-    // The rim: brighter along the top edge, fading out by the bottom. This
-    // is the single cheapest cue that a surface is glass rather than paint.
-    val rim = remember(cyber) {
-        Brush.verticalGradient(listOf(cyber.NavRim, cyber.NavRim.copy(alpha = 0.08f)))
-    }
-    val shadowColor = cyber.Shadow
-    val selectedInk = cyber.Cyan
-    val idleInk = cyber.TextSecondary
-
-    Box(
+    BoxWithConstraints(
         modifier
             .fillMaxWidth()
-            .padding(start = BarInset, end = BarInset, top = 6.dp, bottom = 10.dp),
-    ) {
-        BoxWithConstraints(
-            Modifier
-                .fillMaxWidth()
-                .height(BarHeight)
-                .shadow(
-                    elevation = 14.dp,
-                    shape = Capsule,
-                    clip = false,
-                    // Opaque — Compose multiplies these by its own
-                    // elevation alpha, so a pre-faded colour cancels the
-                    // shadow out almost entirely.
-                    ambientColor = shadowColor,
-                    spotColor = shadowColor,
-                )
-                .clip(Capsule)
-                .background(glass)
-                .border(width = 1.dp, brush = rim, shape = Capsule)
-                .pointerInput(items.size) {
-                    val step = size.width / items.size.toFloat()
-                    var startIndex = 0
-                    var emitted = 0
-                    var total = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            startIndex = currentIndex
-                            emitted = currentIndex
-                            total = 0f
-                        },
-                        onHorizontalDrag = { change, amount ->
-                            change.consume()
-                            total += amount
-                            // Dragging RIGHT moves forward, following the
-                            // finger: the selection travels the way your
-                            // thumb travels, which is what the bar's own
-                            // left-to-right ordering implies.
-                            val steps = (total / step).roundToInt()
-                            val target = (startIndex + steps).coerceIn(0, items.lastIndex)
-                            if (target != emitted) {
-                                emitted = target
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                select(target)
-                            }
-                        },
-                    )
-                },
-        ) {
-            val itemWidth = maxWidth / items.size
-            val safeIndex = selectedIndex.coerceIn(0, items.lastIndex)
-
-            // Low bouncy + medium-low stiffness is the closest match to the
-            // iOS pill: it overshoots by a hair and settles, rather than
-            // easing in flatly. Stiffer than this reads as Material.
-            val indicatorX by animateDpAsState(
-                targetValue = itemWidth * safeIndex,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-                label = "glass-nav-indicator",
-            )
-
-            // A soft cyan glow behind the selected icon, sliding with the selection.
-            Box(
-                Modifier
-                    .offset(x = indicatorX)
-                    .width(itemWidth)
-                    .fillMaxHeight()
-                    .drawBehind {
-                        val center = Offset(size.width / 2f, size.height / 2f - 7.dp.toPx())
-                        val radius = 24.dp.toPx()
-                        drawCircle(
-                            Brush.radialGradient(
-                                listOf(
-                                    cyber.Cyan.copy(alpha = 0.34f * cyber.Glow),
-                                    cyber.Cyan.copy(alpha = 0.10f * cyber.Glow),
-                                    Color.Transparent,
-                                ),
-                                center = center,
-                                radius = radius,
-                            ),
-                            radius = radius,
-                            center = center,
-                        )
+            .height(BarHeight)
+            .pointerInput(items.size) {
+                val step = size.width / items.size.toFloat()
+                var startIndex = 0
+                var emitted = 0
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        startIndex = currentIndex
+                        emitted = currentIndex
+                        total = 0f
                     },
-            )
-
-            Row(Modifier.fillMaxWidth().fillMaxHeight()) {
-                items.forEachIndexed { index, item ->
-                    val selected = index == safeIndex
-
-                    val contentColor by animateColorAsState(
-                        targetValue = if (selected) selectedInk else idleInk,
-                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        label = "glass-nav-content-$index",
-                    )
-                    // A 4% lift, not more. Large enough to feel under the
-                    // thumb, small enough that the row of icons still reads
-                    // as one aligned set.
-                    val iconScale by animateFloatAsState(
-                        targetValue = if (selected) 1.04f else 1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMediumLow,
-                        ),
-                        label = "glass-nav-icon-scale-$index",
-                    )
-
-                    Column(
-                        modifier = Modifier
-                            .width(itemWidth)
-                            .fillMaxHeight()
-                            .selectable(
-                                selected = selected,
-                                role = Role.Tab,
-                                onClick = { onSelect(index) },
-                            ),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(
-                            item.icon,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier
-                                .size(22.dp)
+                    onHorizontalDrag = { change, amount ->
+                        change.consume()
+                        total += amount
+                        val steps = (total / step).roundToInt()
+                        val target = (startIndex + steps).coerceIn(0, items.lastIndex)
+                        if (target != emitted) {
+                            emitted = target
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            select(target)
+                        }
+                    },
+                )
+            },
+    ) {
+        val itemWidth = maxWidth / items.size
+        val safeIndex = selectedIndex.coerceIn(0, items.lastIndex)
+        Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+            items.forEachIndexed { index, item ->
+                val selected = index == safeIndex
+                val indicator by animateFloatAsState(
+                    targetValue = if (selected) 1f else 0f,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "nav-indicator-$index",
+                )
+                val iconTint by animateColorAsState(
+                    targetValue = if (selected) catalog.onBlueContainer else palette.muted,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "nav-icon-$index",
+                )
+                Column(
+                    modifier = Modifier
+                        .width(itemWidth)
+                        .fillMaxHeight()
+                        .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(index) }),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(Modifier.size(IndicatorWidth, IndicatorHeight), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
                                 .graphicsLayer {
-                                    scaleX = iconScale
-                                    scaleY = iconScale
-                                },
+                                    // The pill grows out from the icon, Material's way.
+                                    scaleX = 0.5f + 0.5f * indicator
+                                    alpha = indicator
+                                }
+                                .clip(RoundedCornerShape(percent = 50))
+                                .background(catalog.blueContainer),
                         )
-                        Text(
-                            item.label,
-                            fontSize = 10.sp,
-                            // iOS keeps tab labels at one weight and lets
-                            // colour carry the state. Swapping weight on
-                            // selection also reflows the label's width,
-                            // which makes the row twitch as you swipe.
-                            fontWeight = FontWeight.Medium,
-                            color = contentColor,
-                            maxLines = 1,
-                            textAlign = TextAlign.Center,
-                            // 2dp, not 3: the label's own line box already
-                            // carries leading below the glyphs, so a larger
-                            // gap pushes the pair visibly below center.
-                            modifier = Modifier.padding(top = 2.dp, start = 2.dp, end = 2.dp),
-                        )
+                        Icon(item.icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(24.dp))
                     }
+                    Text(
+                        item.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) palette.ink else palette.muted,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
+                    )
                 }
             }
         }

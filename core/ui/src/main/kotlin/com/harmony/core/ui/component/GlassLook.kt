@@ -86,57 +86,22 @@ import com.harmony.core.ui.theme.isCyberGlass
 private val Capsule = RoundedCornerShape(percent = 50)
 
 /**
- * The frosted fill used by every glass surface in the app: the section's own
- * field colour pulled toward white and held below full opacity.
- *
- * Deriving it from the palette rather than hardcoding a grey is what keeps
- * the look coherent across sections — amber Library and blue EQ each get
- * their own tint of frost instead of one neutral slab dropped on top of five
- * differently-coloured screens.
- */
-/**
- * The frosted fill used by every glass surface in the app: the section's
- * own field colour lifted toward the light and held below full opacity.
- *
- * Deriving it from the palette rather than hardcoding a grey is what keeps
- * the look coherent across sections — amber Library and blue EQ each get
- * their own tint of frost instead of one neutral slab dropped on top of
- * five differently-coloured screens.
- *
- * The dark-mode branch is not a nicety, it's a correctness fix. Lifting
- * toward white unconditionally is right on a near-white field and wrong on
- * a near-black one: on #15121F a strength of 0.6 produces a light grey
- * pane, while palette.ink stays #F1EEFF, i.e. near-white text on a
- * near-white card. Dark surfaces have to move a fraction of that distance
- * so the pane separates from the page without ever closing on the ink.
- *
- * Alpha is high on purpose. This is glass you read paragraphs of text
- * through, not a decorative overlay; every point of transparency spent
- * showing the list underneath is contrast taken away from the label on
- * top, and the label is what the card is for.
+ * The fill of every card-like surface (search pill, song cards, panels): the
+ * page lifted one step, opaque. The name is historical; nothing is glass now.
  */
 fun glassFill(palette: EditorialPalette, strength: Float = 0.62f): Color {
+    // Solid, not glass: a surface one step off the page. Text sits on it at
+    // full contrast; nothing underneath shows through.
     val onDarkField = palette.field.luminance() < 0.5f
     return if (onDarkField) {
-        lerp(palette.field, Color.White, strength * 0.16f).copy(alpha = 0.96f)
+        lerp(palette.field, Color.White, strength * 0.07f)
     } else {
-        lerp(palette.field, Color.White, strength).copy(alpha = 0.94f)
+        lerp(palette.field, Color.White, strength)
     }
 }
 
-/**
- * The bright rim that reads as the lit edge of a pane of glass.
- *
- * Weaker on dark surfaces: the same white that reads as a soft catch of
- * light on a near-white pane reads as a hard drawn outline on a near-black
- * one, because the contrast against the fill is several times greater.
- */
-fun glassRim(palette: EditorialPalette): Color =
-    if (palette.field.luminance() < 0.5f) {
-        Color.White.copy(alpha = 0.16f)
-    } else {
-        Color.White.copy(alpha = 0.55f)
-    }
+/** The pane's edge: the page's hairline. */
+fun glassRim(palette: EditorialPalette): Color = palette.line
 
 // ---------------------------------------------------------------------------
 // Search bar

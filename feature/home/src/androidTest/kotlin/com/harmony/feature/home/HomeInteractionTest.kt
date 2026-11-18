@@ -118,7 +118,7 @@ class HomeInteractionTest {
     @Test
     fun continueCardOpensThePlayerAndItsButtonOnlyPlays() {
         setHome()
-        rule.onNodeWithText("3 of 24 in queue").assertIsDisplayed()
+        rule.onNodeWithText("3 of 24 in queue", substring = true).assertIsDisplayed()
         rule.onNodeWithTag(HomeTags.CONTINUE_PLAY).performClick()
         assertEquals(listOf("toggle"), log)
         rule.onNodeWithTag(HomeTags.CONTINUE).performClick()
@@ -128,7 +128,7 @@ class HomeInteractionTest {
     @Test
     fun lastPlayedCardPlaysFromBothTheCardAndTheButton() {
         setHome(full.copy(nowPlaying = null, resumeSong = song(9)))
-        rule.onNodeWithText("LAST PLAYED").assertIsDisplayed()
+        rule.onNodeWithText("Last played").assertIsDisplayed()
         rule.onNodeWithTag(HomeTags.CONTINUE_PLAY).performClick()
         rule.onNodeWithTag(HomeTags.CONTINUE).performClick()
         assertEquals(listOf("toggle", "toggle"), log)

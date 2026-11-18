@@ -1,5 +1,6 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -142,7 +143,7 @@ fun CyberCountPill(text: String, modifier: Modifier = Modifier) {
     Text(
         text.uppercase(),
         color = glass.TextSilver,
-        fontSize = 10.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 0.8.sp,
         modifier = modifier
@@ -165,7 +166,7 @@ fun CyberQualityBadge(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
         color = accent,
-        fontSize = 10.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.ExtraBold,
         fontFamily = FontFamily.Monospace,
         modifier = modifier
@@ -291,7 +292,8 @@ fun AlbumSearchCard(
         }
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             if (queuedLabel != null) {
-                Text(queuedLabel, color = glass.LiveInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                // Waiting in the album queue: quiet; red is for what is downloading now.
+                Text(queuedLabel, color = glass.TextSecondary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
             } else {
                 NeonPillButton(
                     text = if (loading) "Loading tracklist…" else "Download Album",
@@ -357,13 +359,14 @@ private fun BatchProgress(batch: AlbumBatch, modifier: Modifier = Modifier) {
     val glass = CyberGlassColors
     Column(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(batch.statusLabel.uppercase(), color = statusColor(batch.state), fontSize = 11.sp,
-                fontWeight = FontWeight.ExtraBold, letterSpacing = 0.9.sp, modifier = Modifier.weight(1f))
+            // One count, in words: "Downloading song 4 of 7", then the speed and
+            // the percentage. The old line said 4/7 on the left and 3/7 on the right.
+            Text(batch.statusLabel, color = statusColor(batch.state), style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f))
             val speed = transferSpeedLabel(batch.bytesPerSecond)
-            if (speed.isNotEmpty()) Text(speed, color = glass.Sky, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 10.dp))
-            Text("${batch.completed}/${batch.total} · ${batch.percent}%", color = glass.TextSecondary, fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace)
+            if (speed.isNotEmpty()) Text(speed, color = glass.TextSecondary, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(end = 10.dp))
+            Text("${batch.percent}%", color = glass.TextSecondary, style = MaterialTheme.typography.labelMedium)
         }
         LaserProgressBar(batch.fraction, Modifier.padding(top = 6.dp))
     }
@@ -373,16 +376,17 @@ private fun BatchProgress(batch: AlbumBatch, modifier: Modifier = Modifier) {
 private fun statusColor(state: AlbumBatchState): Color {
     val glass = CyberGlassColors
     return when (state) {
-        AlbumBatchState.FAILED, AlbumBatchState.PARTIAL -> Color(0xFFFF6B8B)
+        AlbumBatchState.FAILED, AlbumBatchState.PARTIAL -> MaterialTheme.colorScheme.error
         AlbumBatchState.COMPLETED -> glass.Mint
-        AlbumBatchState.PAUSED, AlbumBatchState.READY -> glass.TextSecondary
+        // Waiting is not happening yet: quiet, not the live colour.
+        AlbumBatchState.PAUSED, AlbumBatchState.READY, AlbumBatchState.QUEUED -> glass.TextSecondary
         else -> glass.LiveInk
     }
 }
 
 /**
  * One track in an album: its number, title, length, and its live state
- * (queued, a cyan progress ring, "24D Indexed ✔", Retry). [selectable]
+ * (queued, a progress ring, "Ready for mixes", Retry). [selectable]
  * shows the checkbox ring before the album is queued.
  */
 @Composable
@@ -421,7 +425,7 @@ fun AlbumTrackLine(
             val line = row.detail?.takeIf { it.isNotBlank() } ?: listOf(
                 row.track.artist.takeIf { it.isNotBlank() }, length, phaseNote(row.phase),
             ).filterNotNull().joinToString(" · ")
-            Text(line, color = if (row.phase == AlbumTrackPhase.FAILED || row.phase == AlbumTrackPhase.VERIFY) Color(0xFFFF6B8B) else glass.TextSecondary,
+            Text(line, color = if (row.phase == AlbumTrackPhase.FAILED || row.phase == AlbumTrackPhase.VERIFY) MaterialTheme.colorScheme.error else glass.TextSecondary,
                 fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         TrackState(row, onRetry, onSkip, controlsEnabled)
@@ -463,18 +467,18 @@ private fun TrackState(row: AlbumTrackRow, onRetry: () -> Unit, onSkip: () -> Un
                 else {
                     CircularProgressIndicator(progress = { fraction }, modifier = Modifier.size(26.dp), color = glass.Cyan, strokeWidth = 3.dp,
                         trackColor = glass.Cyan.copy(alpha = 0.15f), strokeCap = StrokeCap.Round)
-                    Text("${(fraction * 100).toInt()}", color = glass.TextSilver, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    // The ring is the progress; an 8sp number inside it was unreadable.
                 }
             }
         }
-        AlbumTrackPhase.INDEXING -> BrainChip("24D…", glowing = true)
-        AlbumTrackPhase.INDEXED -> BrainChip("24D Indexed ✔", glowing = false)
+        AlbumTrackPhase.INDEXING -> BrainChip("Analysing…", glowing = true)
+        AlbumTrackPhase.INDEXED -> BrainChip("Ready for mixes", glowing = false)
         AlbumTrackPhase.SAVED, AlbumTrackPhase.IN_LIBRARY ->
             Icon(Icons.Rounded.CheckCircle, phaseNote(row.phase), Modifier.size(22.dp), tint = glass.Mint)
         AlbumTrackPhase.FAILED, AlbumTrackPhase.VERIFY ->
             SmallPill(if (row.phase == AlbumTrackPhase.VERIFY) "Verify" else "Retry",
                 if (row.phase == AlbumTrackPhase.VERIFY) Icons.Rounded.VerifiedUser else Icons.Rounded.Refresh,
-                onRetry, enabled, accent = Color(0xFFFF6B8B))
+                onRetry, enabled, accent = MaterialTheme.colorScheme.error)
         AlbumTrackPhase.SKIPPED -> if (row.canRetry) SmallPill("Add back", Icons.Rounded.Refresh, onRetry, enabled, accent = glass.Cyan)
         AlbumTrackPhase.WAITING -> Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Schedule, "Queued", Modifier.size(18.dp), tint = glass.TextQuiet)
@@ -488,15 +492,14 @@ private fun TrackState(row: AlbumTrackRow, onRetry: () -> Unit, onSkip: () -> Un
     }
 }
 
-/** The mint "24D Indexed ✔" capsule (and "24D…" while it measures). */
+/** "Ready for mixes" once Smart Shuffle has measured the song ("Analysing…" while it does). */
 @Composable
 private fun BrainChip(text: String, glowing: Boolean) {
     val glass = CyberGlassColors
     Text(
         text,
         color = glass.OnAccent,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.ExtraBold,
+        style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
             .neonGlow(glass.Mint, spread = 4.dp, intensity = (if (glowing) 0.35f else 0.18f) * glass.Glow)
             .clip(CircleShape)
@@ -567,7 +570,7 @@ fun AlbumBatchCard(
                 if (batch.canResume) SmallPill("Resume", Icons.Rounded.PlayArrow, onResume, enabled, glass.Mint)
                 if (batch.canRetryFailed) SmallPill("Retry ${batch.failed}", Icons.Rounded.Refresh, onResume, enabled, glass.Mint)
                 Spacer(Modifier.weight(1f))
-                if (batch.canCancel) SmallPill("Cancel", Icons.Rounded.Close, onCancel, enabled, Color(0xFFFF6B8B))
+                if (batch.canCancel) SmallPill("Cancel", Icons.Rounded.Close, onCancel, enabled, MaterialTheme.colorScheme.error)
             }
         }
         AnimatedVisibility(visible = expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
@@ -585,7 +588,7 @@ fun AlbumBatchCard(
 @Composable
 fun CyberNotice(text: String, modifier: Modifier = Modifier, error: Boolean = false, onDismiss: (() -> Unit)? = null) {
     val glass = CyberGlassColors
-    val accent = if (error) Color(0xFFFF6B8B) else glass.Cyan
+    val accent = if (error) MaterialTheme.colorScheme.error else glass.Cyan
     Row(
         modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(accent.copy(alpha = 0.08f))
             .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 6.dp),

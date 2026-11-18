@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.harmony.feature.downloads"
     buildFeatures { compose = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 dependencies {
@@ -43,7 +44,14 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 
     testImplementation(libs.junit)
+    // Design screenshots on the JVM (DownloadsDesignShots): build/shots/.
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation(libs.kotlinx.coroutines.test)
     // android.jar's org.json is a stub in local unit tests; the search tests parse real JSON.
     testImplementation("org.json:json:20240303")
+    debugImplementation(platform(libs.compose.bom))
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

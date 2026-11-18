@@ -1,5 +1,7 @@
 package com.harmony.feature.player
 
+import com.harmony.core.ui.theme.Catalog
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -21,18 +23,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * The Now Playing screen has its own small palette rather than borrowing the
- * app's Material scheme.
- *
- * Reason: the design is built on one specific soft-lavender field with very
- * low-contrast tonal controls, and Material's dynamic colors would repaint
- * that field with whatever the wallpaper happens to be — which is exactly the
- * thing the design is trading away. Every other screen still follows the
- * user's dynamic/dark/AMOLED settings untouched; only the player opts out.
- *
- * It still follows light/dark, by reading the active scheme's luminance
- * instead of taking a parameter — so the AMOLED and dark-mode toggles keep
- * working here without any new plumbing through the ViewModel or navigation.
+ * The roles the Now Playing screen, the queue and the Smart Shuffle sheet
+ * draw with, resolved from the catalogue so the player sits on the same
+ * ground as every other screen: blue for what you can act on (shuffle,
+ * repeat, favourite), red for the playhead and the played part of the
+ * waveform, because that is what is playing now.
  */
 @Immutable
 data class PlayerPalette(
@@ -49,8 +44,10 @@ data class PlayerPalette(
     /** The one raised control: play/pause. */
     val primaryControl: Color,
     val onPrimaryControl: Color,
-    /** Played waveform, active shuffle/repeat, favorite-on. */
+    /** Active shuffle/repeat, favorite-on: things you switched on. */
     val accent: Color,
+    /** The playhead and the played part of the waveform: what is playing now. */
+    val live: Color,
     /** Unplayed waveform. */
     val track: Color,
     val vinyl: Color,
@@ -58,45 +55,26 @@ data class PlayerPalette(
     val artShadow: Color,
 )
 
-private val LightPlayerPalette = PlayerPalette(
-    background = Color(0xFFDCD7FA),
-    ink = Color(0xFF17142B),
-    muted = Color(0xFF5D5878),
-    control = Color(0xFFE8E4FD),
-    controlEdge = Color(0x1417142B),
-    primaryControl = Color(0xFFFFFFFF),
-    onPrimaryControl = Color(0xFF17142B),
-    accent = Color(0xFF6C4BE8),
-    track = Color(0xFFB4ACDD),
-    vinyl = Color(0xFF17151C),
-    vinylGroove = Color(0x1FFFFFFF),
-    artShadow = Color(0xFF2A2350),
-)
-
-private val DarkPlayerPalette = PlayerPalette(
-    background = Color(0xFF15121F),
-    ink = Color(0xFFF1EEFF),
-    muted = Color(0xFF9E98BF),
-    control = Color(0xFF232032),
-    controlEdge = Color(0x1AFFFFFF),
-    primaryControl = Color(0xFFEDE9FF),
-    onPrimaryControl = Color(0xFF17142B),
-    accent = Color(0xFF9B85FF),
-    track = Color(0xFF393452),
-    vinyl = Color(0xFF0B0A10),
-    vinylGroove = Color(0x14FFFFFF),
-    artShadow = Color(0xFF000000),
-)
-
-/**
- * Picks the light or dark player palette from the ambient Material scheme, so
- * the player follows the app's theme setting (system / light / dark / AMOLED)
- * without needing it passed down.
- */
+/** The player's palette for the current theme, from [Catalog]. */
 @Composable
-fun playerPalette(): PlayerPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) DarkPlayerPalette
-    else LightPlayerPalette
+fun playerPalette(): PlayerPalette {
+    val c = Catalog
+    return PlayerPalette(
+        background = c.ground,
+        ink = c.ink,
+        muted = c.muted,
+        control = c.surface,
+        controlEdge = c.line,
+        primaryControl = c.ink,
+        onPrimaryControl = c.ground,
+        accent = c.blue,
+        live = c.red,
+        track = c.line,
+        vinyl = if (c.isDark) Color(0xFF060708) else Color(0xFF15171B),
+        vinylGroove = Color(0x1AFFFFFF),
+        artShadow = Color.Black,
+    )
+}
 
 /**
  * The tonal circle used for every secondary control on this screen.

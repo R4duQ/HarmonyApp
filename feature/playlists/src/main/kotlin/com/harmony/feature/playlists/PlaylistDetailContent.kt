@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -254,17 +255,8 @@ internal fun PlaylistDetailContent(
                     .fillMaxSize()
                     .padding(horizontal = PageInset)
                     .clip(RoundedCornerShape(topStart = PageRadius, topEnd = PageRadius))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(glassFill(palette, 0.78f), glassFill(palette, 0.58f)),
-                            endY = 1400f,
-                        ),
-                    )
-                    .border(
-                        1.dp,
-                        Brush.verticalGradient(listOf(glassRim(palette), Color.Transparent), endY = 600f),
-                        RoundedCornerShape(topStart = PageRadius, topEnd = PageRadius),
-                    )
+                    .background(glassFill(palette, 0.7f))
+                    .border(1.dp, palette.line, RoundedCornerShape(topStart = PageRadius, topEnd = PageRadius))
                     .testTag(PlaylistDetailTags.LIST),
                 contentPadding = PaddingValues(bottom = bottomPadding + 16.dp),
             ) {
@@ -610,7 +602,6 @@ private fun Hero(
     val songs = ui.songs
     val artwork = remember(songs) { PlaylistDetailFormat.coverArtwork(songs.orEmpty()) }
     Box(modifier.fillMaxWidth()) {
-        HeroBackdrop(artwork.firstOrNull(), palette, Modifier.matchParentSize())
         Column(
             Modifier
                 .fillMaxWidth()
@@ -620,20 +611,7 @@ private fun Hero(
             BoxWithConstraints(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp)
-                    // A soft pool of the accent under the cover, so a cover-less
-                    // playlist doesn't look like a grey placeholder page. Drawn
-                    // behind rather than laid out, so it costs no height.
-                    .drawBehind {
-                        drawCircle(
-                            Brush.radialGradient(
-                                listOf(palette.accent.copy(alpha = 0.20f), Color.Transparent),
-                                center = center,
-                                radius = size.height * 0.75f,
-                            ),
-                            radius = size.height * 0.75f,
-                        )
-                    },
+                    .padding(top = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 // At large font sizes the text below needs the height more than
@@ -649,30 +627,6 @@ private fun Hero(
             }
 
             Spacer(Modifier.height(20.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (ui.smartType != null) "SMART PLAYLIST" else "PLAYLIST",
-                    fontSize = 11.sp,
-                    letterSpacing = 1.8.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.accent,
-                )
-                if (ui.smartType != null) {
-                    Text(
-                        "LIVE",
-                        fontSize = 9.sp,
-                        letterSpacing = 1.2.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.onAccent,
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(palette.accent)
-                            .padding(horizontal = 6.dp, vertical = 1.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(6.dp))
             if (ui.title == null) {
                 SkeletonBlock(palette, Modifier.width(190.dp).height(28.dp), RoundedCornerShape(8.dp))
             } else {
@@ -681,10 +635,7 @@ private fun Hero(
                 val long = ui.title.length > 24
                 Text(
                     ui.title,
-                    fontSize = if (long) 26.sp else 32.sp,
-                    lineHeight = if (long) 31.sp else 37.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.7).sp,
+                    style = if (long) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.displaySmall,
                     color = palette.ink,
                     textAlign = TextAlign.Center,
                     maxLines = 3,
@@ -704,8 +655,7 @@ private fun Hero(
                     if (artists != null) {
                         Text(
                             "with $artists",
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = palette.muted,
                             textAlign = TextAlign.Center,
                             maxLines = 2,
@@ -715,8 +665,7 @@ private fun Hero(
                     if (ui.smartType != null) {
                         Text(
                             smartRule(ui.smartType),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = palette.muted,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(top = 4.dp),
@@ -735,50 +684,12 @@ private fun Hero(
 
 /** What a smart playlist collects, in one line. */
 private fun smartRule(type: SmartPlaylistType): String = when (type) {
-    SmartPlaylistType.FAVORITES -> "Every song you've marked as a favourite · updates automatically"
-    SmartPlaylistType.MOST_PLAYED -> "Your most played songs · updates automatically"
-    SmartPlaylistType.RECENTLY_ADDED -> "The newest songs in your library · updates automatically"
-    SmartPlaylistType.RECENTLY_PLAYED -> "What you've played lately · updates automatically"
-    SmartPlaylistType.HIGHEST_ENERGY -> "Your most energetic songs · updates automatically"
-    SmartPlaylistType.LOWEST_ENERGY -> "Your calmest songs · updates automatically"
-}
-
-/**
- * The lead cover, enlarged and blurred into a wash of its colours behind
- * the header, fading out into the page. Blur needs Android 12; older phones
- * keep the plain glass page and the accent pool.
- */
-@Composable
-private fun HeroBackdrop(artwork: String?, palette: EditorialPalette, modifier: Modifier) {
-    if (artwork == null || android.os.Build.VERSION.SDK_INT < 31) return
-    Box(
-        modifier
-            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-            .drawWithContent {
-                drawContent()
-                // Fade to nothing towards the bottom, so the glass page takes over.
-                drawRect(
-                    Brush.verticalGradient(0f to Color.Black, 0.55f to Color.Black.copy(alpha = 0.7f), 1f to Color.Transparent),
-                    blendMode = BlendMode.DstIn,
-                )
-            },
-    ) {
-        Artwork(
-            artwork,
-            contentDescription = null,
-            cornerRadius = 0.dp,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = 1.5f
-                    scaleY = 1.5f
-                    alpha = if (palette.field.luminance() < 0.5f) 0.55f else 0.38f
-                }
-                .blur(60.dp, BlurredEdgeTreatment.Rectangle),
-        )
-        // Keep the title readable on any cover.
-        Box(Modifier.fillMaxSize().background(palette.field.copy(alpha = 0.25f)))
-    }
+    SmartPlaylistType.FAVORITES -> "Smart playlist: every song you've marked as a favourite · updates automatically"
+    SmartPlaylistType.MOST_PLAYED -> "Smart playlist: your most played songs · updates automatically"
+    SmartPlaylistType.RECENTLY_ADDED -> "Smart playlist: the newest songs in your library · updates automatically"
+    SmartPlaylistType.RECENTLY_PLAYED -> "Smart playlist: what you've played lately · updates automatically"
+    SmartPlaylistType.HIGHEST_ENERGY -> "Smart playlist: your most energetic songs · updates automatically"
+    SmartPlaylistType.LOWEST_ENERGY -> "Smart playlist: your calmest songs · updates automatically"
 }
 
 /**
@@ -798,7 +709,6 @@ private fun CoverStack(artwork: List<String>, palette: EditorialPalette, smartTy
                             translationX = (if (i == 0) -1 else 1) * size.toPx() * 0.17f
                             translationY = size.toPx() * 0.02f
                         }
-                        .shadow(10.dp, RoundedCornerShape(back * 0.08f))
                         .size(back),
                 ) {
                     Artwork(uri, contentDescription = null, modifier = Modifier.fillMaxSize(), cornerRadius = back * 0.08f)
@@ -857,9 +767,7 @@ private fun PlayButton(enabled: Boolean, palette: EditorialPalette, onClick: () 
         rim = null,
         enabled = enabled,
         onClick = onClick,
-        modifier = modifier
-            .shadow(if (enabled) 10.dp else 0.dp, RoundedCornerShape(50), spotColor = palette.accent, ambientColor = palette.accent)
-            .testTag(PlaylistDetailTags.PLAY),
+        modifier = modifier.testTag(PlaylistDetailTags.PLAY),
     )
 }
 
@@ -868,9 +776,9 @@ private fun ShuffleButton(enabled: Boolean, palette: EditorialPalette, onClick: 
     ActionButton(
         label = "Shuffle",
         icon = Icons.Rounded.Shuffle,
-        container = palette.accent.copy(alpha = 0.13f).compositeOver(glassFill(palette, 0.9f)),
+        container = Color.Transparent,
         content = palette.ink,
-        rim = glassRim(palette),
+        rim = palette.line,
         enabled = enabled,
         onClick = onClick,
         modifier = modifier.testTag(PlaylistDetailTags.SHUFFLE),
@@ -904,8 +812,7 @@ private fun ActionButton(
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         Text(
             label,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelLarge,
             color = tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

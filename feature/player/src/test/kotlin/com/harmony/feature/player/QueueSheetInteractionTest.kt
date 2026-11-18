@@ -65,6 +65,14 @@ class QueueSheetInteractionTest {
         /** The song playing ends; the next one starts. */
         fun advance() { current++; answer() }
 
+        /** An online mix's next song is ready: it joins right after the song playing. */
+        fun insertNext(title: String) {
+            val id = 900L + entries.size
+            entries.add(current + 1, Entry(100 + entries.size, Song(id, "online:$id", title, "Artist", "Album", 1, null, null, null, null, null, null,
+                180_000, null, null, null, null, null, null, null, null)))
+            answer()
+        }
+
         fun move(from: Int, to: Int, songId: Long, onDone: (Boolean) -> Unit) {
             val move = QueueMoves.resolve(entries.map { it.song.id.toString() }, current, from, to, songId.toString())
             if (move == null) { onDone(false); return }
@@ -255,6 +263,38 @@ class QueueSheetInteractionTest {
         assertEquals(1, player.playingTag())
         assertEquals(listOf(0, 1, 2, 3, 4), player.entries.map { it.tag })
         assertEquals(listOf("B", "C", "D"), shown())
+    }
+
+    // ---- The queue changes under the finger: an online song joins mid-drag.
+
+    @Test fun anOnlineSongJoinsWhileDragging() {
+        val player = show("Now", "A", "B", "C", "D")
+        val step = rowHeight()
+        val node = handle("D")
+        node.performTouchInput {
+            down(center)
+            advanceEventTime(viewConfiguration.longPressTimeoutMillis + 100)
+            repeat(12) { moveBy(Offset(0f, -2 * step / 12)); advanceEventTime(16) }
+        }
+        rule.waitForIdle()
+        // The mix's next song becomes ready while D is held between A and B.
+        player.insertNext("Online")
+        rule.waitForIdle()
+        node.performTouchInput { up() }
+        rule.waitForIdle()
+        // D lands where it was dropped, right after A; the online song stays
+        // where the player put it; nothing is lost or duplicated.
+        assertEquals(listOf("Online", "A", "D", "B", "C"), player.entries.drop(1).map { it.song.title })
+        assertEquals(listOf("Online", "A", "D", "B", "C"), shown())
+    }
+
+    @Test fun retargetKeepsTheNeighbourTheUserChose() {
+        // Shown at the drop: A, D, B, C (D dropped at 1, after A). The player now has X first.
+        assertEquals(4 to 2, QueueDrop.retarget(listOf(9L, 1L, 2L, 3L, 4L), 4L, listOf(1L, 4L, 2L, 3L), 1))
+        // Dropped at the top: goes to the top, before whatever joined.
+        assertEquals(4 to 0, QueueDrop.retarget(listOf(9L, 1L, 2L, 3L, 4L), 4L, listOf(4L, 1L, 2L, 3L), 0))
+        // The dragged song left the queue meanwhile: no move.
+        assertEquals(null, QueueDrop.retarget(listOf(9L, 1L, 2L), 4L, listOf(1L, 4L, 2L), 1))
     }
 
     // ---- The same moves without dragging (TalkBack's actions).

@@ -1,5 +1,15 @@
 package com.harmony.feature.player
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.IntrinsicSize
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -184,9 +194,10 @@ fun NowPlayingScreen(
     var showQueue by remember { mutableStateOf(false) }
     var showShuffleSheet by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
-    var showMenu by remember { mutableStateOf(false) }
     var showPlayOn by remember { mutableStateOf(false) }
     val connectState by viewModel.connectState.collectAsStateWithLifecycle()
+    val mix by viewModel.mix.collectAsStateWithLifecycle()
+    val onlineMix by viewModel.onlineMix.collectAsStateWithLifecycle()
     // A handoff that ended unsure asks where the music should be (Universal Queue, stage 10).
     val unsureHandoff = connectState.unsure
     LaunchedEffect(unsureHandoff) { if (unsureHandoff != null) showPlayOn = true }
@@ -304,24 +315,6 @@ fun NowPlayingScreen(
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "artwork-breathe",
     )
-    val favoriteScale by animateFloatAsState(
-        targetValue = if (isFavorite) 1.15f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "favorite-pop",
-    )
-    val favoriteTint by animateColorAsState(
-        targetValue = if (isFavorite) palette.accent else palette.muted,
-        label = "favorite-tint",
-    )
-    val shuffleTint by animateColorAsState(
-        targetValue = if (state.shuffleMode == ShuffleMode.OFF) palette.muted else palette.accent,
-        label = "shuffle-tint",
-    )
-    val repeatTint by animateColorAsState(
-        targetValue = if (state.repeatMode == RepeatMode.OFF) palette.muted else palette.accent,
-        label = "repeat-tint",
-    )
-
     val waveform = rememberMorphingWaveform(song?.id)
 
     val onSeekCommit: (Float) -> Unit = { fraction ->
@@ -397,197 +390,40 @@ fun NowPlayingScreen(
             .padding(horizontal = sidePadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        PlayerTopBar(
-            albumName = song?.album,
+        NowPlayingBody(
+            state = state,
+            song = song,
+            landscape = landscape,
             palette = palette,
-            onBack = onBack,
-            menuOpen = showMenu,
-            onMenuOpenChange = { showMenu = it },
-            hasLyrics = song?.embeddedLyrics != null,
-            onQueue = { showQueue = true },
-            onShuffleSheet = { showShuffleSheet = true },
-            onLyrics = { showLyrics = true },
-            onEqualizer = onOpenEqualizer,
-            // In landscape the title block sits under the record with no room
-            // beside it, so favourite moves up here rather than being dropped.
-            favorite = if (!landscape) null else FavoriteSpec(
-                isFavorite = isFavorite,
-                tint = favoriteTint,
-                scale = favoriteScale,
-                onToggle = viewModel::onToggleFavorite,
-            ),
-        )
-
-        if (landscape) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Left half: the hero and its label, as one centred group.
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    ArtworkPager(
-                        song = song,
-                        isPlaying = state.isPlaying,
-                        playScale = playScale,
-                        gestureScope = gestureScope,
-                        onNext = viewModel::onNext,
-                        onPrevious = viewModel::onPrevious,
-                        // The largest record of the right shape that fits BOTH this
-                        // half's width and 62% of its height. A fixed height alone
-                        // was fine on a phone, where height is always the limit, but
-                        // on a tablet it pushed the record past its half.
-                        modifier = Modifier
-                            .fillMaxHeight(0.62f)
-                            .fillMaxWidth()
-                            .wrapContentSize()
-                            .aspectRatio(1f / 0.72f),
-                    )
-                    TitleBlock(
-                        song = song,
-                        palette = palette,
-                        centered = true,
-                        titleSize = 21,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 14.dp),
-                    )
-                    NowPlayingAudioQuality(
-                        info = audioInfo,
-                        palette = palette,
-                        centered = true,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-
-                Spacer(Modifier.width(20.dp))
-
-                // Right half: everything you operate. Kept to a phone-like width
-                // on a tablet so the transport buttons stay within a thumb's reach.
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .wrapContentWidth()
-                        .widthIn(max = 480.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    MetaRow(state, outputChoice, journeyProgress, palette, centered = true, onOutput = { showPlayOn = true })
-                    Spacer(Modifier.height(14.dp))
-                    SeekBlock(
-                        progress = dragFraction ?: animatedProgress,
-                        waveform = waveform,
-                        state = state,
-                        dragFraction = dragFraction,
-                        palette = palette,
-                        onScrub = { dragFraction = it },
-                        onScrubFinished = onSeekCommit,
-                        onScrubCancel = { dragFraction = null },
-                        waveformHeight = 44,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Transport(
-                        state = state,
-                        palette = palette,
-                        repeatTint = repeatTint,
-                        shuffleTint = shuffleTint,
-                        onRepeat = viewModel::cycleRepeatMode,
-                        onPrevious = viewModel::onPrevious,
-                        onPlayPause = viewModel::onPlayPause,
-                        onNext = viewModel::onNext,
-                        onShuffle = viewModel::cycleShuffleMode,
-                        onShuffleLongPress = { showShuffleSheet = true },
-                        smartStyle = smartStyle,
-                        journeyProgress = journeyProgress,
-                        playSize = 64,
-                        sideSize = 48,
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-        } else {
-            Spacer(Modifier.weight(1f))
-            ArtworkPager(
-                song = song,
-                isPlaying = state.isPlaying,
-                playScale = playScale,
-                gestureScope = gestureScope,
+            isFavorite = isFavorite,
+            audioInfo = audioInfo,
+            output = outputChoice,
+            journeyProgress = journeyProgress,
+            smartStyle = smartStyle,
+            progress = dragFraction ?: animatedProgress,
+            dragFraction = dragFraction,
+            waveform = waveform,
+            playScale = playScale,
+            mixOn = mix != null,
+            mixStatus = mixStatusFor(mix, onlineMix, upcomingEmpty = state.queueIndex >= state.queue.lastIndex),
+            cb = NowPlayingCallbacks(
+                onBack = onBack,
+                onQueue = { showQueue = true },
+                onMixSheet = { showShuffleSheet = true },
+                onLyrics = { showLyrics = true },
+                onEqualizer = onOpenEqualizer,
+                onPlayOn = { showPlayOn = true },
+                onToggleFavorite = viewModel::onToggleFavorite,
                 onNext = viewModel::onNext,
                 onPrevious = viewModel::onPrevious,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f / 0.72f),
-            )
-            Spacer(Modifier.weight(1.1f))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TitleBlock(
-                    song = song,
-                    palette = palette,
-                    centered = false,
-                    titleSize = 25,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(12.dp))
-                FavoriteButton(
-                    spec = FavoriteSpec(isFavorite, favoriteTint, favoriteScale, viewModel::onToggleFavorite),
-                    palette = palette,
-                )
-            }
-            NowPlayingAudioQuality(
-                info = audioInfo,
-                palette = palette,
-                centered = false,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            MetaRow(
-                state, outputChoice, journeyProgress, palette,
-                centered = false,
-                modifier = Modifier.padding(top = 7.dp),
-                onOutput = { showPlayOn = true },
-            )
-            Spacer(Modifier.height(18.dp))
-            SeekBlock(
-                progress = dragFraction ?: animatedProgress,
-                waveform = waveform,
-                state = state,
-                dragFraction = dragFraction,
-                palette = palette,
+                onPlayPause = viewModel::onPlayPause,
+                onRepeat = viewModel::cycleRepeatMode,
+                onShuffle = viewModel::cycleShuffleMode,
                 onScrub = { dragFraction = it },
                 onScrubFinished = onSeekCommit,
                 onScrubCancel = { dragFraction = null },
-                waveformHeight = 52,
-            )
-            Spacer(Modifier.height(22.dp))
-            Transport(
-                state = state,
-                palette = palette,
-                repeatTint = repeatTint,
-                shuffleTint = shuffleTint,
-                onRepeat = viewModel::cycleRepeatMode,
-                onPrevious = viewModel::onPrevious,
-                onPlayPause = viewModel::onPlayPause,
-                onNext = viewModel::onNext,
-                onShuffle = viewModel::cycleShuffleMode,
-                onShuffleLongPress = { showShuffleSheet = true },
-                smartStyle = smartStyle,
-                journeyProgress = journeyProgress,
-                playSize = 72,
-                sideSize = 54,
-            )
-            Spacer(Modifier.height(28.dp))
-        }
+            ),
+        )
     }
 
     if (showQueue) {
@@ -637,6 +473,383 @@ fun NowPlayingScreen(
                 Text(song.embeddedLyrics!!, style = MaterialTheme.typography.bodyLarge)
             }
         }
+    }
+}
+
+/** What Now Playing's layout does when tapped; the screen wires these to its ViewModel and sheets. */
+internal class NowPlayingCallbacks(
+    val onBack: () -> Unit = {},
+    val onQueue: () -> Unit = {},
+    val onMixSheet: () -> Unit = {},
+    val onLyrics: () -> Unit = {},
+    val onEqualizer: (() -> Unit)? = null,
+    val onPlayOn: () -> Unit = {},
+    val onToggleFavorite: () -> Unit = {},
+    val onNext: () -> Unit = {},
+    val onPrevious: () -> Unit = {},
+    val onPlayPause: () -> Unit = {},
+    val onRepeat: () -> Unit = {},
+    val onShuffle: () -> Unit = {},
+    val onScrub: (Float) -> Unit = {},
+    val onScrubFinished: (Float) -> Unit = {},
+    val onScrubCancel: () -> Unit = {},
+)
+
+/**
+ * Everything Now Playing draws, portrait and landscape: the top bar, the
+ * record, the title, the format card, the output and the transport. It reads
+ * plain state and reports taps through [cb], so it renders without a player
+ * (the design screenshots draw it with fixed data).
+ */
+@Composable
+internal fun ColumnScope.NowPlayingBody(
+    state: PlayerState,
+    song: Song?,
+    landscape: Boolean,
+    palette: PlayerPalette,
+    isFavorite: Boolean,
+    audioInfo: MiniPlayerAudioInfo?,
+    output: OutputChoice,
+    journeyProgress: Float?,
+    smartStyle: SmartShuffleStyle,
+    progress: Float,
+    dragFraction: Float?,
+    waveform: FloatArray,
+    playScale: Float,
+    cb: NowPlayingCallbacks,
+    /** A mix is running: the Mix action shows it as on. */
+    mixOn: Boolean = false,
+    /** What the mix is doing with the next song, from the player's real state; null when nothing to say. */
+    mixStatus: MixStatusUi? = null,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val gestureScope = rememberCoroutineScope()
+    val favoriteScale by animateFloatAsState(
+        targetValue = if (isFavorite) 1.15f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "favorite-pop",
+    )
+    val favoriteTint by animateColorAsState(
+        targetValue = if (isFavorite) palette.accent else palette.muted,
+        label = "favorite-tint",
+    )
+    val shuffleTint by animateColorAsState(
+        targetValue = if (state.shuffleMode == ShuffleMode.OFF) palette.muted else palette.accent,
+        label = "shuffle-tint",
+    )
+    val repeatTint by animateColorAsState(
+        targetValue = if (state.repeatMode == RepeatMode.OFF) palette.muted else palette.accent,
+        label = "repeat-tint",
+    )
+
+    PlayerTopBar(
+        albumName = song?.album,
+        palette = palette,
+        onBack = cb.onBack,
+        menuOpen = menuOpen,
+        onMenuOpenChange = { menuOpen = it },
+        hasLyrics = song?.embeddedLyrics != null,
+        onQueue = cb.onQueue,
+        onShuffleSheet = cb.onMixSheet,
+        onLyrics = cb.onLyrics,
+        onEqualizer = cb.onEqualizer,
+        // In landscape the title block sits under the record with no room
+        // beside it, so favourite moves up here rather than being dropped.
+        favorite = if (!landscape) null else FavoriteSpec(
+            isFavorite = isFavorite,
+            tint = favoriteTint,
+            scale = favoriteScale,
+            onToggle = cb.onToggleFavorite,
+        ),
+    )
+
+    // Short phones (a 640dp screen, or a large font) tighten the rhythm so the
+    // transport and the action row stay on screen; the record gives way first.
+    val config = LocalConfiguration.current
+    val short = config.screenHeightDp < 720 || LocalDensity.current.fontScale > 1.2f
+    val deviceIcon = OutputIcons.forOutput(state.audioOutput.type, output.form)
+    val onComputer = state.audioOutput.type == com.harmony.core.model.AudioOutputType.COMPUTER
+    val upcoming = (state.queue.size - state.queueIndex - 1).coerceAtLeast(0)
+    val actions = @Composable { modifier: Modifier ->
+        PlayerActionRow(
+            upcoming = upcoming,
+            mixOn = mixOn,
+            deviceLabel = state.audioOutput.label,
+            deviceIcon = deviceIcon,
+            onComputer = onComputer,
+            palette = palette,
+            cb = cb,
+            modifier = modifier,
+        )
+    }
+
+    if (landscape) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Left: the record, as large as the half allows, and the song under it.
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                ArtworkPager(
+                    song = song,
+                    isPlaying = state.isPlaying,
+                    playScale = playScale,
+                    gestureScope = gestureScope,
+                    onNext = cb.onNext,
+                    onPrevious = cb.onPrevious,
+                    // The largest record of the right shape that fits the half's
+                    // width and what the title leaves of its height.
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth()
+                        .wrapContentSize()
+                        .aspectRatio(1f / 0.72f),
+                )
+                TitleBlock(
+                    song = song,
+                    palette = palette,
+                    centered = true,
+                    titleSize = if (short) 19 else 21,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 4.dp),
+                )
+            }
+
+            Spacer(Modifier.width(20.dp))
+
+            // Right: everything you read and operate, kept to a phone-like width.
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .wrapContentWidth()
+                    .widthIn(max = 480.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                NowPlayingAudioQuality(
+                    info = audioInfo,
+                    bitDepth = song?.bitDepth,
+                    palette = palette,
+                    centered = true,
+                )
+                MetaRow(state, output, journeyProgress, palette, centered = true, showOutput = false, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(8.dp))
+                SeekBlock(
+                    progress = progress,
+                    waveform = waveform,
+                    state = state,
+                    dragFraction = dragFraction,
+                    palette = palette,
+                    onScrub = cb.onScrub,
+                    onScrubFinished = cb.onScrubFinished,
+                    onScrubCancel = cb.onScrubCancel,
+                    waveformHeight = if (short) 32 else 40,
+                )
+                Spacer(Modifier.height(if (short) 6.dp else 10.dp))
+                Transport(
+                    state = state,
+                    palette = palette,
+                    repeatTint = repeatTint,
+                    shuffleTint = shuffleTint,
+                    onRepeat = cb.onRepeat,
+                    onPrevious = cb.onPrevious,
+                    onPlayPause = cb.onPlayPause,
+                    onNext = cb.onNext,
+                    onShuffle = cb.onShuffle,
+                    onShuffleLongPress = cb.onMixSheet,
+                    smartStyle = smartStyle,
+                    journeyProgress = journeyProgress,
+                    playSize = if (short) 56 else 64,
+                    sideSize = 48,
+                )
+                if (mixStatus != null) MixStatusLine(mixStatus, palette, centered = true, modifier = Modifier.padding(top = 6.dp))
+                actions(Modifier.padding(top = if (short) 4.dp else 8.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    } else {
+        Spacer(Modifier.height(if (short) 0.dp else 8.dp))
+        // The record is the centre of the screen and takes whatever height the
+        // controls leave; on a short phone it shrinks rather than pushing the
+        // transport off screen.
+        ArtworkPager(
+            song = song,
+            isPlaying = state.isPlaying,
+            playScale = playScale,
+            gestureScope = gestureScope,
+            onNext = cb.onNext,
+            onPrevious = cb.onPrevious,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .wrapContentSize()
+                .aspectRatio(1f / 0.72f),
+        )
+        Spacer(Modifier.height(if (short) 8.dp else 16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TitleBlock(
+                song = song,
+                palette = palette,
+                centered = false,
+                titleSize = if (short) 21 else 25,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            FavoriteButton(
+                spec = FavoriteSpec(isFavorite, favoriteTint, favoriteScale, cb.onToggleFavorite),
+                palette = palette,
+            )
+        }
+        NowPlayingAudioQuality(
+            info = audioInfo,
+            bitDepth = song?.bitDepth,
+            palette = palette,
+            centered = false,
+            modifier = Modifier.padding(top = if (short) 8.dp else 12.dp),
+        )
+        MetaRow(
+            state, output, journeyProgress, palette,
+            centered = false,
+            showOutput = false,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Spacer(Modifier.height(if (short) 6.dp else 12.dp))
+        SeekBlock(
+            progress = progress,
+            waveform = waveform,
+            state = state,
+            dragFraction = dragFraction,
+            palette = palette,
+            onScrub = cb.onScrub,
+            onScrubFinished = cb.onScrubFinished,
+            onScrubCancel = cb.onScrubCancel,
+            waveformHeight = if (short) 36 else 52,
+        )
+        Spacer(Modifier.height(if (short) 8.dp else 16.dp))
+        Transport(
+            state = state,
+            palette = palette,
+            repeatTint = repeatTint,
+            shuffleTint = shuffleTint,
+            onRepeat = cb.onRepeat,
+            onPrevious = cb.onPrevious,
+            onPlayPause = cb.onPlayPause,
+            onNext = cb.onNext,
+            onShuffle = cb.onShuffle,
+            onShuffleLongPress = cb.onMixSheet,
+            smartStyle = smartStyle,
+            journeyProgress = journeyProgress,
+            playSize = if (short) 60 else 72,
+            sideSize = if (short) 48 else 54,
+        )
+        if (mixStatus != null) MixStatusLine(mixStatus, palette, centered = true, modifier = Modifier.padding(top = 10.dp))
+        actions(Modifier.padding(top = if (short) 6.dp else 14.dp, bottom = if (short) 6.dp else 16.dp))
+    }
+}
+
+/** What a running mix is doing with the next song, in words, from the player's real state. */
+internal class MixStatusUi(val text: String, val working: Boolean)
+
+/**
+ * The mix's line under the transport: "Preparing “Numb” · 45% · playback
+ * starts by itself when it's ready", "Your library plays on · online songs
+ * download on Wi-Fi only". Red while something is being prepared for the
+ * music now; muted when the mix has fallen back.
+ */
+@Composable
+internal fun MixStatusLine(status: MixStatusUi, palette: PlayerPalette, centered: Boolean, modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (status.working) Icons.Rounded.CloudDownload else Icons.Rounded.Info,
+            contentDescription = null,
+            tint = if (status.working) palette.live else palette.muted,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            status.text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (status.working) palette.ink else palette.muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 6.dp),
+        )
+    }
+}
+
+/**
+ * The four things people reach for while listening, always on screen and
+ * always named: the queue (with how many songs are coming), the mix, where
+ * the music plays (the device's own name, in blue while a computer plays it)
+ * and the equalizer. They used to sit in the overflow menu or behind a
+ * long-press.
+ */
+@Composable
+private fun PlayerActionRow(
+    upcoming: Int,
+    mixOn: Boolean,
+    deviceLabel: String,
+    deviceIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    onComputer: Boolean,
+    palette: PlayerPalette,
+    cb: NowPlayingCallbacks,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        PlayerAction(Icons.AutoMirrored.Rounded.QueueMusic, if (upcoming > 0) "Queue · $upcoming" else "Queue", false, palette, cb.onQueue, Modifier.weight(1f))
+        PlayerAction(Icons.Rounded.AutoAwesome, "Mix", mixOn, palette, cb.onMixSheet, Modifier.weight(1f))
+        PlayerAction(deviceIcon, deviceLabel, onComputer, palette, cb.onPlayOn, Modifier.weight(1f), clickLabel = "Choose where to play")
+        cb.onEqualizer?.let { PlayerAction(Icons.Rounded.Equalizer, "Equalizer", false, palette, it, Modifier.weight(1f)) }
+    }
+}
+
+@Composable
+private fun PlayerAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    palette: PlayerPalette,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    clickLabel: String? = null,
+) {
+    val tint = if (active) palette.accent else palette.ink
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClickLabel = clickLabel, onClick = onClick)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (active) palette.accent else palette.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }
 
@@ -887,10 +1100,7 @@ private fun TitleBlock(
         ) {
             Text(
                 song?.title ?: "Nothing playing",
-                fontSize = titleSize.sp,
-                lineHeight = (titleSize + 5).sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.4).sp,
+                style = MaterialTheme.typography.headlineMedium.copy(fontSize = titleSize.sp, lineHeight = (titleSize + 6).sp),
                 color = palette.ink,
                 maxLines = if (centered) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
@@ -910,73 +1120,81 @@ private fun TitleBlock(
 }
 
 /**
- * Live codec information for the full player. It deliberately consumes the
- * same resolver as [MiniPlayer], so changing tracks cannot leave the two
- * player surfaces reporting different formats or lossless status.
+ * The format card: the file as it is, set like the fields of a catalogue
+ * card under a red header rule (red because this is the file playing now).
+ * Format, lossless or not, resolution and bitrate, each a small label over
+ * its value in tabular figures. It consumes the same resolver as the mini
+ * player, so the two can never report different formats.
  */
 @Composable
-private fun NowPlayingAudioQuality(
+internal fun NowPlayingAudioQuality(
     info: MiniPlayerAudioInfo?,
+    bitDepth: Int?,
     palette: PlayerPalette,
-    centered: Boolean,
+    @Suppress("UNUSED_PARAMETER") centered: Boolean,
     modifier: Modifier = Modifier,
 ) {
     AnimatedContent(
         targetState = info,
-        transitionSpec = {
-            fadeIn(tween(220)).togetherWith(fadeOut(tween(140)))
-        },
+        transitionSpec = { fadeIn(tween(220)).togetherWith(fadeOut(tween(140))) },
         label = "now-playing-audio-quality",
         modifier = modifier.fillMaxWidth(),
     ) { resolved ->
         if (resolved == null) {
             Spacer(Modifier.height(0.dp))
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
-            ) {
-                if (resolved.isLossless) {
-                    Row(
-                        modifier = Modifier
-                            .background(
-                                palette.accent.copy(alpha = 0.13f),
-                                RoundedCornerShape(50),
-                            )
-                            .border(
-                                1.dp,
-                                palette.accent.copy(alpha = 0.36f),
-                                RoundedCornerShape(50),
-                            )
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Rounded.GraphicEq,
-                            contentDescription = "Lossless audio",
-                            tint = palette.accent,
-                            modifier = Modifier.size(12.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "LOSSLESS",
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.45.sp,
-                            color = palette.accent,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
+            val shape = RoundedCornerShape(10.dp)
+            val fontScale = LocalDensity.current.fontScale
+            val rate = resolved.sampleRateHz?.takeIf { it > 0 }
+            val khz = rate?.let { if (it % 1000 == 0) "${it / 1000}" else "%.1f".format(it / 1000.0) }
+            val fields = buildList {
+                add("Format" to (resolved.format ?: "Audio"))
+                add("Quality" to if (resolved.isLossless) "Lossless" else "Lossy")
+                when {
+                    bitDepth != null && khz != null -> add("Bit/kHz" to "$bitDepth/$khz")
+                    khz != null -> add("Rate" to "$khz kHz")
                 }
-                Text(
-                    resolved.summary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                resolved.bitrateKbps?.takeIf { it > 0 }?.let { add("Kbps" to "$it") }
+            }
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .border(1.dp, palette.controlEdge, shape)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = fields.joinToString(", ") { (k, v) -> "$k $v" }
+                    },
+            ) {
+              // Too narrow for a labelled field each (a small phone, a large font,
+              // half a landscape screen): the same facts on one line.
+              val compact = maxWidth / fields.size < 80.dp * fontScale
+              Column(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth().height(2.dp).background(palette.live))
+                if (compact) {
+                    Text(
+                        fields.joinToString("  ·  ") { (k, v) -> if (k == "Kbps") "$v kbps" else v },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = palette.ink,
+                        maxLines = 2,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                } else Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                    fields.forEachIndexed { i, (label, value) ->
+                        if (i > 0) Box(Modifier.fillMaxHeight().width(1.dp).background(palette.controlEdge))
+                        Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1)
+                            Text(
+                                value,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = palette.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                }
+              }
             }
         }
     }
@@ -996,16 +1214,19 @@ private fun MetaRow(
     centered: Boolean,
     modifier: Modifier = Modifier,
     onOutput: () -> Unit = {},
+    /** The output now sits in the action row; the line keeps the journey and the crossfade's next song. */
+    showOutput: Boolean = true,
 ) {
+    val lead = if (showOutput) " · " else ""
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
     ) {
-        OutputLabel(state, output, palette, onOutput)
+        if (showOutput) OutputLabel(state, output, palette, onOutput)
         AnimatedVisibility(visible = journeyProgress != null) {
             Text(
-                " · Journey ${((journeyProgress ?: 0f) * 100).toInt()}%",
+                "${lead}Journey ${((journeyProgress ?: 0f) * 100).toInt()}%",
                 fontSize = 11.sp,
                 color = palette.accent,
                 maxLines = 1,
@@ -1019,7 +1240,7 @@ private fun MetaRow(
         ) {
             state.upcomingSong?.let { next ->
                 Text(
-                    " · Next: ${next.title}",
+                    "${if (showOutput || journeyProgress != null) " · " else ""}Next: ${next.title}",
                     fontSize = 11.sp,
                     color = palette.muted,
                     maxLines = 1,
@@ -1129,7 +1350,7 @@ private fun SeekBlock(
         onScrub = onScrub,
         onScrubFinished = onScrubFinished,
         onScrubCancel = onScrubCancel,
-        playedColor = palette.accent,
+        playedColor = palette.live,
         trackColor = palette.track,
         modifier = Modifier
             .fillMaxWidth()
@@ -1145,8 +1366,8 @@ private fun SeekBlock(
     ) {
         val shownPosition = dragFraction?.let { (it * state.durationMs).toLong() }
             ?: state.positionMs
-        Text(formatDuration(shownPosition), fontSize = 11.sp, color = palette.muted)
-        Text(formatDuration(state.durationMs), fontSize = 11.sp, color = palette.muted)
+        Text(formatDuration(shownPosition), style = MaterialTheme.typography.labelMedium, color = palette.muted)
+        Text(formatDuration(state.durationMs), style = MaterialTheme.typography.labelMedium, color = palette.muted)
     }
 }
 

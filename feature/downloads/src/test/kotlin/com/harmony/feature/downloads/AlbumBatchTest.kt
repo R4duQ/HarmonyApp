@@ -31,7 +31,7 @@ class AlbumBatchTest {
         val live = ActiveDownload("Track 2", "Mornye", "Downloading", 0.5f, albumId = "a", trackId = "2", bytesPerSecond = 3_400_000L)
         val batch = AlbumBatches.of(album(rows, queuedAt = 10L), AlbumWork.RUNNING, processing = true, live = live)
         assertEquals(AlbumBatchState.DOWNLOADING, batch.state)
-        assertEquals("Downloading (2/4)", batch.statusLabel)
+        assertEquals("Downloading song 2 of 4", batch.statusLabel)
         assertEquals(1, batch.completed)
         assertEquals(37, batch.percent) // (1 + 0.5) / 4
         assertEquals(3_400_000L, batch.bytesPerSecond)
@@ -83,7 +83,7 @@ class AlbumBatchTest {
         val rows = listOf(saved(tracks[0]), tracks[1].copy(status = AlbumTrackStatus.PAUSED), tracks[2].copy(status = AlbumTrackStatus.PAUSED), tracks[3].copy(status = AlbumTrackStatus.PAUSED))
         val batch = AlbumBatches.of(album(rows), AlbumWork.RUNNING, processing = false, live = null)
         assertEquals(AlbumBatchState.PAUSED, batch.state)
-        assertEquals("Paused · 1/4", batch.statusLabel)
+        assertEquals("Paused · 1 of 4 done", batch.statusLabel)
     }
 
     @Test fun completedPartialAndFailed() {
@@ -108,7 +108,7 @@ class AlbumBatchTest {
         val rows = tracks.take(3).map { saved(it, AlbumTrackStatus.INDEXED) } + saved(tracks[3], AlbumTrackStatus.INDEXING)
         val batch = AlbumBatches.of(album(rows, queuedAt = 1L), AlbumWork.RUNNING, processing = true, live = null)
         assertEquals(AlbumBatchState.INDEXING, batch.state)
-        assertEquals("Indexing 24D", batch.statusLabel)
+        assertEquals("Analysing for mixes", batch.statusLabel)
         assertEquals(AlbumTrackPhase.INDEXING, batch.tracks[3].phase)
         // Interrupted mid-measurement: the file is saved, the library's own pass measures it.
         val stopped = AlbumBatches.of(album(rows), AlbumWork.NONE, processing = false, live = null)

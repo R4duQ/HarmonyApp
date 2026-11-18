@@ -1,5 +1,10 @@
 package com.harmony.feature.library
 
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.harmony.core.ui.component.crateLetter
+import com.harmony.core.ui.component.CrateDivider
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -504,29 +509,49 @@ private fun SongsTab(
         )
         return
     }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = LocalFloatingChromeHeight.current),
-    ) {
-        items(
-            count = songs.itemCount,
-            key = { index -> songs.peek(index)?.id ?: "placeholder-$index" },
-        ) { index ->
-            val song = songs[index]
-            if (song != null) {
-                GlassSongCard(
-                    song = song,
-                    palette = palette,
-                    onClick = { viewModel.onPagedSongClick(song) },
-                    onPlayNext = { viewModel.addToQueue(song) },
-                    onAddToPlaylist = { addToPlaylistSongId = song.id },
-                    onRemove = { viewModel.deleteSong(song) },
-                    removeLabel = "Delete from phone",
-                    onSwipeToQueue = { viewModel.addToQueue(song) },
-                    modifier = Modifier.animateItem(),
-                )
+    // The list is sorted by title, so it is filed like a record crate: a
+    // divider tab where each letter starts, and the letter you are in pinned
+    // over the top while you scroll.
+    val listState = rememberLazyListState()
+    val pinnedLetter by remember(songs) {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) null
+            else songs.peek(listState.firstVisibleItemIndex)?.let { crateLetter(it.title) }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(top = 6.dp, bottom = LocalFloatingChromeHeight.current),
+        ) {
+            items(
+                count = songs.itemCount,
+                key = { index -> songs.peek(index)?.id ?: "placeholder-$index" },
+            ) { index ->
+                val song = songs[index]
+                if (song != null) {
+                    Column(Modifier.animateItem()) {
+                        val letter = crateLetter(song.title)
+                        val previous = if (index == 0) null else songs.peek(index - 1)
+                        if (index == 0 || (previous != null && crateLetter(previous.title) != letter)) {
+                            CrateDivider(letter, Modifier.padding(top = if (index == 0) 0.dp else 12.dp, bottom = 4.dp))
+                        }
+                        GlassSongCard(
+                            song = song,
+                            palette = palette,
+                            onClick = { viewModel.onPagedSongClick(song) },
+                            onPlayNext = { viewModel.addToQueue(song) },
+                            onAddToPlaylist = { addToPlaylistSongId = song.id },
+                            onRemove = { viewModel.deleteSong(song) },
+                            removeLabel = "Delete from phone",
+                            onSwipeToQueue = { viewModel.addToQueue(song) },
+                        )
+                    }
+                }
             }
         }
+        pinnedLetter?.let { CrateDivider(it, Modifier.align(Alignment.TopStart)) }
     }
     addToPlaylistSongId?.let { id ->
         androidx.compose.material3.ModalBottomSheet(onDismissRequest = { addToPlaylistSongId = null }) {
@@ -552,7 +577,16 @@ private fun AlbumsTab(
             start = 14.dp, end = 14.dp, top = 14.dp, bottom = LocalFloatingChromeHeight.current,
         ),
     ) {
-        items(albums, key = { it.id }) { album ->
+        // Filed by name like the songs: a divider tab spanning the row where
+        // each letter starts.
+        albums.forEachIndexed { index, album ->
+            val letter = crateLetter(album.name)
+            if (index == 0 || crateLetter(albums[index - 1].name) != letter) {
+                item(key = "letter-$letter-$index", span = { GridItemSpan(maxLineSpan) }, contentType = "divider") {
+                    CrateDivider(letter, Modifier.padding(top = if (index == 0) 0.dp else 10.dp, bottom = 2.dp), gutter = 6.dp)
+                }
+            }
+            item(key = album.id, contentType = "album") {
             EditorialCard(
                 palette = palette,
                 onClick = { onAlbumClick(album.id) },
@@ -592,6 +626,7 @@ private fun AlbumsTab(
                 }
             }
         }
+            }
     }
 }
 
@@ -612,7 +647,14 @@ private fun ArtistsTab(
         // Keyed on the name, not the id. GROUP BY names.name in
         // CollectionDao.observeArtists guarantees one row per name, so the
         // name is the only value here that cannot collide by construction.
-        items(artists, key = { it.name }) { artist ->
+        artists.forEachIndexed { index, artist ->
+            val letter = crateLetter(artist.name)
+            if (index == 0 || crateLetter(artists[index - 1].name) != letter) {
+                item(key = "letter-$letter-$index", contentType = "divider") {
+                    CrateDivider(letter, Modifier.padding(top = if (index == 0) 0.dp else 10.dp, bottom = 2.dp))
+                }
+            }
+            item(key = artist.name, contentType = "artist") {
             EditorialCard(
                 palette = palette,
                 onClick = { onArtistClick(artist.name) },
@@ -628,9 +670,7 @@ private fun ArtistsTab(
                     Column(Modifier.weight(1f)) {
                         Text(
                             artist.name,
-                            fontSize = 21.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.3).sp,
+                            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
                             color = palette.ink,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -660,6 +700,7 @@ private fun ArtistsTab(
                 }
             }
         }
+            }
     }
 }
 

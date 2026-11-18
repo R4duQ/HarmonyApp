@@ -1,5 +1,12 @@
 package com.harmony.feature.library
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -81,9 +88,9 @@ private data class ArtistAlbum(
 }
 
 /**
- * The artist page, matching the amber mock: eyebrow, oversized artist name,
- * then the artist's albums as outlined cards — framed artwork, "N songs •
- * 2hr 15min", circled play.
+ * The artist page: back, the artist's name with how much of them you own,
+ * Play all and Shuffle, then the albums newest first as outlined cards
+ * (framed artwork, "2021 · 10 songs · 36min", circled play).
  *
  * Albums are derived by grouping the artist's songs client-side (keeping
  * disc/track order within each group) rather than adding an
@@ -99,6 +106,8 @@ private data class ArtistAlbum(
 @Composable
 fun ArtistDetailScreen(
     onAlbumClick: (Long) -> Unit = {},
+    /** The way back, shown as on the album page; null leaves it to the system Back. */
+    onBack: (() -> Unit)? = null,
     viewModel: ArtistDetailViewModel = hiltViewModel(),
 ) {
     val songs by viewModel.songs.collectAsStateWithLifecycle()
@@ -128,25 +137,50 @@ fun ArtistDetailScreen(
         contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current),
     ) {
         item {
-            Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 10.dp)) {
-                Text(
-                    "ARTIST",
-                    fontSize = 11.sp,
-                    letterSpacing = 2.2.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.ink,
-                )
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 8.dp)) {
+                if (onBack != null) {
+                    EditorialCircleButton(onClick = onBack, contentDescription = "Back", palette = palette, size = 48.dp) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null, modifier = Modifier.size(20.dp))
+                    }
+                }
                 Text(
                     viewModel.artistName,
-                    fontSize = 42.sp,
-                    lineHeight = 46.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-1.2).sp,
+                    style = MaterialTheme.typography.displaySmall,
                     color = palette.ink,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 12.dp).semantics { heading() },
                 )
+                Text(
+                    listOf(
+                        if (albums.size == 1) "1 album" else "${albums.size} albums",
+                        if (songs.size == 1) "1 song" else "${songs.size} songs",
+                    ).joinToString("  ·  "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.muted,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                // The page's one primary action: everything by this artist.
+                if (songs.isNotEmpty()) {
+                    Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        androidx.compose.material3.Button(
+                            onClick = { viewModel.play(albums.flatMap { it.songs }, 0) },
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = palette.accent, contentColor = palette.onAccent),
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Text("Play all", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+                        }
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { viewModel.play(albums.flatMap { it.songs }.shuffled(), 0) },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, palette.line),
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Icon(Icons.Rounded.Shuffle, contentDescription = null, tint = palette.ink, modifier = Modifier.size(20.dp))
+                            Text("Shuffle", style = MaterialTheme.typography.labelLarge, color = palette.ink, modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
+                }
             }
         }
 
@@ -183,16 +217,18 @@ fun ArtistDetailScreen(
                     ) {
                         Text(
                             album.name,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.2).sp,
+                            style = MaterialTheme.typography.titleMedium,
                             color = palette.ink,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "${album.songs.size} songs  •  ${formatLongDuration(album.totalDurationMs)}",
-                            fontSize = 12.sp,
+                            listOfNotNull(
+                                album.songs.firstNotNullOfOrNull { it.year }?.toString(),
+                                if (album.songs.size == 1) "1 song" else "${album.songs.size} songs",
+                                formatLongDuration(album.totalDurationMs),
+                            ).joinToString("  ·  "),
+                            style = MaterialTheme.typography.bodySmall,
                             color = palette.muted,
                             modifier = Modifier.padding(top = 3.dp),
                         )

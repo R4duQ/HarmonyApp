@@ -59,22 +59,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import com.harmony.core.ui.theme.Catalog
 import com.harmony.core.ui.theme.CyberGlassColors
 import com.harmony.core.ui.theme.CyberGlassPalette
 import com.harmony.core.ui.theme.isCyberGlass
 
 /**
- * The "editorial" look shared by the Library (amber) and Playlists (green)
- * screens: one saturated full-bleed field, near-black ink, and content held
- * in thin ink-outlined rounded cards. Same construction, different field —
- * so the two screens read as siblings, and the color itself tells you which
- * part of the app you're in.
- *
- * Like the player, these screens deliberately opt out of Material dynamic
- * colors (the poster-flat field IS the design; wallpaper-derived tints would
- * erase it), but still follow light/dark by reading the ambient scheme's
- * luminance. Dark variants keep each screen's hue at a low register instead
- * of going grey, so the section identity survives at night.
+ * The colours a screen hands its components: the page, its ink, and the one
+ * structure colour ([accent]). Every section gets the same values now, from
+ * the catalogue ([catalogPalette]); the type is kept because most components
+ * take one.
  */
 @Immutable
 data class EditorialPalette(
@@ -90,55 +84,6 @@ data class EditorialPalette(
     val accent: Color,
     val onAccent: Color,
 )
-
-/**
- * The single light-mode field every section now sits on.
- *
- * The palettes used to each own a saturated full-bleed field — amber for
- * Library, green for Playlists, blue for EQ — which made the section
- * identity impossible to miss but also meant the app had no neutral ground
- * anywhere in light mode. Everything on screen had to fight a shouting
- * background.
- *
- * Section identity now lives in [EditorialPalette.accent] instead: the
- * background is constant and quiet, and each section colours its own
- * controls, chips and progress. Dark mode is untouched — the dark palettes
- * still carry their own tinted fields, where a near-black field reads as
- * depth rather than as noise.
- */
-private val HarmonyLightField = Color(0xFFF4FDFF)
-
-/** Titles and primary icons on [HarmonyLightField]. */
-private val HarmonyLightInk = Color(0xFF16232B)
-
-/** Subtitles, counts, inactive controls. */
-private val HarmonyLightMuted = Color(0x9916232B)
-
-/**
- * Hairline outlines. Much softer than the old light palettes, which used
- * solid ink for [EditorialPalette.line] — a full-strength border was legible
- * against a saturated field but draws as harsh boxing on a near-white one.
- */
-private val HarmonyLightLine = Color(0x2916232B)
-
-/**
- * The single dark-mode field every section now sits on, matching the light
- * side's HarmonyLightField above. #15121F is not a new colour invented for
- * this: it's exactly what LavenderDark (the EQ section) already used, and
- * what the Now Playing screen's own separate PlayerPalette uses for its
- * dark background — this just makes every OTHER dark section match a
- * background that two parts of the app were already independently using.
- */
-private val HarmonyDarkField = Color(0xFF15121F)
-
-/** Titles and primary icons on [HarmonyDarkField] — also matches PlayerPalette's dark ink. */
-private val HarmonyDarkInk = Color(0xFFF1EEFF)
-
-/** Subtitles, counts, inactive controls. Matches PlayerPalette's dark muted. */
-private val HarmonyDarkMuted = Color(0xFF9E98BF)
-
-/** Hairline outlines on [HarmonyDarkField]. */
-private val HarmonyDarkLine = Color(0x29F1EEFF)
 
 /**
  * How much bottom clearance a screen's scrollable content needs to leave so
@@ -191,252 +136,83 @@ val ContentBottomSpacing = 16.dp
 val LocalFloatingChromeHeight = compositionLocalOf { ContentBottomSpacing }
 
 /**
- * The mini player's own surface. Fixed per light/dark theme rather than the
- * section palette: the player is the one piece of chrome that persists
- * across every screen, so giving it a constant colour (per theme) is what
- * makes it read as a single object following you around instead of a strip
- * that recolours itself whenever you change tabs.
- *
- * Bright gold in light mode; a deeper mustard gold in dark mode — the same
- * warm hue carried at a tone that reads as "gold on a night sky" rather
- * than as a light-mode colour that just got dimmed.
- *
- * Held well below full opacity. Content no longer scrolls underneath —
- * the shell ends it at this pill's top edge — so what shows through is the
- * page's own flat field rather than passing artwork, and the fill can go
- * much further than it safely could before.
- *
- * 0.72 is the floor, set by DARK mode specifically: this pill carries dark
- * ink on gold, and as the gold thins toward a near-black field the two
- * close on each other. Measured, 0.72 leaves the title at ~4.9:1 and 0.66
- * drops it to ~4.3:1, under the 4.5:1 readability threshold. Light mode
- * sits above 12:1 throughout and is not the constraint.
+ * The mini player's surface: the catalogue's solid block, the same on every
+ * screen and never see-through, so the title on it reads at a glance in a
+ * moving car whatever scrolls underneath.
  */
 @Composable
-fun miniPlayerField(): Color =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) {
-        Color(0xFFE1BE1F).copy(alpha = 0.72f)
-    } else {
-        Color(0xFFFFD54F).copy(alpha = 0.72f)
-    }
+fun miniPlayerField(): Color = Catalog.block
+
+/** The mini player's edge: none needed on a solid block; kept transparent for callers. */
+val MiniPlayerRim = Color.Transparent
+
+/** Ink on the mini player block. */
+val MiniPlayerInk: Color
+    @Composable get() = Catalog.onBlock
+
+/** Secondary text on the mini player block. */
+val MiniPlayerMuted: Color
+    @Composable get() = Catalog.onBlockMuted
+
+/** Selected segment (Songs / Albums / Artists): catalogue blue. */
+val SegmentSelectedField: Color
+    @Composable get() = Catalog.blue
+val SegmentSelectedInk: Color
+    @Composable get() = Catalog.onBlue
+
+/** Unselected segments: the raised surface. */
+val SegmentField: Color
+    @Composable get() = Catalog.raised
+val SegmentInk: Color
+    @Composable get() = Catalog.ink
+
+/** A tab with nothing in it yet. */
+val SegmentFieldMuted: Color
+    @Composable get() = Catalog.ground
+val SegmentInkMuted: Color
+    @Composable get() = Catalog.muted
 
 /**
- * The lit rim along the mini player's edge, matching the nav bar's.
- *
- * Once the surface below it is translucent the pill needs an edge of its
- * own, or it stops reading as an object sitting on top of the page and
- * starts looking like the page is simply tinted yellow in that band.
- */
-val MiniPlayerRim = Color(0x73FFFFFF)
-
-/** Ink on [MiniPlayerField] — dark, since the yellow is bright. */
-val MiniPlayerInk = Color(0xFF2A2206)
-
-/** Secondary text on [MiniPlayerField]. */
-val MiniPlayerMuted = Color(0xA62A2206)
-
-/** Selected segment in the Songs / Albums / Artists control. */
-val SegmentSelectedField = Color(0xFF574F63)
-val SegmentSelectedInk = Color(0xFFFFFFFF)
-
-/** Unselected segments — a light lavender chip. */
-val SegmentField = Color(0xFFEDE7F6)
-val SegmentInk = Color(0xFF3F3A4A)
-
-/** The quietest segment tier, for a tab with nothing in it yet. */
-val SegmentFieldMuted = Color(0xFFF4F0FA)
-val SegmentInkMuted = Color(0xFF8A8496)
-
-private val AmberLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFFF3A311),
-    onAccent = Color(0xFF1A1403),
-)
-
-private val AmberDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFFF3A311),
-    onAccent = Color(0xFF1A1403),
-)
-
-// Green and Blue previously carried Amber's accent (#F3A311) and onAccent
-// verbatim — copy-pasted when the palettes were added and never changed. That
-// is why the Play button on a green playlist and the preset chips on the blue
-// Equalizer rendered gold on screens with no other warm colour in them. Each
-// family now carries its own accent, following Amber's own pattern: light
-// palettes accent with their dark ink, dark palettes with the family's bright
-// hue.
-private val GreenLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF1E9153),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val GreenDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF3FBF77),
-    onAccent = Color(0xFF07130C),
-)
-
-private val BlueLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF2C87CE),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val BlueDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF4FA3E3),
-    onAccent = Color(0xFF06131F),
-)
-
-private val StoneLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF6E6A5F),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val StoneDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFFE6DDCB),
-    onAccent = Color(0xFF17150F),
-)
-
-private val TealLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF128F8A),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val TealDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF3FBFB6),
-    onAccent = Color(0xFF04211F),
-)
-
-private val CoralLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFFDA4A31),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val CoralDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFFE9573F),
-    onAccent = Color(0xFF210A05),
-)
-
-private val LavenderLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF6C4BE8),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val LavenderDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF9B85FF),
-    onAccent = Color(0xFF17142B),
-)
-
-@Composable
-fun amberPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) AmberDark else AmberLight
-
-/**
- * The library's palette: Cyber-Glass ([CyberGlassPalette]), obsidian and
- * cyan in dark theme, pearl and deep cyan in light.
+ * Every section's palette: the catalogue. Sections used to own a hue each
+ * (amber Home, green Playlists, coral Discover...); they are told apart by
+ * their titles now, and the one structure colour means the same thing on
+ * every screen. The named functions stay so screens and tests compile.
  */
 @Composable
-fun libraryPalette(): EditorialPalette = CyberGlassPalette
+fun catalogPalette(): EditorialPalette {
+    val c = Catalog
+    return EditorialPalette(field = c.ground, ink = c.ink, muted = c.muted, line = c.line, accent = c.blue, onAccent = c.onBlue)
+}
 
 @Composable
-fun greenPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) GreenDark else GreenLight
+fun amberPalette(): EditorialPalette = catalogPalette()
 
-/** Equalizer. Blue reads as "instrument panel" next to the library's amber. */
+/** The library's palette. */
 @Composable
-fun bluePalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) BlueDark else BlueLight
-
-/**
- * Settings. The one unsaturated field in the set, on purpose — settings is
- * the screen you pass through rather than dwell in, and a shouting color
- * would be competing with the sections that actually hold content.
- */
-@Composable
-fun stonePalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) StoneDark else StoneLight
-
-/**
- * Discover. Warm and loud on purpose — it is the one section that sends you
- * somewhere Harmony doesn't control, so it should not be mistakable for the
- * library's amber at a glance.
- */
-/**
- * Downloads. The screen itself renders in teal from the Material scheme; the
- * shell previously handed it lavender, so the mini player and navigation bar
- * came out purple over a teal screen. Same hue family now, until Downloads is
- * converted to the editorial kit properly.
- */
-@Composable
-fun tealPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) TealDark else TealLight
+fun libraryPalette(): EditorialPalette = catalogPalette()
 
 @Composable
-fun coralPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) CoralDark else CoralLight
+fun greenPalette(): EditorialPalette = catalogPalette()
 
-/**
- * The player's field, expressed as an EditorialPalette so the app shell can
- * treat every destination uniformly. The field values here MUST match
- * PlayerPalette's background, or the player screen gets a seam where the
- * chrome meets it.
- */
+/** Equalizer. */
 @Composable
-fun lavenderPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) LavenderDark else LavenderLight
+fun bluePalette(): EditorialPalette = catalogPalette()
+
+/** Settings, the tag editor and the FLAC check. */
+@Composable
+fun stonePalette(): EditorialPalette = catalogPalette()
+
+/** Downloads. */
+@Composable
+fun tealPalette(): EditorialPalette = catalogPalette()
+
+/** Discover. */
+@Composable
+fun coralPalette(): EditorialPalette = catalogPalette()
+
+/** Recognize. */
+@Composable
+fun lavenderPalette(): EditorialPalette = catalogPalette()
 
 /**
  * Cross-fades every color in a palette at once, so moving between sections

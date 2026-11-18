@@ -139,7 +139,7 @@ class ThemeShowcaseScreenshotTest {
                         shuffleOn = true, repeatMode = RepeatMode.OFF, deviceLabel = "Phone speaker",
                         deviceIcon = Icons.Rounded.Headphones,
                         upNext = listOf(1 to songs[1], 2 to songs[2]),
-                        telemetry = "LIVE SPECTRAL EQ",
+                        telemetry = "Equalizer tuning to this song",
                     ),
                     actions = MiniPlayerActions(),
                 )

@@ -35,6 +35,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(composeBom)
     testImplementation(libs.compose.ui.test.junit4)
+    // The test activity Robolectric launches, for every variant CI tests (release included).
+    testImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation(composeBom)
     debugImplementation(libs.compose.ui.test.manifest)
 }
