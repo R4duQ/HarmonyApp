@@ -225,14 +225,14 @@ private fun FocusCard(
             mine?.message?.let { Text(it, color = palette.muted, fontSize = 12.sp, modifier = Modifier.testTag(DiscoveryTags.PREVIEW_NOTE)) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RoundAction(Icons.Rounded.PushPin, if (item.kept) "Stop keeping" else "Keep when regenerating", palette,
-                    { actions.toggleKeep(item.key) }, enabled = !replacing, active = item.kept, modifier = Modifier.testTag(DiscoveryTags.KEEP))
-                RoundAction(Icons.Rounded.ThumbUp, "More like this", palette, { actions.moreLike(item.key) }, enabled = !replacing,
+                    { actions.toggleKeep(item.key) }, enabled = !replacing, active = item.kept, caption = if (item.kept) "Kept" else "Keep", modifier = Modifier.testTag(DiscoveryTags.KEEP))
+                RoundAction(Icons.Rounded.ThumbUp, "More like this", palette, { actions.moreLike(item.key) }, enabled = !replacing, caption = "More like",
                     modifier = Modifier.testTag(DiscoveryTags.MORE_LIKE))
-                RoundAction(Icons.Rounded.SwapHoriz, "Replace this song", palette, { actions.replace(item.key) }, enabled = !replacing,
+                RoundAction(Icons.Rounded.SwapHoriz, "Replace this song", palette, { actions.replace(item.key) }, enabled = !replacing, caption = "Replace",
                     modifier = Modifier.testTag(DiscoveryTags.REPLACE))
-                RoundAction(Icons.Rounded.Block, "Not interested", palette, { actions.notInterested(item.key) }, enabled = !replacing,
+                RoundAction(Icons.Rounded.Block, "Not interested", palette, { actions.notInterested(item.key) }, enabled = !replacing, caption = "Not for me",
                     modifier = Modifier.testTag(DiscoveryTags.NOT_INTERESTED))
-                RoundAction(Icons.Rounded.Delete, "Remove from selection", palette, { actions.remove(item.key) }, enabled = !replacing,
+                RoundAction(Icons.Rounded.Delete, "Remove from selection", palette, { actions.remove(item.key) }, enabled = !replacing, caption = "Remove",
                     modifier = Modifier.testTag(DiscoveryTags.REMOVE))
             }
         }

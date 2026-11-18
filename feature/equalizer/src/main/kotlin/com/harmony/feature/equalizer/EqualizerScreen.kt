@@ -1,5 +1,9 @@
 package com.harmony.feature.equalizer
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -201,22 +205,22 @@ fun EqualizerScreen(
             Column(Modifier.weight(1f)) {
                 Text(
                     "Equalizer",
-                    fontSize = 40.sp,
-                    lineHeight = 44.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-1).sp,
+                    style = MaterialTheme.typography.headlineLarge,
                     color = palette.ink,
                 )
+                // What shapes the sound right now, named first, at reading size:
+                // the one thing to know at a glance while the music plays.
                 Text(
                     when {
-                        status.bitPerfect -> "Bit-perfect — the DAC gets the file untouched"
-                        !eq.enabled -> "Off — flat, with clean-output protection"
-                        eq.clarity -> "On — Clarity Live sets every band, live"
-                        eq.auto -> "On — Auto calibrates to what it hears, live"
-                        else -> "On — your curve"
+                        status.bitPerfect -> "Active: Bit-perfect · the DAC gets the file untouched"
+                        !eq.enabled -> "Off · the music plays flat"
+                        eq.clarity -> "Active: Clarity Live · it sets every band as the song plays"
+                        eq.auto -> "Active: Auto · your curve, corrected live for this output"
+                        else -> "Active: your curve"
                     },
-                    fontSize = 12.sp,
-                    color = palette.muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (eq.enabled || status.bitPerfect) palette.ink else palette.muted,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
             EditorialSwitch(eq.enabled, viewModel::setEnabled, palette)
@@ -307,17 +311,21 @@ private fun AutoCard(eq: EqSettings, status: EqStatus, viewModel: EqualizerViewM
             }
             EditorialSwitch(on, { viewModel.toggleAuto() }, palette)
         }
-        Text(
+        // The how-it-works detail stays one tap away instead of a paragraph
+        // that pushes the controls down.
+        var howOpen by remember { mutableStateOf(false) }
+        androidx.compose.material3.TextButton(onClick = { howOpen = !howOpen }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
+            Text(if (howOpen) "Hide how Auto works" else "How Auto works", style = MaterialTheme.typography.labelLarge, color = palette.accent)
+        }
+        if (howOpen) Text(
             "Auto listens to the music as it plays, in the ten bands, about every 1.2 seconds, and compares " +
                 "its balance with a target for the output. It lifts thin sub-bass and air by up to 4.5 dB and " +
                 "takes out boxy mid-bass and harsh upper mids by up to 4.5 dB, gliding on top of your sliders. " +
                 "In silence and quiet intros (under −42 dBFS) it holds still, so it never lifts noise. Heavy " +
                 "kicks pull the bass boost back and sharp sibilance the 4–8 kHz boost, within milliseconds. " +
                 "It never reads tags or genres.",
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
+            style = MaterialTheme.typography.bodySmall,
             color = palette.muted,
-            modifier = Modifier.padding(top = 10.dp),
         )
     }
 }

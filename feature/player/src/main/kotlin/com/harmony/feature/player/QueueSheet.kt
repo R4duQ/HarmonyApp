@@ -1,5 +1,19 @@
 package com.harmony.feature.player
 
+import com.harmony.core.model.ShuffleMode
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.material.icons.rounded.LibraryAddCheck
+import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -209,6 +223,10 @@ internal fun QueueSheetContent(
     var dragFrom by remember { mutableIntStateOf(-1) }
     var dragTo by remember { mutableIntStateOf(-1) }
     var dragBase by remember { mutableIntStateOf(0) }
+    // The player's own order when the drag began, to tell at the drop whether
+    // the queue itself changed meanwhile (a move still awaiting the player's
+    // answer is not a change: the screen already shows it).
+    var dragPlayerKeys by remember { mutableStateOf<List<Long>>(emptyList()) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     // All rows are the same height, so one measurement serves every drag.
     var rowHeightPx by remember { mutableFloatStateOf(0f) }
@@ -224,6 +242,9 @@ internal fun QueueSheetContent(
     val latestUpcoming by rememberUpdatedState(upcoming)
     val latestFirstUpcoming by rememberUpdatedState(firstUpcoming)
     val latestOnMove by rememberUpdatedState(onMove)
+    // The player's own order, as it is now: a song can join it mid-drag (an
+    // online mix's next song becomes ready), shifting every index after it.
+    val latestEntries by rememberUpdatedState(queueEntries)
 
     // The player's answer (a new queue, or another song playing) replaces the local order.
     LaunchedEffect(state.queue, state.queueIndex) {
@@ -264,7 +285,7 @@ internal fun QueueSheetContent(
     val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.58f).dp
 
     Column(Modifier.fillMaxWidth()) {
-        QueueHeader(upcoming.size, palette)
+        QueueHeader(upcoming.size, palette, state.shuffleMode, picks = state.playNextCount)
 
         if (nowPlaying != null) {
             NowPlayingCard(
@@ -319,7 +340,7 @@ internal fun QueueSheetContent(
                 Column {
                     when {
                         state.playNextCount > 0 && absolute == firstUpcoming ->
-                            QueueSectionLabel("Next up", palette, accent = true)
+                            QueueSectionLabel("Your picks", palette, accent = true)
                         state.playNextCount > 0 && absolute == priorityEnd + 1 ->
                             QueueSectionLabel("Then", palette)
                         state.playNextCount == 0 && absolute == firstUpcoming ->
@@ -332,6 +353,7 @@ internal fun QueueSheetContent(
                         artworkUri = song.artworkUri,
                         durationMs = song.durationMs,
                         palette = palette,
+                        picked = state.playNextCount > 0 && absolute <= priorityEnd,
                         isDragging = isDragging,
                         canMoveUp = rel > 0,
                         canMoveDown = rel < upcoming.lastIndex,
@@ -369,6 +391,7 @@ internal fun QueueSheetContent(
                                         dragFrom = index
                                         dragTo = index
                                         dragBase = latestFirstUpcoming
+                                        dragPlayerKeys = latestEntries.map { it.key }
                                         dragOffset = 0f
                                         rowHeight = rowHeightPx.takeIf { it > 0f } ?: 72.dp.toPx()
                                     }
@@ -413,8 +436,23 @@ internal fun QueueSheetContent(
                                         dragOffset = 0f
                                         // One move for the whole gesture, from
                                         // the order the drag started on.
-                                        if (order != null) commitMove(order.moved(to, from), from, to, dragBase)
-                                        else localOrder = null
+                                        if (order == null) {
+                                            localOrder = null
+                                        } else {
+                                            val started = order.moved(to, from)
+                                            val now = latestEntries
+                                            if (now.map { it.key } == dragPlayerKeys && latestFirstUpcoming == dragBase) {
+                                                commitMove(started, from, to, dragBase)
+                                            } else {
+                                                // The queue changed under the finger. Keep what the
+                                                // user meant, "this song right after that one", on the
+                                                // queue as it is now; indices from the start would be
+                                                // refused, and the row would jump back.
+                                                val move = QueueDrop.retarget(now.map { it.key }, entry.key, order.map { it.key }, to)
+                                                if (move == null) localOrder = null
+                                                else commitMove(now, move.first, move.second, latestFirstUpcoming)
+                                            }
+                                        }
                                     }
                                 },
                                 onDragCancel = {
@@ -438,27 +476,40 @@ internal fun QueueSheetContent(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun QueueHeader(upcomingCount: Int, palette: PlayerPalette) {
+private fun QueueHeader(upcomingCount: Int, palette: PlayerPalette, shuffleMode: ShuffleMode = ShuffleMode.OFF, picks: Int = 0) {
     Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 14.dp)) {
-        Text(
-            "Queue",
-            fontSize = 26.sp,
-            lineHeight = 31.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.5).sp,
-            color = palette.ink,
-        )
+        Text("Queue", style = MaterialTheme.typography.headlineMedium, color = palette.ink)
         Text(
             when (upcomingCount) {
                 0 -> "Nothing after this"
-                1 -> "1 track up next"
-                else -> "$upcomingCount tracks up next"
+                1 -> "1 song up next"
+                else -> "$upcomingCount songs up next"
             },
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
+            style = MaterialTheme.typography.bodyMedium,
             color = palette.muted,
         )
+        // Shuffle reorders what comes after your picks, never the picks: say so,
+        // so a reshuffled list doesn't read as your selection being lost.
+        if (shuffleMode != ShuffleMode.OFF && picks > 0) {
+            Text(
+                "${shuffleName(shuffleMode)} is on · your ${if (picks == 1) "pick plays" else "$picks picks play"} first",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.accent,
+                modifier = Modifier.padding(top = 2.dp).testTag(QueueTags.SHUFFLE_NOTE),
+            )
+        }
     }
+}
+
+private fun shuffleName(mode: ShuffleMode) = when (mode) {
+    ShuffleMode.OFF -> "Shuffle"
+    ShuffleMode.RANDOM -> "Shuffle"
+    else -> "Smart Shuffle"
+}
+
+internal object QueueTags {
+    const val SHUFFLE_NOTE = "queue_shuffle_note"
+    fun pick(title: String) = "queue_pick_$title"
 }
 
 /**
@@ -796,6 +847,18 @@ private fun OnlineMixPanel(
  * nothing queued after the song playing, that playback goes on by itself; when
  * nothing online can come, that the library plays on and why.
  */
+/**
+ * The mix line Now Playing and the mini player show, from the player's real
+ * state: null with no mix, or a library-only one (nothing can wait or fail
+ * there); otherwise what [statusLine] says, flagged as working while a song
+ * is being found, prepared or queued.
+ */
+internal fun mixStatusFor(mix: MixState?, online: OnlineMixState, upcomingEmpty: Boolean): MixStatusUi? {
+    if (mix == null || mix.source == MixSource.OFFLINE) return null
+    val progress = online.progress()
+    return MixStatusUi(statusLine(progress, mix.source, upcomingEmpty), working = progress !is OnlineProgress.Stopped)
+}
+
 internal fun statusLine(progress: OnlineProgress, source: MixSource, upcomingEmpty: Boolean): String {
     val startsByItself = if (upcomingEmpty) " · playback starts by itself when it's ready" else ""
     return when (progress) {
@@ -870,6 +933,8 @@ private fun QueueRow(
     palette: PlayerPalette,
     isDragging: Boolean,
     canMoveUp: Boolean,
+    /** Queued by hand ("Play next"): it keeps its place ahead of shuffle and the mix. */
+    picked: Boolean = false,
     canMoveDown: Boolean,
     onClick: () -> Unit,
     onRemove: () -> Unit,
@@ -897,7 +962,7 @@ private fun QueueRow(
             // two competing.
             .clickable(onClick = onClick)
             .semantics {
-                contentDescription = "$title by $artist"
+                contentDescription = if (picked) "$title by $artist, your pick" else "$title by $artist"
                 // Reordering by drag is impossible with a screen reader, so
                 // the same two moves are exposed as explicit actions.
                 customActions = buildList {
@@ -931,22 +996,25 @@ private fun QueueRow(
         ) {
             Text(
                 title,
-                fontSize = 14.5.sp,
-                lineHeight = 19.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmall,
                 color = palette.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 1.dp),
             )
             Text(
-                "$artist · ${formatDuration(durationMs)}",
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
+                buildAnnotatedString {
+                    if (picked) {
+                        withStyle(SpanStyle(color = palette.accent, fontWeight = FontWeight.SemiBold)) { append("Your pick") }
+                        append("  ·  ")
+                    }
+                    append("$artist · ${formatDuration(durationMs)}")
+                },
+                style = MaterialTheme.typography.bodySmall,
                 color = palette.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 1.dp),
+                modifier = Modifier.padding(start = 1.dp).then(if (picked) Modifier.testTag(QueueTags.pick(title)) else Modifier),
             )
         }
         trailing?.invoke()
@@ -993,9 +1061,9 @@ private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, 
         ) {
             when (status) {
                 KeepStatus.Keeping -> CircularProgressIndicator(Modifier.size(14.dp), color = palette.accent, strokeWidth = 2.dp)
-                is KeepStatus.Kept -> Icon(Icons.Rounded.Check, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
+                is KeepStatus.Kept -> Icon(Icons.Rounded.LibraryAddCheck, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
                 is KeepStatus.Failed -> Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = palette.muted, modifier = Modifier.size(16.dp))
-                null -> Icon(Icons.Rounded.Download, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
+                null -> Icon(Icons.Rounded.LibraryAdd, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
             }
             Text(
                 when (status) {
@@ -1013,18 +1081,37 @@ private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, 
         }
         return
     }
-    IconButton(
-        onClick = { onKeep(song) },
-        enabled = enabled,
-        modifier = Modifier
-            .size(48.dp)
-            .semantics { contentDescription = description },
-    ) {
-        when (status) {
-            KeepStatus.Keeping -> CircularProgressIndicator(Modifier.size(18.dp), color = palette.accent, strokeWidth = 2.dp)
-            is KeepStatus.Kept -> Icon(Icons.Rounded.DownloadDone, contentDescription = null, tint = palette.accent, modifier = Modifier.size(20.dp))
-            is KeepStatus.Failed -> Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = palette.muted, modifier = Modifier.size(20.dp))
-            null -> Icon(Icons.Rounded.Download, contentDescription = null, tint = palette.ink, modifier = Modifier.size(20.dp))
+    // Saved: say where it went, in words, not only with a changed glyph.
+    AnimatedContent(
+        targetState = status is KeepStatus.Kept,
+        transitionSpec = { (fadeIn(tween(220)) + scaleIn(initialScale = 0.85f)).togetherWith(fadeOut(tween(120))) },
+        label = "keep-row",
+    ) { kept ->
+        if (kept) {
+            Row(
+                Modifier
+                    .heightIn(min = 48.dp)
+                    .semantics { contentDescription = description }
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.LibraryAddCheck, contentDescription = null, tint = palette.accent, modifier = Modifier.size(18.dp))
+                Text("In library", style = MaterialTheme.typography.labelMedium, color = palette.accent, modifier = Modifier.padding(start = 4.dp))
+            }
+        } else {
+            IconButton(
+                onClick = { onKeep(song) },
+                enabled = enabled,
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = description },
+            ) {
+                when (status) {
+                    KeepStatus.Keeping -> CircularProgressIndicator(Modifier.size(18.dp), color = palette.accent, strokeWidth = 2.dp)
+                    is KeepStatus.Failed -> Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = palette.muted, modifier = Modifier.size(20.dp))
+                    else -> Icon(Icons.Rounded.LibraryAdd, contentDescription = null, tint = palette.ink, modifier = Modifier.size(20.dp))
+                }
+            }
         }
     }
 }
@@ -1057,5 +1144,30 @@ private fun QueueEmptyState(palette: PlayerPalette) {
             lineHeight = 18.sp,
             color = palette.muted,
         )
+    }
+}
+
+/** Re-aims a drop when the queue changed during the drag. */
+internal object QueueDrop {
+    /**
+     * Where [dragged] goes in [now] (the player's upcoming keys as they are),
+     * given the order the user saw at the drop ([shown], with [dragged] at
+     * [droppedAt]): right after the row it was dropped under, or right before
+     * the row it was dropped above when it went to the top. Null when the
+     * dragged song is no longer queued.
+     */
+    fun retarget(now: List<Long>, dragged: Long, shown: List<Long>, droppedAt: Int): Pair<Int, Int>? {
+        val from = now.indexOf(dragged)
+        if (from < 0) return null
+        val without = now.filter { it != dragged }
+        val after = shown.getOrNull(droppedAt - 1)?.let { without.indexOf(it) }?.takeIf { it >= 0 }
+        val before = shown.getOrNull(droppedAt + 1)?.let { without.indexOf(it) }?.takeIf { it >= 0 }
+        val to = when {
+            droppedAt == 0 -> 0
+            after != null -> after + 1
+            before != null -> before
+            else -> without.size
+        }
+        return from to to.coerceIn(0, now.lastIndex)
     }
 }

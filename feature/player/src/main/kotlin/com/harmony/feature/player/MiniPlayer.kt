@@ -59,6 +59,8 @@ fun MiniPlayer(
     val forms by viewModel.outputForms.collectAsStateWithLifecycle()
     val brain by viewModel.brainTelemetry.collectAsStateWithLifecycle()
     val liveEq by viewModel.liveSpectralEq.collectAsStateWithLifecycle()
+    val mix by viewModel.mix.collectAsStateWithLifecycle()
+    val onlineMix by viewModel.onlineMix.collectAsStateWithLifecycle()
 
     var lastSong by remember { mutableStateOf<Song?>(null) }
     state.currentSong?.let { lastSong = it }
@@ -110,6 +112,7 @@ fun MiniPlayer(
             telemetry = miniTelemetryLine(
                 brain.nowPlaying?.takeIf { it.trace.trackId == song.id },
                 liveSpectralEq = liveEq,
+                mixStatus = mixStatusFor(mix, onlineMix, upcomingEmpty = state.queueIndex >= state.queue.lastIndex),
             ),
         )
         val actions = remember(viewModel, onExpand) {
@@ -129,29 +132,35 @@ fun MiniPlayer(
 }
 
 /**
- * The micro-subtitle under the title: what the engines are doing for this
- * song, from live data only. "LIVE SPECTRAL EQ" while the equalizer's AUTO
- * LIVE calibrates to the music; why Smart Shuffle picked the song when it
- * did ("VIBE MATCH 94%"). Null when neither applies.
+ * The line under the mini player's title, in plain words and from live data
+ * only. A running online or combined mix comes first ([mixStatus]): whether
+ * the next song is being prepared, will start by itself, or the library
+ * plays on and why. Otherwise why Smart Shuffle picked this song, and
+ * whether the equalizer is adjusting itself to it. Null when nothing applies.
  */
-internal fun miniTelemetryLine(decision: com.harmony.core.model.QueuedDecision?, liveSpectralEq: Boolean): String? {
+internal fun miniTelemetryLine(
+    decision: com.harmony.core.model.QueuedDecision?,
+    liveSpectralEq: Boolean,
+    mixStatus: MixStatusUi? = null,
+): String? {
+    if (mixStatus != null) return mixStatus.text
     val parts = buildList {
-        if (liveSpectralEq) add("LIVE SPECTRAL EQ")
         decision?.let {
             add(
                 when (it.trace.reason) {
-                    com.harmony.core.model.ReasonTag.VIBE_MATCH -> "VIBE MATCH ${it.vibeMatchPct}%"
-                    com.harmony.core.model.ReasonTag.MARKOV_FAVORITE -> "YOUR USUAL NEXT"
-                    com.harmony.core.model.ReasonTag.BANDIT_GEM -> "REDISCOVERY"
-                    com.harmony.core.model.ReasonTag.POST_SKIP_PIVOT -> "POST-SKIP PIVOT"
-                    com.harmony.core.model.ReasonTag.PROVEN_FAVORITE -> "PROVEN FAVORITE"
-                    com.harmony.core.model.ReasonTag.SONIC_ADVENTURE -> "SONIC ADVENTURE"
-                    com.harmony.core.model.ReasonTag.COLD_START -> "WILDCARD"
+                    com.harmony.core.model.ReasonTag.VIBE_MATCH -> "Sounds like the last song · ${it.vibeMatchPct}% match"
+                    com.harmony.core.model.ReasonTag.MARKOV_FAVORITE -> "Often follows your last song"
+                    com.harmony.core.model.ReasonTag.BANDIT_GEM -> "One you haven't played in a while"
+                    com.harmony.core.model.ReasonTag.POST_SKIP_PIVOT -> "A change of direction after your skip"
+                    com.harmony.core.model.ReasonTag.PROVEN_FAVORITE -> "One of your favourites"
+                    com.harmony.core.model.ReasonTag.SONIC_ADVENTURE -> "Further from your usual"
+                    com.harmony.core.model.ReasonTag.COLD_START -> "A fresh pick"
                 },
             )
         }
+        if (liveSpectralEq) add("Equalizer tuning to this song")
     }
-    return parts.takeIf { it.isNotEmpty() }?.joinToString(" • ")
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
 /** The songs after the current one, with their queue positions; wraps round when the whole queue repeats. */

@@ -1,5 +1,6 @@
 package com.harmony.feature.discover.ui
 
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -246,11 +247,13 @@ internal fun RoundAction(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     active: Boolean = false,
+    /** A word under the icon, so the five song actions read without guessing. */
+    caption: String? = null,
 ) {
-    Box(
-        modifier.size(48.dp).clip(CircleShape).pressable(onClick, enabled = enabled, pressedScale = 0.9f)
-            .semantics { contentDescription = label; if (active) stateDescription = "On" },
-        contentAlignment = Alignment.Center,
+    androidx.compose.foundation.layout.Column(
+        modifier.widthIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).pressable(onClick, enabled = enabled, pressedScale = 0.92f)
+            .semantics(mergeDescendants = true) { contentDescription = label; if (active) stateDescription = "On" },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             Modifier.size(42.dp).clip(CircleShape)
@@ -263,6 +266,15 @@ internal fun RoundAction(
                 active -> palette.onAccent
                 else -> palette.ink
             }, modifier = Modifier.size(20.dp))
+        }
+        if (caption != null) {
+            androidx.compose.material3.Text(
+                caption,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = if (active) palette.accent else palette.muted,
+                maxLines = 1,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }

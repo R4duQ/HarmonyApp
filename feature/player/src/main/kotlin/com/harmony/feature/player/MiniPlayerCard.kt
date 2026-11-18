@@ -1,5 +1,6 @@
 package com.harmony.feature.player
 
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -202,6 +203,7 @@ private fun miniColors(c: HarmonyColors) = MiniColors(
 fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modifier = Modifier) {
     val catalog = Catalog
     val colors = remember(catalog) { miniColors(catalog) }
+    val compact = LocalConfiguration.current.screenHeightDp < 720 || LocalDensity.current.fontScale > 1.2f
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val onExpand by rememberUpdatedState(actions.onExpand)
@@ -352,8 +354,8 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                     if (telemetry != null) {
                         Text(
                             telemetry,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = catalog.blockLive,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = catalog.onBlockMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 1.dp),
@@ -399,7 +401,10 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                             )
                         }
                     }
-                    if (ui.upNext.isNotEmpty()) UpNextRow(ui.upNext, colors, actions.onUpNext)
+                    // On a short screen or with a large font the card gives back the
+                    // Up next row, so the page's last row and the navigation stay
+                    // in reach; the queue is one tap away in the player.
+                    if (ui.upNext.isNotEmpty() && !compact) UpNextRow(ui.upNext, colors, actions.onUpNext)
                 }
             }
         }
