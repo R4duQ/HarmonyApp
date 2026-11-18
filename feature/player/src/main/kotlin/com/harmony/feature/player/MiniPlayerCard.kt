@@ -1,5 +1,9 @@
 package com.harmony.feature.player
 
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -102,8 +106,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.harmony.core.ui.component.neonGlow
-import com.harmony.core.ui.theme.CyberGlassColors
-import com.harmony.core.ui.theme.CyberGlassScheme
+import com.harmony.core.ui.theme.Catalog
+import com.harmony.core.ui.theme.HarmonyColors
 import com.harmony.domain.playback.AudioLevels
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.Song
@@ -154,8 +158,10 @@ internal object MiniPlayerTags {
 }
 
 /**
- * The card's colours: Cyber-Glass in both themes, smoked obsidian glass in
- * dark and pearl glass in light, taken from the theme's [CyberGlassScheme].
+ * The card's colours: the catalogue's solid block ([HarmonyColors.block]),
+ * near-black in light and a raised graphite in dark, with its own ink. The
+ * one colour on it is the red of what is playing: the played part of the
+ * line and the live spectrum.
  */
 private class MiniColors(
     val card: Color,
@@ -170,17 +176,17 @@ private class MiniColors(
     val track: Color,
 )
 
-private fun miniColors(c: CyberGlassScheme) = MiniColors(
-    card = c.Card.copy(alpha = c.CARD_ALPHA),
-    ink = c.TextPrimary,
-    muted = c.TextSecondary,
-    button = c.Recessed,
-    buttonInk = c.TextPlaceholder,
-    chip = c.Recessed,
-    chipInk = c.TextSilver,
-    deviceDot = c.Cyan.copy(alpha = 0.16f),
-    deviceDotInk = c.Cyan,
-    track = c.Sky.copy(alpha = 0.12f),
+private fun miniColors(c: HarmonyColors) = MiniColors(
+    card = c.block,
+    ink = c.onBlock,
+    muted = c.onBlockMuted,
+    button = c.onBlock.copy(alpha = 0.08f),
+    buttonInk = c.onBlockMuted,
+    chip = c.onBlock.copy(alpha = 0.08f),
+    chipInk = c.onBlock,
+    deviceDot = Color.Transparent,
+    deviceDotInk = c.onBlockMuted,
+    track = c.onBlock.copy(alpha = 0.18f),
 )
 
 /**
@@ -194,8 +200,8 @@ private fun miniColors(c: CyberGlassScheme) = MiniColors(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modifier = Modifier) {
-    val glass = CyberGlassColors
-    val colors = remember(glass) { miniColors(glass) }
+    val catalog = Catalog
+    val colors = remember(catalog) { miniColors(catalog) }
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val onExpand by rememberUpdatedState(actions.onExpand)
@@ -235,22 +241,16 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
             },
     ) {
         val disc = (maxWidth * 0.27f).coerceIn(84.dp, 120.dp)
-        val shape = RoundedCornerShape(28.dp)
+        val shape = RoundedCornerShape(20.dp)
         val skipAt = 72.dp
 
         Box(Modifier.fillMaxWidth().padding(start = disc / 2)) {
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .shadow(
-                        18.dp,
-                        shape,
-                        ambientColor = glass.Violet,
-                        spotColor = glass.Cyan,
-                    )
+                    .shadow(8.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
                     .clip(shape)
                     .background(colors.card)
-                    .border(1.dp, glass.Iridescent, shape)
                     .testTag(MiniPlayerTags.CARD)
                     .semantics { contentDescription = "Now playing: ${ui.song.title} by ${ui.song.artist}. Open the player." }
                     .clickable(onClick = { expand(-tapLiftPx) })
@@ -337,10 +337,11 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                         modifier = Modifier.padding(top = 8.dp),
                     ) { song ->
                         Text(
-                            "${song.title} - ${song.artist}",
-                            fontSize = 18.sp,
-                            lineHeight = 23.sp,
-                            fontWeight = FontWeight.Bold,
+                            buildAnnotatedString {
+                                append(song.title)
+                                withStyle(SpanStyle(color = colors.muted, fontWeight = FontWeight.Normal)) { append("  ·  ${song.artist}") }
+                            },
+                            style = MaterialTheme.typography.titleMedium,
                             color = colors.ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -351,11 +352,8 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                     if (telemetry != null) {
                         Text(
                             telemetry,
-                            fontSize = 10.5.sp,
-                            lineHeight = 13.sp,
-                            letterSpacing = 0.9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = glass.LiveInk,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = catalog.blockLive,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 1.dp),
@@ -366,6 +364,8 @@ fun MiniPlayerCard(ui: MiniPlayerUi, actions: MiniPlayerActions, modifier: Modif
                         durationMs = ui.durationMs,
                         playing = ui.isPlaying,
                         track = colors.track,
+                        played = catalog.blockLive,
+                        thumb = colors.ink,
                         onSeek = actions.onSeek,
                         modifier = Modifier.padding(top = 6.dp).fillMaxWidth().height(22.dp).testTag(MiniPlayerTags.PROGRESS),
                     )
@@ -431,7 +431,7 @@ private val TAP_LIFT = 36.dp
 // ---------------------------------------------------------------------------
 
 /**
- * The cover as a record: round, with an iridescent rim, turning about once every
+ * The cover as a record: round and dark, turning about once every
  * nine seconds while the music plays. On pause it coasts to a stop and sinks
  * back a little; a skip gives it a quick extra turn; a swipe turns it with
  * the finger.
@@ -449,7 +449,7 @@ private fun Disc(
     onClick: () -> Unit,
     modifier: Modifier,
 ) {
-    val glass = CyberGlassColors
+    val glass = Catalog
     val turn = remember { Animatable(0f) }
     var firstSong by remember { mutableStateOf(true) }
     LaunchedEffect(playing) {
@@ -482,12 +482,10 @@ private fun Disc(
                 rotationZ = turn.value + nudge * 0.4f - (1f - e) * 160f
                 alpha = e.coerceIn(0f, 1f)
             }
-            .shadow(16.dp, CircleShape, ambientColor = glass.Violet, spotColor = glass.Cyan)
+            .shadow(8.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
             .clip(CircleShape)
             // The record stays a dark object in either theme.
             .background(Color(0xFF0D0D10))
-            // A 2dp neon violet-cyan ring.
-            .border(2.dp, glass.IridescentSweep, CircleShape)
             .testTag(MiniPlayerTags.DISC)
             .clickable(role = Role.Button, onClickLabel = "Open the player", onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -536,32 +534,20 @@ private val DiscLabelInk = Color(0xFFCAC4D0)
 
 @Composable
 private fun DeviceChip(label: String, icon: ImageVector, colors: MiniColors) {
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(50))
-            // A cyan-tinted capsule with cyan ink.
-            .background(CyberGlassColors.DevicePill)
-            .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(22.dp).clip(CircleShape).background(colors.deviceDot), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = colors.deviceDotInk, modifier = Modifier.size(14.dp))
-        }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = colors.deviceDotInk, modifier = Modifier.size(16.dp))
         AnimatedContent(
             targetState = label,
             transitionSpec = { fadeIn(tween(250)).togetherWith(fadeOut(tween(150))) },
             label = "mini-device",
         ) { text ->
             Text(
-                text.uppercase(),
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp,
-                letterSpacing = 0.6.sp,
-                fontWeight = FontWeight.Medium,
+                text,
+                style = MaterialTheme.typography.labelMedium,
                 color = colors.deviceDotInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 8.dp),
+                modifier = Modifier.padding(start = 6.dp),
             )
         }
     }
@@ -577,16 +563,13 @@ private fun RoundButton(
     active: Boolean = false,
     size: Dp = 38.dp,
 ) {
-    val glass = CyberGlassColors
-    val tint = if (active) glass.Cyan else colors.buttonInk
+    // Switched on: full ink on a lifted disc. Off: muted ink, no fill.
+    val tint = if (active) colors.ink else colors.buttonInk
     Box(
         Modifier
             .size(size)
-            // A glowing cyan ring on what is switched on, a faint sky rim on the rest.
-            .then(if (active) Modifier.neonGlow(glass.Cyan, 5.dp, 0.30f * glass.Glow) else Modifier)
             .clip(CircleShape)
-            .background(colors.button)
-            .border(1.dp, if (active) tint.copy(alpha = 0.7f) else glass.Sky.copy(alpha = 0.18f), CircleShape)
+            .background(if (active) colors.button else Color.Transparent)
             .testTag(tag)
             .clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -595,39 +578,16 @@ private fun RoundButton(
     }
 }
 
-/** The big violet button, with a soft halo breathing around it while the music plays. */
+/** Play / pause: the one filled control on the block, in its ink. */
 @Composable
 private fun PlayButton(playing: Boolean, onClick: () -> Unit, size: Dp = 50.dp) {
-    val glass = CyberGlassColors
-    val halo = remember { Animatable(0f) }
-    LaunchedEffect(playing) {
-        if (playing) {
-            while (true) {
-                halo.snapTo(0f)
-                halo.animateTo(1f, tween(1_600, easing = LinearEasing))
-            }
-        } else {
-            halo.animateTo(0f, tween(300))
-        }
-    }
-    val haloColor = glass.Purple
+    val catalog = Catalog
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size)) {
-        Canvas(Modifier.fillMaxSize()) {
-            val t = halo.value
-            if (t > 0f) {
-                drawCircle(
-                    haloColor.copy(alpha = 0.35f * (1f - t)),
-                    radius = this.size.minDimension / 2 * (0.86f + 0.14f * t),
-                )
-            }
-        }
         Box(
             Modifier
-                .size(size - 6.dp)
-                .neonGlow(glass.Violet, 6.dp, 0.30f * glass.Glow)
+                .size(size - 4.dp)
                 .clip(CircleShape)
-                .background(glass.PlayButton)
-                .border(1.dp, glass.Cyan.copy(alpha = 0.45f), CircleShape)
+                .background(catalog.onBlock)
                 .testTag(MiniPlayerTags.PLAY)
                 .clickable(role = Role.Button, onClickLabel = if (playing) "Pause" else "Play", onClick = onClick),
             contentAlignment = Alignment.Center,
@@ -643,7 +603,7 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit, size: Dp = 50.dp) 
                 Icon(
                     if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                     contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = Color.White,
+                    tint = catalog.block,
                     modifier = Modifier.size(26.dp),
                 )
             }
@@ -653,14 +613,10 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit, size: Dp = 50.dp) 
 
 @Composable
 private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNext: (Int) -> Unit) {
-    val divider = CyberGlassColors.Divider
     Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "UP NEXT",
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            letterSpacing = 0.8.sp,
-            fontWeight = FontWeight.SemiBold,
+            "Up next",
+            style = MaterialTheme.typography.labelMedium,
             color = colors.muted,
             modifier = Modifier.padding(end = 10.dp),
         )
@@ -692,8 +648,6 @@ private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNex
                         Modifier
                             .clip(RoundedCornerShape(50))
                             .background(colors.chip)
-                            // Recessed, a hairline round the inside edge.
-                            .border(1.dp, divider, RoundedCornerShape(50))
                             .testTag(MiniPlayerTags.upNext(index))
                             .semantics { contentDescription = "${song.title} by ${song.artist}" }
                             .clickable(role = Role.Button, onClickLabel = "Play now") { onUpNext(index) }
@@ -703,9 +657,7 @@ private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNex
                         Artwork(song.artworkUri, null, Modifier.size(24.dp).clip(CircleShape), cornerRadius = 999.dp)
                         Text(
                             song.title,
-                            fontSize = 12.sp,
-                            lineHeight = 15.sp,
-                            fontWeight = FontWeight.Medium,
+                            style = MaterialTheme.typography.labelMedium,
                             color = colors.chipInk,
                             maxLines = 1,
                             modifier = Modifier.padding(start = 7.dp).widthIn(max = 130.dp),
@@ -723,10 +675,9 @@ private fun UpNextRow(upNext: List<Pair<Int, Song>>, colors: MiniColors, onUpNex
 // ---------------------------------------------------------------------------
 
 /**
- * Progress as a rainbow wave up to where the song is, and a flat line after
- * it. While the music plays the wave runs along and the position moves on
- * every frame between the player's updates; on pause the wave settles flat.
- * Tap or drag to seek.
+ * Progress as a straight line: red up to where the song is (the live colour),
+ * the block's faint ink after it, a small thumb at the playhead. The position
+ * moves on every frame between the player's updates. Tap or drag to seek.
  */
 @Composable
 private fun WaveProgress(
@@ -734,11 +685,11 @@ private fun WaveProgress(
     durationMs: Long,
     playing: Boolean,
     track: Color,
+    played: Color,
+    thumb: Color,
     onSeek: (Long) -> Unit,
     modifier: Modifier,
 ) {
-    // Violet into cyan into mint, ending in a glowing laser spark.
-    val glass = CyberGlassColors
     val seek by rememberUpdatedState(onSeek)
     // Where the song is now: the last reported position, carried on with the clock while playing.
     var shown by remember { mutableFloatStateOf(0f) }
@@ -755,16 +706,6 @@ private fun WaveProgress(
             shown = ((positionMs + elapsed).toFloat() / durationMs).coerceIn(0f, 1f)
         } while (playing)
     }
-    val phase = remember { Animatable(0f) }
-    LaunchedEffect(playing) {
-        if (playing) {
-            while (true) {
-                phase.snapTo(phase.value % (2 * PI.toFloat()))
-                phase.animateTo(phase.value + 2 * PI.toFloat(), tween(1_400, easing = LinearEasing))
-            }
-        }
-    }
-    val amplitude by animateFloatAsState(if (playing) 1f else 0f, tween(500), label = "wave-amplitude")
     // For screen readers; the drawing below reads the per-frame position itself, so only it redraws.
     val reported = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 
@@ -795,75 +736,28 @@ private fun WaveProgress(
                 )
             },
     ) {
-        val thumbR = 8.dp.toPx()
+        val thumbR = (if (dragging != null) 7.dp else 5.dp).toPx()
         val left = thumbR
         val right = size.width - thumbR
         val mid = size.height / 2
         val fraction = dragging ?: shown
         val x = left + (right - left) * fraction
-        val stroke = 4.dp.toPx()
-        // What is still to come.
-        drawLine(track, Offset(x, mid), Offset(right, mid), strokeWidth = stroke, cap = StrokeCap.Round)
-        // What has been played: a wave in the rainbow.
-        if (x > left) {
-            val wave = Path()
-            val wavelength = 16.dp.toPx()
-            val amp = 3.dp.toPx() * amplitude
-            var px = left
-            wave.moveTo(px, mid + amp * sin(phase.value))
-            val step = 2f
-            while (px < x) {
-                px = (px + step).coerceAtMost(x)
-                // The wave flattens into the thumb so the two meet cleanly.
-                val ease = ((x - px) / (wavelength * 0.75f)).coerceIn(0f, 1f)
-                wave.lineTo(px, mid + amp * ease * sin((px - left) / wavelength * 2 * PI.toFloat() - phase.value))
-            }
-            drawPath(
-                wave,
-                // Violet into cyan into mint over what has been played.
-                Brush.horizontalGradient(
-                    glass.ProgressColors,
-                    startX = left,
-                    endX = maxOf(x, left + wavelength),
-                ),
-                style = Stroke(stroke, cap = StrokeCap.Round),
-            )
-        }
-        // The laser spark: a wide cyan bloom, a short streak along the line, a white-hot core.
-        drawCircle(
-            Brush.radialGradient(
-                listOf(glass.Cyan.copy(alpha = 0.55f * glass.Glow), glass.Cyan.copy(alpha = 0.12f * glass.Glow), Color.Transparent),
-                center = Offset(x, mid),
-                radius = thumbR * 2.2f,
-            ),
-            radius = thumbR * 2.2f,
-            center = Offset(x, mid),
-        )
-        drawLine(
-            Brush.horizontalGradient(
-                listOf(Color.Transparent, glass.Mint.copy(alpha = 0.9f), Color.Transparent),
-                startX = x - thumbR * 2.4f,
-                endX = x + thumbR * 2.4f,
-            ),
-            Offset(x - thumbR * 2.4f, mid),
-            Offset(x + thumbR * 2.4f, mid),
-            strokeWidth = 1.5.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
-        drawCircle(glass.Cyan, radius = thumbR * 0.62f, center = Offset(x, mid))
-        drawCircle(Color.White, radius = thumbR * 0.34f, center = Offset(x, mid))
+        val stroke = 3.dp.toPx()
+        drawLine(track, Offset(left, mid), Offset(right, mid), strokeWidth = stroke, cap = StrokeCap.Round)
+        if (x > left) drawLine(played, Offset(left, mid), Offset(x, mid), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawCircle(thumb, radius = thumbR, center = Offset(x, mid))
     }
 }
 
 // ---------------------------------------------------------------------------
-// The live mini-waveform (Cyber-Glass)
+// The live mini-waveform
 // ---------------------------------------------------------------------------
 
 private const val SPECTRUM_BARS = 7
 
 /**
  * Seven bars dancing to the music, from the EQ engine's own spectrum
- * (AudioLevels), cyan into violet with a soft glow. The engine's analyser
+ * (AudioLevels), in the live red. The engine's analyser
  * is only asked for while the music plays and the app is on screen; on
  * pause the bars settle low and the polling stops.
  */
@@ -873,7 +767,7 @@ private fun MiniSpectrum(playing: Boolean, modifier: Modifier) {
     val spectrum = remember { FloatArray(AudioLevels.SPECTRUM_BARS) }
     // Read only by the drawing: a new frame redraws without recomposing.
     var frame by remember { mutableIntStateOf(0) }
-    val glass = CyberGlassColors
+    val live = Catalog.blockLive
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, playing) {
         val choreographer = android.view.Choreographer.getInstance()
@@ -935,20 +829,12 @@ private fun MiniSpectrum(playing: Boolean, modifier: Modifier) {
         if (frame < 0) return@Canvas // reading the frame redraws the bars each tick
         val slot = size.width / SPECTRUM_BARS
         val barWidth = slot * 0.52f
-        val brush = Brush.verticalGradient(listOf(glass.Cyan, glass.Violet, glass.Purple))
         for (i in 0 until SPECTRUM_BARS) {
             val h = (size.height * levels[i]).coerceAtLeast(barWidth)
             val x = i * slot + (slot - barWidth) / 2f
             val top = (size.height - h) / 2f
             drawRoundRect(
-                brush,
-                topLeft = Offset(x - barWidth * 0.5f, top - barWidth * 0.4f),
-                size = Size(barWidth * 2f, h + barWidth * 0.8f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth),
-                alpha = 0.16f * glass.Glow,
-            )
-            drawRoundRect(
-                brush,
+                live,
                 topLeft = Offset(x, top),
                 size = Size(barWidth, h),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f),

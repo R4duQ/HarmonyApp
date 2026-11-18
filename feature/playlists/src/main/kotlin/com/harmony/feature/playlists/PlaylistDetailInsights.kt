@@ -1,5 +1,10 @@
 package com.harmony.feature.playlists
 
+import com.harmony.core.ui.theme.Catalog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -71,22 +76,19 @@ internal object PlaylistInsightTags {
     const val NOW_PLAYING = "playlist_now_playing"
 }
 
-private val CardShape = RoundedCornerShape(22.dp)
+private val CardShape = RoundedCornerShape(12.dp)
 
-/** A soft card on the glass page: a touch of the accent over the glass, with a hairline. */
+/** A card on the page: no fill of its own, a hairline around it. */
 private fun Modifier.insightCard(palette: EditorialPalette): Modifier = this
     .clip(CardShape)
-    .background(palette.accent.copy(alpha = 0.06f).compositeOver(glassFill(palette, 0.72f)))
-    .border(1.dp, palette.line.copy(alpha = palette.line.alpha * 0.8f), CardShape)
+    .border(1.dp, palette.line, CardShape)
 
 @Composable
 private fun Eyebrow(text: String, palette: EditorialPalette, modifier: Modifier = Modifier) {
+    // A field label on the catalogue card: small caps, muted.
     Text(
         text.uppercase(),
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 1.6.sp,
-        fontWeight = FontWeight.SemiBold,
+        style = MaterialTheme.typography.labelSmall,
         color = palette.muted,
         modifier = modifier,
     )
@@ -96,33 +98,31 @@ private fun Eyebrow(text: String, palette: EditorialPalette, modifier: Modifier 
 // Now playing
 // ---------------------------------------------------------------------------
 
-/** "Playing from this playlist · Afterglow Street", when the song playing is in it. */
+/**
+ * "Playing from this playlist · Afterglow Street", when the song playing is
+ * in it: a plain line in the live colour, no chip.
+ */
 @Composable
 internal fun NowPlayingChip(song: Song, palette: EditorialPalette, modifier: Modifier = Modifier) {
+    val live = Catalog.red
     Row(
         modifier
-            .clip(RoundedCornerShape(50))
-            .background(palette.accent.copy(alpha = 0.14f))
-            .border(1.dp, palette.accent.copy(alpha = 0.35f), RoundedCornerShape(50))
-            .padding(start = 12.dp, end = 14.dp, top = 7.dp, bottom = 7.dp)
+            .heightIn(min = 32.dp)
             .testTag(PlaylistInsightTags.NOW_PLAYING),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PlayingBars(palette.accent, Modifier.size(14.dp))
+        PlayingBars(live, Modifier.size(14.dp))
         Text(
             "Playing from this playlist",
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = palette.accent,
+            style = MaterialTheme.typography.labelLarge,
+            color = live,
             modifier = Modifier.padding(start = 8.dp),
             maxLines = 1,
         )
         Text(
             "  ·  ${song.title}",
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            color = palette.ink.copy(alpha = 0.8f),
+            style = MaterialTheme.typography.labelLarge,
+            color = palette.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
@@ -155,50 +155,42 @@ internal fun PlayingBars(color: Color, modifier: Modifier = Modifier) {
 // Stat tiles
 // ---------------------------------------------------------------------------
 
-/** Songs, length, artists, albums: four tiles in a row. */
+/**
+ * Songs, length, artists, albums: the fields of one catalogue card, values in
+ * tabular figures over their names, hairlines between.
+ */
 @Composable
 internal fun StatTiles(songs: List<Song>, palette: EditorialPalette, modifier: Modifier = Modifier) {
     val stats = remember(songs) { PlaylistDetailFormat.stats(songs) }
+    val shape = RoundedCornerShape(12.dp)
     Row(
-        modifier.fillMaxWidth().testTag(PlaylistInsightTags.STATS),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .clip(shape)
+            .border(1.dp, palette.line, shape)
+            .testTag(PlaylistInsightTags.STATS),
     ) {
         StatTile("${stats.songs}", if (stats.songs == 1) "song" else "songs", palette, Modifier.weight(1f))
+        StatRule(palette)
         StatTile(PlaylistDetailFormat.compactDuration(stats.totalMs), "length", palette, Modifier.weight(1f))
+        StatRule(palette)
         StatTile("${stats.artists}", if (stats.artists == 1) "artist" else "artists", palette, Modifier.weight(1f))
+        StatRule(palette)
         StatTile("${stats.albums}", if (stats.albums == 1) "album" else "albums", palette, Modifier.weight(1f))
     }
 }
 
 @Composable
+private fun StatRule(palette: EditorialPalette) {
+    Box(Modifier.fillMaxHeight().width(1.dp).background(palette.line))
+}
+
+@Composable
 private fun StatTile(value: String, label: String, palette: EditorialPalette, modifier: Modifier) {
-    Column(
-        modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(palette.accent.copy(alpha = 0.07f).compositeOver(glassFill(palette, 0.72f)))
-            .border(1.dp, palette.line.copy(alpha = palette.line.alpha * 0.8f), RoundedCornerShape(18.dp))
-            .padding(vertical = 12.dp, horizontal = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            value,
-            fontSize = 19.sp,
-            lineHeight = 23.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.3).sp,
-            color = palette.ink,
-            maxLines = 1,
-        )
-        Text(
-            label.uppercase(),
-            fontSize = 9.sp,
-            lineHeight = 12.sp,
-            letterSpacing = 1.2.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = palette.muted,
-            maxLines = 1,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+    Column(modifier.padding(vertical = 12.dp, horizontal = 12.dp)) {
+        Text(value, style = MaterialTheme.typography.titleMedium, color = palette.ink, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = palette.muted, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
@@ -371,8 +363,8 @@ private fun YearSection(spread: PlaylistDetailFormat.YearSpread, palette: Editor
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Text("${spread.bars.first().first}", fontSize = 10.sp, lineHeight = 12.sp, color = palette.muted, modifier = Modifier.weight(1f))
-            Text("${spread.to}", fontSize = 10.sp, lineHeight = 12.sp, color = palette.muted)
+            Text("${spread.bars.first().first}", style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.weight(1f))
+            Text("${spread.to}", style = MaterialTheme.typography.labelSmall, color = palette.muted)
         }
     }
 }
@@ -492,10 +484,7 @@ internal fun QualityBadge(song: Song, palette: EditorialPalette, modifier: Modif
     }
     Text(
         text,
-        fontSize = 8.sp,
-        lineHeight = 10.sp,
-        letterSpacing = 0.6.sp,
-        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.labelSmall,
         color = ink,
         maxLines = 1,
         modifier = modifier

@@ -6,17 +6,14 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import com.harmony.core.ui.component.EditorialPalette
 
 /**
- * The Cyber-Glass look: glass surfaces, electric cyan for what is selected
- * or live, neon violet for borders, gradients and the play controls.
- *
- * It dresses the library (search, chips, song rows, album and artist
- * lists), the floating mini player and the navigation pill, in both themes:
- * [DarkCyberGlass] is the original deep-obsidian look, [LightCyberGlass] the
- * same design on pearl glass, with the accents deepened so they keep their
- * contrast on a light field. Now Playing keeps its own palette.
+ * The roles the former Cyber-Glass look exposed (surfaces, accents, text,
+ * rims), kept as an adapter so older components keep compiling. Every role
+ * now resolves from the catalogue ([HarmonyColors], [cyberGlassFrom]): new
+ * code should read [Catalog] directly.
  *
  * Read it as [CyberGlassColors] inside composables; [HarmonyTheme] provides
  * the one that matches the theme. In a draw or remember lambda, read it into
@@ -100,89 +97,52 @@ class CyberGlassScheme(
     )
 }
 
-/** The original Cyber-Glass. These values are the dark theme as it always was. */
-val DarkCyberGlass = CyberGlassScheme(
-    isDark = true,
-    Obsidian = Color(0xFF0B0F17),
-    ObsidianDeep = Color(0xFF0E131F),
-    Surface = Color(0xFF131926),
-    Chip = Color(0xFF161F30),
-    ChipBorder = Color(0xFF2A3950),
-    ArtWell = Color(0xFF121A2A),
-    Card = Color(0xFF111827),
-    CARD_ALPHA = 0.92f,
-    Recessed = Color(0xFF1A2333),
-    DevicePill = Color(0xFF162A3A),
-    NavGlass = Color(0xFF131B2E),
-    NAV_ALPHA = 0.90f,
-    NavRim = Color(0x4038BDF8),
-    Cyan = Color(0xFF00E5FF),
-    Mint = Color(0xFF00F5D4),
-    Azure = Color(0xFF00BBF9),
-    Sky = Color(0xFF38BDF8),
-    Violet = Color(0xFF8B5CF6),
-    Purple = Color(0xFFA855F7),
-    Indigo = Color(0xFF6D28D9),
-    IndigoDeep = Color(0xFF4C1D95),
-    OnAccent = Color(0xFF0B0F17),
-    LiveInk = Color(0xFF00E5FF).copy(alpha = 0.78f),
-    TextPrimary = Color(0xFFFFFFFF),
-    TextSilver = Color(0xFFE2E8F0),
-    TextPlaceholder = Color(0xFFCBD5E1),
-    TextSecondary = Color(0xFF94A3B8),
-    TextQuiet = Color(0xFF64748B),
-    Divider = Color(0x14FFFFFF),
-    ThumbRim = Color(0x4400E5FF),
+/**
+ * The Cyber-Glass roles, resolved from the catalogue ([HarmonyColors]). The
+ * neon is gone: every accent role is the catalogue blue, live text is the
+ * red, glass is solid surface and [CyberGlassScheme.Glow] is zero, so the
+ * components that still read these roles draw flat and quiet.
+ */
+fun cyberGlassFrom(c: HarmonyColors) = CyberGlassScheme(
+    isDark = c.isDark,
+    Obsidian = c.ground,
+    ObsidianDeep = c.ground,
+    Surface = c.surface,
+    Chip = c.raised,
+    ChipBorder = c.line,
+    ArtWell = c.raised,
+    Card = c.surface,
+    CARD_ALPHA = 1f,
+    Recessed = c.raised,
+    DevicePill = c.raised,
+    NavGlass = c.ground,
+    NAV_ALPHA = 1f,
+    NavRim = c.line,
+    Cyan = c.blue,
+    Mint = c.blue,
+    Azure = c.blue,
+    Sky = c.muted,
+    Violet = c.blue,
+    Purple = c.blue,
+    Indigo = c.line,
+    IndigoDeep = c.line,
+    OnAccent = c.onBlue,
+    LiveInk = c.red,
+    TextPrimary = c.ink,
+    TextSilver = c.ink,
+    TextPlaceholder = c.muted,
+    TextSecondary = c.muted,
+    TextQuiet = c.faint,
+    Divider = c.line,
+    ThumbRim = c.line,
     Shadow = Color.Black,
-    Glow = 1f,
-    SelectedChip = Brush.horizontalGradient(listOf(Color(0xFF00F5D4), Color(0xFF00BBF9))),
+    Glow = 0f,
+    SelectedChip = SolidColor(c.blue),
 )
 
-/**
- * Cyber-Glass on pearl: the same surfaces, rims, gradients and glow as the
- * dark one, light. Cool white glass on a pale blue-grey field; the cyan,
- * violet and mint accents one or two steps deeper, so text and icons in them
- * stay legible (WCAG, measured): cyan 5.4:1 on white and 4.7:1 on the device
- * pill, the duration's sky blue 5.5:1 and the secondary slate 7.1:1 on the
- * page, white on the selected chip 5.5:1 and on the violet play button
- * 5.7:1. Small live text is full-strength cyan here, not faded as in dark.
- */
-val LightCyberGlass = CyberGlassScheme(
-    isDark = false,
-    Obsidian = Color(0xFFF4F7FC),
-    ObsidianDeep = Color(0xFFE8EEF7),
-    Surface = Color(0xFFFFFFFF),
-    Chip = Color(0xFFEEF2F9),
-    ChipBorder = Color(0xFFC9D4E5),
-    ArtWell = Color(0xFFE4EAF4),
-    Card = Color(0xFFFFFFFF),
-    CARD_ALPHA = 0.94f,
-    Recessed = Color(0xFFEDF1F8),
-    DevicePill = Color(0xFFE0F2FE),
-    NavGlass = Color(0xFFFFFFFF),
-    NAV_ALPHA = 0.90f,
-    NavRim = Color(0x590EA5E9),
-    Cyan = Color(0xFF0E7490),
-    Mint = Color(0xFF0D9488),
-    Azure = Color(0xFF0284C7),
-    Sky = Color(0xFF0369A1),
-    Violet = Color(0xFF7C3AED),
-    Purple = Color(0xFF9333EA),
-    Indigo = Color(0xFFC4B5FD),
-    IndigoDeep = Color(0xFFA78BFA),
-    OnAccent = Color(0xFFFFFFFF),
-    LiveInk = Color(0xFF0E7490),
-    TextPrimary = Color(0xFF0B1220),
-    TextSilver = Color(0xFF1E293B),
-    TextPlaceholder = Color(0xFF475569),
-    TextSecondary = Color(0xFF475569),
-    TextQuiet = Color(0xFF64748B),
-    Divider = Color(0x1A0B1220),
-    ThumbRim = Color(0x330E7490),
-    Shadow = Color(0xFF1E293B),
-    Glow = 0.55f,
-    SelectedChip = Brush.horizontalGradient(listOf(Color(0xFF0F766E), Color(0xFF0369A1))),
-)
+val DarkCyberGlass = cyberGlassFrom(DarkHarmonyColors)
+
+val LightCyberGlass = cyberGlassFrom(LightHarmonyColors)
 
 /** The Cyber-Glass of the current theme; [HarmonyTheme] provides it. */
 val LocalCyberGlass = staticCompositionLocalOf { DarkCyberGlass }
@@ -196,11 +156,9 @@ val CyberGlassPalette: EditorialPalette
     @Composable @ReadOnlyComposable get() = LocalCyberGlass.current.palette
 
 /**
- * Whether this palette is a Cyber-Glass one (either theme's): the glass
- * components (search bar, chips, song rows, cards) switch to their neon
- * materials for it. The library hands its palette over unanimated, so an
- * exact match is reliable.
+ * Whether the glass components should take their neon branch. Never, now:
+ * every screen wears the catalogue, so the components draw one way. Kept so
+ * callers compile; their Cyber-Glass branches are dead and can be removed.
  */
 val EditorialPalette.isCyberGlass: Boolean
-    get() = (field == DarkCyberGlass.Obsidian && accent == DarkCyberGlass.Cyan) ||
-        (field == LightCyberGlass.Obsidian && accent == LightCyberGlass.Cyan)
+    get() = false

@@ -15,6 +15,13 @@ Recognize computes Shazam audio fingerprints on the phone with a Kotlin port of 
 Upstream license files and copyright notices remain authoritative for the respective upstream projects.
 
 
+## Fonts on Android
+
+- Archivo (SIL Open Font License 1.1), copyright 2020 The Archivo Project Authors.
+  Source: https://github.com/Omnibus-Type/Archivo
+  Regular, Medium, SemiBold and Bold are bundled in core/ui/src/main/res/font/;
+  the license text is in core/ui/src/main/res/raw/archivo_ofl.txt.
+
 ## Mornye downloads on Android
 
 - Mornye 5.3.1 (MIT), copyright (c) 2026 zarzet.

@@ -1,5 +1,9 @@
 package com.harmony.feature.library
 
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.harmony.core.ui.component.crateLetter
+import com.harmony.core.ui.component.CrateDivider
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -504,29 +508,49 @@ private fun SongsTab(
         )
         return
     }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = LocalFloatingChromeHeight.current),
-    ) {
-        items(
-            count = songs.itemCount,
-            key = { index -> songs.peek(index)?.id ?: "placeholder-$index" },
-        ) { index ->
-            val song = songs[index]
-            if (song != null) {
-                GlassSongCard(
-                    song = song,
-                    palette = palette,
-                    onClick = { viewModel.onPagedSongClick(song) },
-                    onPlayNext = { viewModel.addToQueue(song) },
-                    onAddToPlaylist = { addToPlaylistSongId = song.id },
-                    onRemove = { viewModel.deleteSong(song) },
-                    removeLabel = "Delete from phone",
-                    onSwipeToQueue = { viewModel.addToQueue(song) },
-                    modifier = Modifier.animateItem(),
-                )
+    // The list is sorted by title, so it is filed like a record crate: a
+    // divider tab where each letter starts, and the letter you are in pinned
+    // over the top while you scroll.
+    val listState = rememberLazyListState()
+    val pinnedLetter by remember(songs) {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) null
+            else songs.peek(listState.firstVisibleItemIndex)?.let { crateLetter(it.title) }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(top = 6.dp, bottom = LocalFloatingChromeHeight.current),
+        ) {
+            items(
+                count = songs.itemCount,
+                key = { index -> songs.peek(index)?.id ?: "placeholder-$index" },
+            ) { index ->
+                val song = songs[index]
+                if (song != null) {
+                    Column(Modifier.animateItem()) {
+                        val letter = crateLetter(song.title)
+                        val previous = if (index == 0) null else songs.peek(index - 1)
+                        if (index == 0 || (previous != null && crateLetter(previous.title) != letter)) {
+                            CrateDivider(letter, Modifier.padding(top = if (index == 0) 0.dp else 12.dp, bottom = 4.dp))
+                        }
+                        GlassSongCard(
+                            song = song,
+                            palette = palette,
+                            onClick = { viewModel.onPagedSongClick(song) },
+                            onPlayNext = { viewModel.addToQueue(song) },
+                            onAddToPlaylist = { addToPlaylistSongId = song.id },
+                            onRemove = { viewModel.deleteSong(song) },
+                            removeLabel = "Delete from phone",
+                            onSwipeToQueue = { viewModel.addToQueue(song) },
+                        )
+                    }
+                }
             }
         }
+        pinnedLetter?.let { CrateDivider(it, Modifier.align(Alignment.TopStart)) }
     }
     addToPlaylistSongId?.let { id ->
         androidx.compose.material3.ModalBottomSheet(onDismissRequest = { addToPlaylistSongId = null }) {

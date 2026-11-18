@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.harmony.feature.home"
     buildFeatures { compose = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
 
     defaultConfig {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -23,6 +24,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    // Design screenshots on the JVM (DesignShots): build/shots/.
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
 
     // Home interaction tests: ./gradlew :feature:home:connectedDebugAndroidTest

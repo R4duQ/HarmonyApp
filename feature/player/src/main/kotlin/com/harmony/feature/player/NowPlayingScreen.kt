@@ -1,5 +1,7 @@
 package com.harmony.feature.player
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.IntrinsicSize
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -461,6 +463,7 @@ fun NowPlayingScreen(
                     )
                     NowPlayingAudioQuality(
                         info = audioInfo,
+                        bitDepth = song?.bitDepth,
                         palette = palette,
                         centered = true,
                         modifier = Modifier.padding(top = 8.dp),
@@ -547,9 +550,10 @@ fun NowPlayingScreen(
             }
             NowPlayingAudioQuality(
                 info = audioInfo,
+                bitDepth = song?.bitDepth,
                 palette = palette,
                 centered = false,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = 12.dp),
             )
             MetaRow(
                 state, outputChoice, journeyProgress, palette,
@@ -887,10 +891,7 @@ private fun TitleBlock(
         ) {
             Text(
                 song?.title ?: "Nothing playing",
-                fontSize = titleSize.sp,
-                lineHeight = (titleSize + 5).sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.4).sp,
+                style = MaterialTheme.typography.headlineMedium.copy(fontSize = titleSize.sp, lineHeight = (titleSize + 6).sp),
                 color = palette.ink,
                 maxLines = if (centered) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
@@ -910,73 +911,67 @@ private fun TitleBlock(
 }
 
 /**
- * Live codec information for the full player. It deliberately consumes the
- * same resolver as [MiniPlayer], so changing tracks cannot leave the two
- * player surfaces reporting different formats or lossless status.
+ * The format card: the file as it is, set like the fields of a catalogue
+ * card under a red header rule (red because this is the file playing now).
+ * Format, lossless or not, resolution and bitrate, each a small label over
+ * its value in tabular figures. It consumes the same resolver as the mini
+ * player, so the two can never report different formats.
  */
 @Composable
-private fun NowPlayingAudioQuality(
+internal fun NowPlayingAudioQuality(
     info: MiniPlayerAudioInfo?,
+    bitDepth: Int?,
     palette: PlayerPalette,
-    centered: Boolean,
+    @Suppress("UNUSED_PARAMETER") centered: Boolean,
     modifier: Modifier = Modifier,
 ) {
     AnimatedContent(
         targetState = info,
-        transitionSpec = {
-            fadeIn(tween(220)).togetherWith(fadeOut(tween(140)))
-        },
+        transitionSpec = { fadeIn(tween(220)).togetherWith(fadeOut(tween(140))) },
         label = "now-playing-audio-quality",
         modifier = modifier.fillMaxWidth(),
     ) { resolved ->
         if (resolved == null) {
             Spacer(Modifier.height(0.dp))
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
-            ) {
-                if (resolved.isLossless) {
-                    Row(
-                        modifier = Modifier
-                            .background(
-                                palette.accent.copy(alpha = 0.13f),
-                                RoundedCornerShape(50),
-                            )
-                            .border(
-                                1.dp,
-                                palette.accent.copy(alpha = 0.36f),
-                                RoundedCornerShape(50),
-                            )
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Rounded.GraphicEq,
-                            contentDescription = "Lossless audio",
-                            tint = palette.accent,
-                            modifier = Modifier.size(12.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "LOSSLESS",
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.45.sp,
-                            color = palette.accent,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
+            val shape = RoundedCornerShape(10.dp)
+            val rate = resolved.sampleRateHz?.takeIf { it > 0 }
+            val khz = rate?.let { if (it % 1000 == 0) "${it / 1000}" else "%.1f".format(it / 1000.0) }
+            val fields = buildList {
+                add("Format" to (resolved.format ?: "Audio"))
+                add("Quality" to if (resolved.isLossless) "Lossless" else "Lossy")
+                when {
+                    bitDepth != null && khz != null -> add("Bit/kHz" to "$bitDepth/$khz")
+                    khz != null -> add("Rate" to "$khz kHz")
                 }
-                Text(
-                    resolved.summary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                resolved.bitrateKbps?.takeIf { it > 0 }?.let { add("Kbps" to "$it") }
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .border(1.dp, palette.controlEdge, shape)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = fields.joinToString(", ") { (k, v) -> "$k $v" }
+                    },
+            ) {
+                Box(Modifier.fillMaxWidth().height(2.dp).background(palette.live))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                    fields.forEachIndexed { i, (label, value) ->
+                        if (i > 0) Box(Modifier.fillMaxHeight().width(1.dp).background(palette.controlEdge))
+                        Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1)
+                            Text(
+                                value,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = palette.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1129,7 +1124,7 @@ private fun SeekBlock(
         onScrub = onScrub,
         onScrubFinished = onScrubFinished,
         onScrubCancel = onScrubCancel,
-        playedColor = palette.accent,
+        playedColor = palette.live,
         trackColor = palette.track,
         modifier = Modifier
             .fillMaxWidth()
@@ -1145,8 +1140,8 @@ private fun SeekBlock(
     ) {
         val shownPosition = dragFraction?.let { (it * state.durationMs).toLong() }
             ?: state.positionMs
-        Text(formatDuration(shownPosition), fontSize = 11.sp, color = palette.muted)
-        Text(formatDuration(state.durationMs), fontSize = 11.sp, color = palette.muted)
+        Text(formatDuration(shownPosition), style = MaterialTheme.typography.labelMedium, color = palette.muted)
+        Text(formatDuration(state.durationMs), style = MaterialTheme.typography.labelMedium, color = palette.muted)
     }
 }
 

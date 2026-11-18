@@ -1,5 +1,6 @@
 package com.harmony.feature.home
 
+import com.harmony.core.ui.theme.Catalog
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -201,15 +202,12 @@ internal fun Cover(
                 },
             )
             .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    listOf(palette.accent.copy(alpha = 0.26f), palette.accent.copy(alpha = 0.10f)),
-                ),
-            )
+            // No cover: the raised well with the glyph in muted ink.
+            .background(Catalog.raised)
             .border(1.dp, palette.line, shape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(glyph, contentDescription = null, tint = palette.accent.copy(alpha = 0.8f), modifier = Modifier.size(glyphSize))
+        Icon(glyph, contentDescription = null, tint = palette.muted, modifier = Modifier.size(glyphSize))
         if (uri != null) {
             AsyncImage(
                 model = uri,
@@ -226,14 +224,13 @@ internal fun Cover(
 internal fun MosaicCover(artwork: List<String>, palette: EditorialPalette, modifier: Modifier, glyph: ImageVector) {
     val shape = RoundedCornerShape(16.dp)
     if (artwork.size < 4) {
-        Cover(artwork.firstOrNull(), palette, modifier, shape, glyph = glyph, elevation = 6.dp)
+        Cover(artwork.firstOrNull(), palette, modifier, shape, glyph = glyph)
         return
     }
     Box(
         modifier
-            .shadow(6.dp, shape, ambientColor = palette.ink, spotColor = palette.ink)
             .clip(shape)
-            .background(palette.field),
+            .background(palette.line),
     ) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -364,15 +361,7 @@ internal fun HomeCard(
     modifier: Modifier = Modifier,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
-    val body = remember(palette) {
-        Brush.verticalGradient(
-            listOf(
-                glassFill(palette, strength = 0.72f).compositeOver(palette.field),
-                glassFill(palette, strength = 0.58f).compositeOver(palette.field),
-            ),
-        )
-    }
     GlassCard(palette = palette, modifier = modifier) {
-        Column(Modifier.fillMaxWidth().background(body), content = content)
+        Column(Modifier.fillMaxWidth().background(glassFill(palette, strength = 0.7f)), content = content)
     }
 }
