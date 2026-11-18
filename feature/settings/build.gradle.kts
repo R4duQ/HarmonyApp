@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.harmony.feature.settings"
     buildFeatures { compose = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 dependencies {
@@ -20,4 +21,12 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
     implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
+
+    // Design screenshots on the JVM (SettingsDesignShots): build/shots/.
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(platform(libs.compose.bom))
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

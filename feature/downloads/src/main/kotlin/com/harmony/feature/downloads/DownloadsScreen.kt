@@ -1,5 +1,8 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material3.MaterialTheme
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -134,23 +137,21 @@ fun DownloadsScreen(
     ) {
         Text(
             "Downloads",
-            fontSize = 40.sp,
-            lineHeight = 44.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-1).sp,
+            style = MaterialTheme.typography.headlineLarge,
             color = palette.ink,
-            modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp),
+            modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp).semantics { heading() },
         )
+        // One line instead of a paragraph: what downloads now, and the promise
+        // that matters (the source only changes when you change it).
         Text(
-            "Download a track, a full album, or selected album songs through SpotiFLAC or Soulseek. Choose the audio source explicitly; Harmony never switches engines automatically.",
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
+            "Tracks and albums from ${state.preferredDownloadSource.displayName}. Harmony never switches the source by itself.",
+            style = MaterialTheme.typography.bodyMedium,
             color = palette.muted,
-            modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 10.dp),
+            modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 12.dp),
         )
 
         EditorialSectionLabel(
-            "Download method",
+            "Source",
             palette,
             Modifier.padding(start = 22.dp, bottom = 10.dp),
         )

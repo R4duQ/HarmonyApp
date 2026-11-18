@@ -421,6 +421,7 @@ fun HarmonyApp(
             ) {
                 com.harmony.feature.library.ArtistDetailScreen(
                     onAlbumClick = { navController.navigate("album/$it") },
+                    onBack = { navController.popBackStack() },
                 )
             }
             page(Routes.PLAYLISTS) {

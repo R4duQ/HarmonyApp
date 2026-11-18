@@ -247,8 +247,8 @@ fun SettingsScreen(
         )
         EditorialSettingRow(
             title = "Dynamic colors",
-            subtitle = "Match your wallpaper (Android 12+). Library, Playlists, " +
-                "Equalizer and the player keep their own palettes.",
+            subtitle = "Buttons and selection take your wallpaper's colour (Android 12+). " +
+                "What's playing stays red, so it reads the same everywhere.",
             palette = palette,
             trailing = {
                 EditorialSwitch(state.dynamicColors, viewModel::setDynamicColors, palette)
@@ -342,7 +342,7 @@ fun SettingsScreen(
 
         // ---- Smart Shuffle -----------------------------------------------
         EditorialSectionLabel(
-            "Smart Shuffle",
+            "Smart Shuffle & mixes",
             palette,
             Modifier.padding(start = 22.dp, bottom = 8.dp),
         )
@@ -386,11 +386,59 @@ fun SettingsScreen(
             },
         )
 
+        EditorialSettingRow(
+            title = "Online mixes (experimental)",
+            subtitle = "Mixes can add songs YouTube Music recommends: played from your library when you " +
+                "have them, otherwise prepared as lossless FLAC. No account. What is sent: see Privacy",
+            palette = palette,
+            trailing = {
+                EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)
+            },
+        )
+
+        if (state.onlineMixEnabled) {
+            val sources = listOf("OFFLINE", "COMBINED", "ONLINE")
+            EditorialSettingRow(
+                title = "Mix source",
+                subtitle = when (state.onlineMixSource) {
+                    "ONLINE" -> "Only songs YouTube Music recommends, each as soon as it's ready; your library only if none can come"
+                    "OFFLINE" -> "Your own songs only. Nothing is asked online"
+                    else -> "Your library, with about one YouTube Music pick in three"
+                } + ". Also on the mix card in the queue",
+                palette = palette,
+                content = {
+                    EditorialChoiceChips(
+                        options = listOf("Library", "Combined", "Online"),
+                        selectedIndex = sources.indexOf(state.onlineMixSource).takeIf { it >= 0 } ?: 1,
+                        onSelect = { viewModel.setOnlineMixSource(sources[it]) },
+                        palette = palette,
+                    )
+                },
+            )
+            EditorialSettingRow(
+                title = "Prepare online songs on mobile data",
+                subtitle = "Off: online songs are downloaded over Wi-Fi only",
+                palette = palette,
+                trailing = {
+                    EditorialSwitch(state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData, palette)
+                },
+            )
+            EditorialSettingRow(
+                title = "Save songs you finish twice",
+                subtitle = "An online song you play to the end twice is saved to your library by itself. " +
+                    "Any online song can also be saved from the queue",
+                palette = palette,
+                trailing = {
+                    EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)
+                },
+            )
+        }
+
         EditorialSectionGap()
 
-        // ---- Library & analysis ----
+        // ---- Library ----
         EditorialSectionLabel(
-            "Library & analysis",
+            "Library",
             palette,
             Modifier.padding(start = 22.dp, bottom = 8.dp),
         )
@@ -458,6 +506,14 @@ fun SettingsScreen(
             },
         )
 
+        EditorialSectionGap()
+
+        // ---- Downloads ----
+        EditorialSectionLabel(
+            "Downloads",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
+        )
         EditorialSettingRow(
             title = "Two album tracks at once (experimental)",
             subtitle = "Mornye build only. One at a time while music plays. Off by default",
@@ -467,57 +523,14 @@ fun SettingsScreen(
             },
         )
 
-        EditorialSettingRow(
-            title = "Online mixes (experimental)",
-            subtitle = "\"Mix from this song\" can add songs YouTube Music recommends, played from your " +
-                "library when you have them, otherwise prepared as lossless FLAC through the download engine. " +
-                "No account. When a song's tags aren't enough, a sound fingerprint of 12 seconds of it " +
-                "(never the audio) is sent to Shazam to name it, and its name is searched for on Deezer and YouTube " +
-                "Music; phones with Gemini Nano also guess from the name with their own AI. Off by default",
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)
-            },
+        EditorialSectionGap()
+
+        // ---- Tools ----
+        EditorialSectionLabel(
+            "Tools",
+            palette,
+            Modifier.padding(start = 22.dp, bottom = 8.dp),
         )
-
-        if (state.onlineMixEnabled) {
-            val sources = listOf("OFFLINE", "COMBINED", "ONLINE")
-            EditorialSettingRow(
-                title = "Mix source",
-                subtitle = when (state.onlineMixSource) {
-                    "ONLINE" -> "Only songs YouTube Music recommends, each as soon as it's ready; your library only if none can come"
-                    "OFFLINE" -> "Your own songs only. Nothing is asked online"
-                    else -> "Your library, with about one YouTube Music pick in three"
-                } + ". Also on the mix card in the queue",
-                palette = palette,
-                content = {
-                    EditorialChoiceChips(
-                        options = listOf("Library", "Combined", "Online"),
-                        selectedIndex = sources.indexOf(state.onlineMixSource).takeIf { it >= 0 } ?: 1,
-                        onSelect = { viewModel.setOnlineMixSource(sources[it]) },
-                        palette = palette,
-                    )
-                },
-            )
-            EditorialSettingRow(
-                title = "Prepare online songs on mobile data",
-                subtitle = "Off: online songs are downloaded over Wi-Fi only",
-                palette = palette,
-                trailing = {
-                    EditorialSwitch(state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData, palette)
-                },
-            )
-            EditorialSettingRow(
-                title = "Save songs you finish twice",
-                subtitle = "An online song you play to the end twice is saved to your library by itself. " +
-                    "Any online song can also be saved from the queue",
-                palette = palette,
-                trailing = {
-                    EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)
-                },
-            )
-        }
-
         EditorialSettingRow(
             title = "Edit tags",
             subtitle = "Fix a song's title, artist, album or artwork. Applies " +
@@ -562,7 +575,10 @@ fun SettingsScreen(
                 "Harmony has no Harmony cloud account, analytics, or ads. Local playback " +
                     "and audio analysis stay on this device. Online features such as Downloads " +
                     "and Peer Search communicate with third-party services or peers only when " +
-                    "you choose to use them.",
+                    "you choose to use them.\n\nOnline mixes, when on: if a song's tags aren't enough, " +
+                    "a sound fingerprint of 12 seconds of it (never the audio) is sent to Shazam to name it, " +
+                    "and its name is searched for on Deezer and YouTube Music; phones with Gemini Nano also " +
+                    "guess from the name with their own AI.",
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 color = palette.muted,

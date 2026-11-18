@@ -1,5 +1,6 @@
 package com.harmony.feature.library
 
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.harmony.core.ui.component.crateLetter
@@ -576,7 +577,16 @@ private fun AlbumsTab(
             start = 14.dp, end = 14.dp, top = 14.dp, bottom = LocalFloatingChromeHeight.current,
         ),
     ) {
-        items(albums, key = { it.id }) { album ->
+        // Filed by name like the songs: a divider tab spanning the row where
+        // each letter starts.
+        albums.forEachIndexed { index, album ->
+            val letter = crateLetter(album.name)
+            if (index == 0 || crateLetter(albums[index - 1].name) != letter) {
+                item(key = "letter-$letter-$index", span = { GridItemSpan(maxLineSpan) }, contentType = "divider") {
+                    CrateDivider(letter, Modifier.padding(top = if (index == 0) 0.dp else 10.dp, bottom = 2.dp), gutter = 6.dp)
+                }
+            }
+            item(key = album.id, contentType = "album") {
             EditorialCard(
                 palette = palette,
                 onClick = { onAlbumClick(album.id) },
@@ -616,6 +626,7 @@ private fun AlbumsTab(
                 }
             }
         }
+            }
     }
 }
 
@@ -636,7 +647,14 @@ private fun ArtistsTab(
         // Keyed on the name, not the id. GROUP BY names.name in
         // CollectionDao.observeArtists guarantees one row per name, so the
         // name is the only value here that cannot collide by construction.
-        items(artists, key = { it.name }) { artist ->
+        artists.forEachIndexed { index, artist ->
+            val letter = crateLetter(artist.name)
+            if (index == 0 || crateLetter(artists[index - 1].name) != letter) {
+                item(key = "letter-$letter-$index", contentType = "divider") {
+                    CrateDivider(letter, Modifier.padding(top = if (index == 0) 0.dp else 10.dp, bottom = 2.dp))
+                }
+            }
+            item(key = artist.name, contentType = "artist") {
             EditorialCard(
                 palette = palette,
                 onClick = { onArtistClick(artist.name) },
@@ -652,9 +670,7 @@ private fun ArtistsTab(
                     Column(Modifier.weight(1f)) {
                         Text(
                             artist.name,
-                            fontSize = 21.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.3).sp,
+                            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
                             color = palette.ink,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -684,6 +700,7 @@ private fun ArtistsTab(
                 }
             }
         }
+            }
     }
 }
 

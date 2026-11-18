@@ -1,5 +1,7 @@
 package com.harmony.feature.library
 
+import com.harmony.core.ui.theme.Catalog
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -551,22 +553,19 @@ private fun Hero(
         BoxWithConstraints(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp)
-                .drawBehind {
-                    drawCircle(
-                        Brush.radialGradient(
-                            listOf(palette.accent.copy(alpha = 0.22f), Color.Transparent),
-                            center = center,
-                            radius = size.height * 0.8f,
-                        ),
-                        radius = size.height * 0.8f,
-                    )
-                },
+                .padding(top = 6.dp),
             contentAlignment = Alignment.Center,
         ) {
             // At large font sizes the text below needs the height more than
             // the artwork does, so the record gives some of it back.
-            val shrink = if (LocalDensity.current.fontScale > 1.3f) 0.8f else 1f
+            // On a short phone too: the first screen keeps room for the first
+            // tracks, the thing you came to pick, instead of only the cover.
+            val short = LocalConfiguration.current.screenHeightDp < 720
+            val shrink = when {
+                short -> 0.62f
+                LocalDensity.current.fontScale > 1.3f -> 0.8f
+                else -> 1f
+            }
             val width = min(maxWidth * 0.94f, 360.dp) * shrink
             if (songs == null) {
                 Box(Modifier.width(width).height(width * SLEEVE)) {
@@ -599,21 +598,10 @@ private fun Hero(
             return@Column
         }
 
-        Text(
-            AlbumDetailFormat.eyebrow(headline),
-            fontSize = 11.sp,
-            letterSpacing = 1.8.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = accentText(palette),
-        )
-        Spacer(Modifier.height(6.dp))
         val long = headline.title.length > 24
         Text(
             headline.title,
-            fontSize = if (long) 24.sp else 29.sp,
-            lineHeight = if (long) 29.sp else 34.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.5).sp,
+            style = if (long) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.headlineLarge,
             color = palette.ink,
             textAlign = TextAlign.Center,
             maxLines = 3,
@@ -631,10 +619,8 @@ private fun Hero(
             )
         }
         Text(
-            AlbumDetailFormat.summary(songs.orEmpty(), headline),
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            fontWeight = FontWeight.Medium,
+            listOfNotNull(headline.year?.toString(), AlbumDetailFormat.summary(songs.orEmpty(), headline)).joinToString("  ·  "),
+            style = MaterialTheme.typography.bodyMedium,
             color = palette.muted,
             textAlign = TextAlign.Center,
         )
@@ -886,9 +872,9 @@ private fun ShuffleButton(enabled: Boolean, palette: EditorialPalette, onClick: 
     ActionButton(
         label = "Shuffle",
         icon = Icons.Rounded.Shuffle,
-        container = palette.accent.copy(alpha = 0.14f).compositeOver(glassFill(palette, 0.9f)),
+        container = Color.Transparent,
         content = palette.ink,
-        rim = glassRim(palette),
+        rim = palette.line,
         enabled = enabled,
         onClick = onClick,
         modifier = modifier.testTag(AlbumDetailTags.SHUFFLE),
@@ -986,10 +972,12 @@ private fun TrackRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val accent = accentText(palette)
-    val restFill = glassFill(palette, 0.7f).compositeOver(palette.field)
-    val fill = if (current) palette.accent.copy(alpha = 0.14f).compositeOver(restFill) else restFill
-    val shape = RoundedCornerShape(16.dp)
+    // Flat rows on the page; the one playing is lifted onto the raised surface
+    // and marked in the live red, the same as everywhere else in Harmony.
+    val live = Catalog.red
+    val restFill = Color.Transparent
+    val fill = if (current) Catalog.raised else restFill
+    val shape = RoundedCornerShape(12.dp)
     EditorialSwipeToQueue(
         palette = palette,
         onQueue = onPlayNext,
@@ -1008,7 +996,7 @@ private fun TrackRow(
         ) {
             Box(Modifier.width(NumberColumn), contentAlignment = Alignment.Center) {
                 if (current) {
-                    LevelMeter(active = playing, color = accent, modifier = Modifier.semantics { contentDescription = if (playing) "Now playing" else "Paused" })
+                    LevelMeter(active = playing, color = live, modifier = Modifier.semantics { contentDescription = if (playing) "Now playing" else "Paused" })
                 } else {
                     Text(
                         number.toString(),
@@ -1023,10 +1011,8 @@ private fun TrackRow(
             Column(Modifier.weight(1f).padding(start = 4.dp, end = 8.dp)) {
                 Text(
                     title,
-                    fontSize = 15.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (current) accent else palette.ink,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = palette.ink,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1046,14 +1032,12 @@ private fun TrackRow(
                         if (note != null) {
                             Text(
                                 note,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = accent,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.muted,
                                 maxLines = 1,
                                 modifier = Modifier
                                     .padding(start = if (credit != null) 8.dp else 0.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(palette.accent.copy(alpha = 0.14f))
+                                    .border(1.dp, palette.line, RoundedCornerShape(50))
                                     .padding(horizontal = 7.dp, vertical = 1.dp),
                             )
                         }
