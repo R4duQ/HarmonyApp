@@ -467,7 +467,7 @@ private fun TrackState(row: AlbumTrackRow, onRetry: () -> Unit, onSkip: () -> Un
                 }
             }
         }
-        AlbumTrackPhase.INDEXING -> BrainChip("24D…", glowing = true)
+        AlbumTrackPhase.INDEXING -> BrainChip("Indexing…", glowing = true)
         AlbumTrackPhase.INDEXED -> BrainChip("24D Indexed ✔", glowing = false)
         AlbumTrackPhase.SAVED, AlbumTrackPhase.IN_LIBRARY ->
             Icon(Icons.Rounded.CheckCircle, phaseNote(row.phase), Modifier.size(22.dp), tint = glass.Mint)

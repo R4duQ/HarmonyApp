@@ -247,121 +247,6 @@ val SegmentInk = Color(0xFF3F3A4A)
 val SegmentFieldMuted = Color(0xFFF4F0FA)
 val SegmentInkMuted = Color(0xFF8A8496)
 
-private val AmberLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFFF3A311),
-    onAccent = Color(0xFF1A1403),
-)
-
-private val AmberDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFFF3A311),
-    onAccent = Color(0xFF1A1403),
-)
-
-// Green and Blue previously carried Amber's accent (#F3A311) and onAccent
-// verbatim — copy-pasted when the palettes were added and never changed. That
-// is why the Play button on a green playlist and the preset chips on the blue
-// Equalizer rendered gold on screens with no other warm colour in them. Each
-// family now carries its own accent, following Amber's own pattern: light
-// palettes accent with their dark ink, dark palettes with the family's bright
-// hue.
-private val GreenLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF1E9153),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val GreenDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF3FBF77),
-    onAccent = Color(0xFF07130C),
-)
-
-private val BlueLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF2C87CE),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val BlueDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF4FA3E3),
-    onAccent = Color(0xFF06131F),
-)
-
-private val StoneLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF6E6A5F),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val StoneDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFFE6DDCB),
-    onAccent = Color(0xFF17150F),
-)
-
-private val TealLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFF128F8A),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val TealDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFF3FBFB6),
-    onAccent = Color(0xFF04211F),
-)
-
-private val CoralLight = EditorialPalette(
-    field = HarmonyLightField,
-    ink = HarmonyLightInk,
-    muted = HarmonyLightMuted,
-    line = HarmonyLightLine,
-    accent = Color(0xFFDA4A31),
-    onAccent = Color(0xFFFFFFFF),
-)
-
-private val CoralDark = EditorialPalette(
-    field = HarmonyDarkField,
-    ink = HarmonyDarkInk,
-    muted = HarmonyDarkMuted,
-    line = HarmonyDarkLine,
-    accent = Color(0xFFE9573F),
-    onAccent = Color(0xFF210A05),
-)
-
 private val LavenderLight = EditorialPalette(
     field = HarmonyLightField,
     ink = HarmonyLightInk,
@@ -380,53 +265,37 @@ private val LavenderDark = EditorialPalette(
     onAccent = Color(0xFF17142B),
 )
 
-@Composable
-fun amberPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) AmberDark else AmberLight
-
 /**
- * The library's palette: Cyber-Glass ([CyberGlassPalette]), obsidian and
- * cyan in dark theme, pearl and deep cyan in light.
+ * The section palettes. Every section once had its own: amber for Home and
+ * the library's detail pages, green for Playlists, blue for the Equalizer,
+ * stone for Settings, coral for Discover, teal for Downloads. Harmony now
+ * wears one look everywhere, Cyber-Glass ([CyberGlassPalette]): obsidian
+ * and cyan in dark theme, pearl and deep cyan in light, the glass components
+ * (cards, chips, tabs, switches, sliders, rows) switching to their glass
+ * materials for it. The names stay so each screen still says which section
+ * it is, and a section can take its own palette again from here.
  */
+@Composable
+fun amberPalette(): EditorialPalette = CyberGlassPalette
+
+/** The library's palette: Cyber-Glass, as every section's. */
 @Composable
 fun libraryPalette(): EditorialPalette = CyberGlassPalette
 
 @Composable
-fun greenPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) GreenDark else GreenLight
-
-/** Equalizer. Blue reads as "instrument panel" next to the library's amber. */
-@Composable
-fun bluePalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) BlueDark else BlueLight
-
-/**
- * Settings. The one unsaturated field in the set, on purpose — settings is
- * the screen you pass through rather than dwell in, and a shouting color
- * would be competing with the sections that actually hold content.
- */
-@Composable
-fun stonePalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) StoneDark else StoneLight
-
-/**
- * Discover. Warm and loud on purpose — it is the one section that sends you
- * somewhere Harmony doesn't control, so it should not be mistakable for the
- * library's amber at a glance.
- */
-/**
- * Downloads. The screen itself renders in teal from the Material scheme; the
- * shell previously handed it lavender, so the mini player and navigation bar
- * came out purple over a teal screen. Same hue family now, until Downloads is
- * converted to the editorial kit properly.
- */
-@Composable
-fun tealPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) TealDark else TealLight
+fun greenPalette(): EditorialPalette = CyberGlassPalette
 
 @Composable
-fun coralPalette(): EditorialPalette =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) CoralDark else CoralLight
+fun bluePalette(): EditorialPalette = CyberGlassPalette
+
+@Composable
+fun stonePalette(): EditorialPalette = CyberGlassPalette
+
+@Composable
+fun tealPalette(): EditorialPalette = CyberGlassPalette
+
+@Composable
+fun coralPalette(): EditorialPalette = CyberGlassPalette
 
 /**
  * The player's field, expressed as an EditorialPalette so the app shell can

@@ -1,6 +1,7 @@
 package com.harmony.core.ui.component
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import com.harmony.core.ui.theme.CyberGlassColors
+import com.harmony.core.ui.theme.isCyberGlass
 
 /**
  * Form controls for the editorial screens (Settings, Equalizer).
@@ -49,7 +54,8 @@ fun EditorialSectionLabel(
         fontSize = 11.sp,
         letterSpacing = 2.sp,
         fontWeight = FontWeight.SemiBold,
-        color = palette.ink,
+        // Cyber-Glass: quieter, as the player's "UP NEXT", so the eyebrow organises without shouting.
+        color = if (palette.isCyberGlass) CyberGlassColors.TextSecondary else palette.ink,
         modifier = modifier,
     )
 }
@@ -114,18 +120,32 @@ fun EditorialSwitch(
     palette: EditorialPalette,
     modifier: Modifier = Modifier,
 ) {
+    val cyber = palette.isCyberGlass
     Switch(
         checked = checked,
         onCheckedChange = onCheckedChange,
         modifier = modifier,
-        colors = SwitchDefaults.colors(
-            checkedThumbColor = palette.onAccent,
-            checkedTrackColor = palette.accent,
-            checkedBorderColor = palette.line,
-            uncheckedThumbColor = palette.muted,
-            uncheckedTrackColor = Color.Transparent,
-            uncheckedBorderColor = palette.line,
-        ),
+        colors = if (cyber) {
+            // Cyber-Glass: a cyan track when on, a recessed chip well with a slate rim when off.
+            val glass = CyberGlassColors
+            SwitchDefaults.colors(
+                checkedThumbColor = glass.OnAccent,
+                checkedTrackColor = glass.Cyan,
+                checkedBorderColor = glass.Cyan,
+                uncheckedThumbColor = glass.TextQuiet,
+                uncheckedTrackColor = glass.Chip,
+                uncheckedBorderColor = glass.ChipBorder,
+            )
+        } else {
+            SwitchDefaults.colors(
+                checkedThumbColor = palette.onAccent,
+                checkedTrackColor = palette.accent,
+                checkedBorderColor = palette.line,
+                uncheckedThumbColor = palette.muted,
+                uncheckedTrackColor = Color.Transparent,
+                uncheckedBorderColor = palette.line,
+            )
+        },
     )
 }
 
@@ -148,8 +168,32 @@ fun EditorialChoiceChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        val cyber = palette.isCyberGlass
         options.forEachIndexed { index, label ->
             val selected = index == selectedIndex
+            if (cyber) {
+                // Cyber-Glass: the library's own tabs. The selected one takes the cyan gradient,
+                // the others are glass chips with a slate rim.
+                val glass = CyberGlassColors
+                Surface(
+                    onClick = { onSelect(index) },
+                    shape = RoundedCornerShape(50),
+                    color = if (selected) Color.Transparent else glass.Chip,
+                    contentColor = if (selected) glass.OnAccent else glass.TextSilver,
+                    border = if (selected) null else BorderStroke(1.dp, glass.ChipBorder),
+                    modifier = Modifier.semantics { this.selected = selected },
+                ) {
+                    Text(
+                        label,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        modifier = Modifier
+                            .then(if (selected) Modifier.background(glass.SelectedChip) else Modifier)
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                return@forEachIndexed
+            }
             Surface(
                 onClick = { onSelect(index) },
                 shape = RoundedCornerShape(50),
@@ -183,13 +227,25 @@ fun EditorialSlider(
         modifier = modifier,
         valueRange = valueRange,
         steps = steps,
-        colors = SliderDefaults.colors(
-            thumbColor = palette.ink,
-            activeTrackColor = palette.ink,
-            activeTickColor = palette.field,
-            inactiveTrackColor = palette.muted.copy(alpha = 0.35f),
-            inactiveTickColor = palette.muted,
-        ),
+        colors = if (palette.isCyberGlass) {
+            // Cyber-Glass: a cyan fill and thumb on a slate groove, as the player's progress.
+            val glass = CyberGlassColors
+            SliderDefaults.colors(
+                thumbColor = glass.Cyan,
+                activeTrackColor = glass.Cyan,
+                activeTickColor = glass.OnAccent,
+                inactiveTrackColor = glass.ChipBorder,
+                inactiveTickColor = glass.TextQuiet,
+            )
+        } else {
+            SliderDefaults.colors(
+                thumbColor = palette.ink,
+                activeTrackColor = palette.ink,
+                activeTickColor = palette.field,
+                inactiveTrackColor = palette.muted.copy(alpha = 0.35f),
+                inactiveTickColor = palette.muted,
+            )
+        },
     )
 }
 
@@ -206,9 +262,9 @@ fun EditorialTextAction(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        color = Color.Transparent,
-        contentColor = palette.ink,
-        border = BorderStroke(1.5.dp, palette.line),
+        color = if (palette.isCyberGlass) CyberGlassColors.Chip else Color.Transparent,
+        contentColor = if (palette.isCyberGlass) CyberGlassColors.Cyan else palette.ink,
+        border = if (palette.isCyberGlass) BorderStroke(1.dp, CyberGlassColors.ChipBorder) else BorderStroke(1.5.dp, palette.line),
     ) {
         Text(
             text,
