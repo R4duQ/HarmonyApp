@@ -1,5 +1,7 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
@@ -244,6 +246,7 @@ fun DownloadsScreen(
                 onQueryChange = viewModel::setQuery,
                 onSearch = viewModel::searchSelectedSource,
                 onSelect = viewModel::selectSpotiFlacSearchResult,
+                onDownloadResult = viewModel::downloadSpotiFlacSearchResult,
                 onOutputFormatChange = viewModel::setSpotiFlacOutputFormat,
                 onDownload = viewModel::requestDownloadForIdentifiedTrack,
                 onCancelDownload = viewModel::cancelSpotiFlacDownload,
@@ -513,6 +516,8 @@ internal fun SpotiFlacDownloadsLayout(
     onCheckVerificationAndRetry: () -> Unit,
     onToggleErrorDetails: () -> Unit,
     onRecognize: () -> Unit = {},
+    /** Verify a result and start its download in one tap. */
+    onDownloadResult: (SpotiFlacSearchCandidate) -> Unit = onSelect,
 ) {
     // Check provider readiness early, without holding public metadata search
     // hostage to a browser callback. Verification is enforced by the engine
@@ -881,7 +886,7 @@ internal fun SpotiFlacDownloadsLayout(
                             color = palette.ink,
                         )
                         Text(
-                            "Select one result. The Download button appears only after Harmony resolves that selection.",
+                            "Download checks the exact track with the provider, then starts by itself.",
                             fontSize = 11.sp,
                             lineHeight = 16.sp,
                             color = palette.muted,
@@ -945,29 +950,31 @@ internal fun SpotiFlacDownloadsLayout(
                                         modifier = Modifier.padding(top = 4.dp),
                                     )
                                 }
-                                TextButton(
-                                    enabled = !state.isIdentifying && !state.isSpotiFlacDownloading,
-                                    onClick = { onSelect(candidate) },
-                                ) {
-                                    Text(if (selected) "Selected" else "Select")
+                                // One action per result. While this row is being verified it says so
+                                // in place, where the finger was, instead of in a line further down.
+                                if (selected && state.isIdentifying) {
+                                    Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        Text("Checking…", style = MaterialTheme.typography.labelLarge, color = palette.muted, modifier = Modifier.padding(start = 8.dp))
+                                    }
+                                } else {
+                                    TextButton(
+                                        enabled = !state.isIdentifying && !state.isSpotiFlacDownloading,
+                                        onClick = { onDownloadResult(candidate) },
+                                        modifier = Modifier.heightIn(min = 48.dp).semantics {
+                                            contentDescription = "Download ${candidate.title} by ${candidate.artist}"
+                                        },
+                                    ) {
+                                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Text(
+                                            if (selected && state.isSpotiFlacDownloading) "Downloading" else "Download",
+                                            modifier = Modifier.padding(start = 4.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
-
-                if (state.isIdentifying && state.spotiFlacSearchResults.isNotEmpty()) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                    )
-                    Text(
-                        "Resolving the selected metadata result…",
-                        fontSize = 11.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 5.dp),
-                    )
                 }
 
                 state.identifiedTrack?.let { track ->

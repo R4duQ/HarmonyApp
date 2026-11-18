@@ -1459,8 +1459,18 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
-    fun selectSpotiFlacSearchResult(candidate: SpotiFlacSearchCandidate) {
-        if (_state.value.isIdentifying) return
+    fun selectSpotiFlacSearchResult(candidate: SpotiFlacSearchCandidate) = resolveSpotiFlacResult(candidate, thenDownload = false)
+
+    /**
+     * One tap from a result to a download: the same verification Select runs
+     * (the exact provider track, its ISRC), then the download starts by itself
+     * if the result is still the one chosen. A failed verification stops
+     * there with its error, as Select's would.
+     */
+    fun downloadSpotiFlacSearchResult(candidate: SpotiFlacSearchCandidate) = resolveSpotiFlacResult(candidate, thenDownload = true)
+
+    private fun resolveSpotiFlacResult(candidate: SpotiFlacSearchCandidate, thenDownload: Boolean) {
+        if (_state.value.isIdentifying || _state.value.isSpotiFlacDownloading) return
         _state.update {
             it.copy(
                 isIdentifying = true,
@@ -1482,9 +1492,12 @@ class DownloadsViewModel @Inject constructor(
                         message = buildString {
                             append("Track verified")
                             track.isrc?.let { code -> append(" · ISRC $code") }
-                            append(". Press Download below to start the lossless-provider download.")
+                            append(if (thenDownload) ". Starting the download." else ". Press Download below to start the lossless-provider download.")
                         },
                     )
+                }
+                if (thenDownload && _state.value.selectedSpotiFlacMetadataId == candidate.metadataId) {
+                    requestDownloadForIdentifiedTrack()
                 }
             } catch (cancelled: CancellationException) {
                 _state.update { it.copy(isIdentifying = false) }

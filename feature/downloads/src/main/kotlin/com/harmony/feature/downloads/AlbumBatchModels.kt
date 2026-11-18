@@ -132,9 +132,9 @@ data class AlbumBatch(
         get() = when (state) {
             AlbumBatchState.READY -> if (total == 0) "Select tracks" else "Ready · $total tracks"
             AlbumBatchState.QUEUED -> "Queued"
-            AlbumBatchState.DOWNLOADING -> "Downloading (${(completed + 1).coerceAtMost(total)}/$total)"
-            AlbumBatchState.INDEXING -> "Indexing 24D"
-            AlbumBatchState.PAUSED -> "Paused · $completed/$total"
+            AlbumBatchState.DOWNLOADING -> "Downloading song ${(completed + 1).coerceAtMost(total)} of $total"
+            AlbumBatchState.INDEXING -> "Analysing for mixes"
+            AlbumBatchState.PAUSED -> "Paused · $completed of $total done"
             AlbumBatchState.COMPLETED -> "Completed"
             AlbumBatchState.PARTIAL -> "Partial · $failed failed"
             AlbumBatchState.FAILED -> "Failed"

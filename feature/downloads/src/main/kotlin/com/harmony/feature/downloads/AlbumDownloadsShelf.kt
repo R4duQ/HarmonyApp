@@ -1,5 +1,8 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,9 +51,10 @@ fun AlbumDownloadsShelf(
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("ALBUM QUEUE", color = glass.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.4.sp, modifier = Modifier.weight(1f).padding(start = 4.dp))
-            if (active > 0) Text("$active active", color = glass.LiveInk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Album downloads", color = glass.TextPrimary, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f).padding(start = 4.dp).semantics { heading() })
+            if (active > 0) Text(if (active == 1) "1 in progress" else "$active in progress", color = glass.LiveInk,
+                style = MaterialTheme.typography.labelMedium)
         }
         message?.let { CyberNotice(it, error = true, onDismiss = viewModel::dismissMessage) }
         shown.forEach { batch ->
