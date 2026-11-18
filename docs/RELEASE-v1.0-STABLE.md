@@ -1,8 +1,27 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **171**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 170), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **172**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 171), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 172 — Clearer mixes, "Save to library", Clarity Live in plain words
+
+- **Choose the mix on the mix card.** In the queue, the card shows where the mix comes
+  from before you start it (**Library**, **Combined** or **Online**) and changes it in one
+  tap, all three shown at once; the button is **Start mix**. It is the same setting as in
+  Settings, where the three are now shown side by side. Changing it while a mix plays
+  starts the mix again from the song playing. (The card used to say "A radio from your
+  library" whatever the source.)
+- **One line says what happens next.** Under an online mix, the first line now says what
+  the music is waiting for: the song being prepared and how far along, that playback
+  starts by itself when it is ready, or that the mix continues from your library and the
+  real reason (not on YouTube Music, no connection, a download service needs sign-in,
+  Wi-Fi only). Each song's own state is under **Details**.
+- **"Save to library" instead of "Keep".** Online songs are saved with **Save to
+  library** (the song playing shows **In library ✓** once saved), the panel's button is
+  **Save all to library**, and the setting is now **Save songs you finish twice**.
+- **Clarity Live in plain words.** The card says what it does in one line; how it works
+  is a tap away under **How it works**.
 
 ## Build 171 — Online mixes play online songs only
 
