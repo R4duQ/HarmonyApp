@@ -29,6 +29,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
+    // The test activity Robolectric launches, for every variant CI tests (release included).
+    testImplementation("androidx.compose.ui:ui-test-manifest")
 
     // Album page interaction tests: ./gradlew :feature:library:connectedDebugAndroidTest
     androidTestImplementation(platform(libs.compose.bom))

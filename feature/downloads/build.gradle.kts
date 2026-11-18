@@ -48,6 +48,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
+    testImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation(libs.kotlinx.coroutines.test)
     // android.jar's org.json is a stub in local unit tests; the search tests parse real JSON.
     testImplementation("org.json:json:20240303")
