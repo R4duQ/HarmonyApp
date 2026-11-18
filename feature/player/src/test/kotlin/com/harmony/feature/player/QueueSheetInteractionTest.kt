@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import com.harmony.core.model.MixSource
 import com.harmony.core.model.MixState
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.Song
@@ -291,7 +292,8 @@ class QueueSheetInteractionTest {
             )
         }
         rule.onNodeWithText("Mix from this song").assertIsDisplayed()
-        rule.onNodeWithText("Start").performClick()
+        rule.onNodeWithText("From your library").assertIsDisplayed()
+        rule.onNodeWithText("Start mix").performClick()
         rule.waitForIdle()
         assertEquals(1, starts)
         rule.onNodeWithText("Mix from A").assertIsDisplayed()
@@ -299,6 +301,30 @@ class QueueSheetInteractionTest {
         rule.waitForIdle()
         assertEquals(1, stops)
         rule.onNodeWithText("Mix from this song").assertIsDisplayed()
+    }
+
+    @Test
+    fun theMixCardShowsItsSourceAndChangesItInOneTap() {
+        val player = FakePlayer(listOf("A", "B", "C"))
+        var choice by mutableStateOf<MixSource?>(MixSource.ONLINE)
+        val chosen = mutableListOf<MixSource>()
+        rule.setContent {
+            QueueSheetContent(
+                player.state, onPlay = {}, onRemove = {}, onMove = player::move,
+                mixAvailable = true, mixChoice = choice,
+                onChooseMixSource = { chosen += it; choice = it },
+            )
+        }
+        rule.onNodeWithText("Online").assertIsDisplayed()
+        rule.onNodeWithText("Online").performClick()
+        rule.waitForIdle()
+        // All three, at once.
+        rule.onNodeWithText("Library").assertIsDisplayed()
+        rule.onNodeWithText("Combined").assertIsDisplayed()
+        rule.onNodeWithText("Combined").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(MixSource.COMBINED), chosen)
+        rule.onNodeWithText("Combined").assertIsDisplayed()
     }
 
     @Test

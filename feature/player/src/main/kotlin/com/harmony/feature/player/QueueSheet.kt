@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
@@ -29,6 +31,8 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -52,6 +56,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,10 +67,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.model.MixSource
 import com.harmony.core.model.MixState
 import com.harmony.domain.online.CandidateStage
-import com.harmony.domain.online.CatalogFailure
 import com.harmony.domain.online.MatchVerdict
 import com.harmony.domain.online.OnlineCandidate
 import com.harmony.domain.online.OnlineMixState
+import com.harmony.domain.online.OnlineProgress
+import com.harmony.domain.online.StopReason
+import com.harmony.domain.online.progress
 import com.harmony.domain.online.SeedBasis
 import com.harmony.domain.online.SeedStatus
 import com.harmony.core.model.PlayerState
@@ -131,7 +138,10 @@ fun QueueSheet(viewModel: PlayerViewModel) {
     val mix by viewModel.mix.collectAsStateWithLifecycle()
     val online by viewModel.onlineMix.collectAsStateWithLifecycle()
     val keepStatus by viewModel.keepStatus.collectAsStateWithLifecycle()
+    val mixChoice by viewModel.mixSourceChoice.collectAsStateWithLifecycle()
     QueueSheetContent(
+        mixChoice = mixChoice,
+        onChooseMixSource = viewModel::onChooseMixSource,
         keepStatus = keepStatus,
         onKeep = viewModel::onKeep,
         onKeepAll = viewModel::onKeepAll,
@@ -166,6 +176,9 @@ internal fun QueueSheetContent(
     keepStatus: Map<String, KeepStatus> = emptyMap(),
     onKeep: (Song) -> Unit = {},
     onKeepAll: () -> Unit = {},
+    /** The source "Start mix" uses; null while online mixes are off (library only). */
+    mixChoice: MixSource? = null,
+    onChooseMixSource: (MixSource) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val palette = playerPalette()
@@ -270,12 +283,12 @@ internal fun QueueSheetContent(
         val canMix = mixAvailable && nowPlaying != null &&
             (nowPlaying.id >= 0 || com.harmony.domain.playback.OnlineSongs.isOnline(nowPlaying))
         if (mix != null || canMix) {
-            MixBar(mix = mix, palette = palette, onStart = onStartMix, onStop = onStopMix)
+            MixBar(mix = mix, choice = mixChoice, palette = palette, onStart = onStartMix, onStop = onStopMix, onChoose = onChooseMixSource)
         }
         if (mix != null && mix.source != MixSource.OFFLINE) {
             // "Keep all" while an online song of the queue is not in the library yet.
             val unkept = state.queue.count { OnlineSongs.isOnline(it) && keepStatus.of(it) !is KeepStatus.Kept }
-            OnlineMixPanel(online, palette, unkept = unkept, onKeepAll = onKeepAll)
+            OnlineMixPanel(online, mix.source, upcomingEmpty = queueUpcoming.isEmpty(), palette, unkept = unkept, onKeepAll = onKeepAll)
         }
 
         if (upcoming.isEmpty()) {
@@ -521,17 +534,24 @@ private fun NowPlayingCard(
 }
 
 /**
- * "Mix from this song" / "Stop mix": a radio from the song playing, made
- * from the local library only (it works offline). While it runs, the bar
+ * "Mix from this song": a radio from the song playing. The card says where
+ * it will draw from before it starts (Library, Combined, Online) and changes
+ * it in one tap, all three shown at once; [choice] is null while online mixes
+ * are off, and then there is nothing to choose. Changing the source of a mix
+ * that runs starts it again from the song playing. While it runs, the card
  * names the seed song the mix keeps returning to.
  */
 @Composable
 private fun MixBar(
     mix: MixState?,
+    choice: MixSource?,
     palette: PlayerPalette,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onChoose: (MixSource) -> Unit,
 ) {
+    val source = mix?.source ?: choice ?: MixSource.OFFLINE
+    var choosing by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -556,22 +576,76 @@ private fun MixBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                when {
-                    mix == null -> "A radio from your library"
-                    mix.source == MixSource.ONLINE -> "YouTube Music recommendations · learns from skips"
-                    mix.source == MixSource.COMBINED -> "Your library + YouTube Music · learns from skips"
-                    else -> "From your library · learns from skips"
-                },
-                fontSize = 11.5.sp,
-                lineHeight = 15.sp,
-                color = palette.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (choice == null && mix?.source.let { it == null || it == MixSource.OFFLINE }) {
+                // Online mixes are off: the library is the only source, nothing to choose.
+                Text(
+                    "From your library" + if (mix != null) " · learns from skips" else "",
+                    fontSize = 11.5.sp,
+                    lineHeight = 15.sp,
+                    color = palette.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Box {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(role = Role.Button, onClickLabel = "Choose where the mix comes from") { choosing = true }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            sourceName(source),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.accent,
+                        )
+                        Icon(
+                            Icons.Rounded.ArrowDropDown,
+                            contentDescription = null,
+                            tint = palette.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            sourceLine(source),
+                            fontSize = 11.5.sp,
+                            lineHeight = 15.sp,
+                            color = palette.muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+                        for (option in listOf(MixSource.OFFLINE, MixSource.COMBINED, MixSource.ONLINE)) {
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(sourceName(option), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        Text(sourceDescription(option), fontSize = 12.sp, lineHeight = 16.sp, color = palette.muted)
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Check,
+                                        contentDescription = if (option == source) "Selected" else null,
+                                        tint = if (option == source) palette.accent else androidx.compose.ui.graphics.Color.Transparent,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                },
+                                onClick = {
+                                    choosing = false
+                                    if (option != source) onChoose(option)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
         Text(
-            if (mix != null) "Stop mix" else "Start",
+            if (mix != null) "Stop mix" else "Start mix",
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             color = palette.accent,
@@ -579,7 +653,7 @@ private fun MixBar(
                 .clip(RoundedCornerShape(10.dp))
                 .clickable(
                     role = Role.Button,
-                    onClickLabel = if (mix != null) "Stop mix" else "Mix from this song",
+                    onClickLabel = if (mix != null) "Stop mix" else "Start a mix from this song",
                     onClick = if (mix != null) onStop else onStart,
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -587,38 +661,52 @@ private fun MixBar(
     }
 }
 
+private fun sourceName(source: MixSource) = when (source) {
+    MixSource.OFFLINE -> "Library"
+    MixSource.COMBINED -> "Combined"
+    MixSource.ONLINE -> "Online"
+}
+
+/** After the source's name on the card: what it means, briefly. */
+private fun sourceLine(source: MixSource) = when (source) {
+    MixSource.OFFLINE -> " · your songs only"
+    MixSource.COMBINED -> " · library + YouTube Music"
+    MixSource.ONLINE -> " · YouTube Music picks"
+}
+
+private fun sourceDescription(source: MixSource) = when (source) {
+    MixSource.OFFLINE -> "Your own songs only. Works offline, nothing is asked online"
+    MixSource.COMBINED -> "Your library, with about one YouTube Music pick in three"
+    MixSource.ONLINE -> "Only songs YouTube Music recommends, each as soon as it's ready"
+}
+
 /**
- * The online side of a running mix: whether the song playing was found on
- * YouTube Music, then each recommendation and where it stands (in the
- * library, being prepared, ready, or why not). A recommendation joins the
- * queue only once it is ready.
+ * The online side of a running mix, said in one line: what happens to the
+ * music next ([OnlineProgress]): a song being prepared, playback that starts
+ * by itself, or the library filling in, with the real reason. Under it, how
+ * the song playing was found; each recommendation's own state is under
+ * Details. "Save all" puts the online songs of the queue in the library.
  */
 @Composable
-private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette, unkept: Int = 0, onKeepAll: () -> Unit = {}) {
-    val seedLine = when (val seed = online.seed) {
-        SeedStatus.Idle, SeedStatus.Identifying -> "Finding this song on YouTube Music…"
-        is SeedStatus.Identified -> when (seed.basis) {
+private fun OnlineMixPanel(
+    online: OnlineMixState,
+    source: MixSource,
+    upcomingEmpty: Boolean,
+    palette: PlayerPalette,
+    unkept: Int = 0,
+    onKeepAll: () -> Unit = {},
+) {
+    var details by remember { mutableStateOf(false) }
+    val status = statusLine(online.progress(), source, upcomingEmpty)
+    val seedLine = (online.seed as? SeedStatus.Identified)?.let { seed ->
+        when (seed.basis) {
             SeedBasis.KNOWN, SeedBasis.TAGS -> "Found on YouTube Music"
             SeedBasis.NAME -> "Found on YouTube Music from the file's name"
             SeedBasis.FINGERPRINT -> "Recognised by its sound, found on YouTube Music"
             SeedBasis.GUESS -> "Found by searching its name on YouTube Music"
-            SeedBasis.ARTIST -> "Song not found: looser suggestions from the artist's radio"
-            SeedBasis.GENRE -> "Song not found: looser suggestions by genre"
+            SeedBasis.ARTIST -> "Song not found: looser picks from the artist's radio"
+            SeedBasis.GENRE -> "Song not found: looser picks by genre"
         }
-        is SeedStatus.NotIdentified -> when (seed.verdict) {
-            MatchVerdict.AMBIGUOUS -> "Several recordings match on YouTube Music: none chosen"
-            MatchVerdict.UNCERTAIN -> "Not sure which YouTube Music song this is: none chosen"
-            else -> if (seed.songsSeen == 0) "No songs on YouTube Music from this network" else "Not found on YouTube Music"
-        } + " · your library plays on"
-        is SeedStatus.Failed -> "YouTube Music: " + when (val f = seed.failure) {
-            CatalogFailure.Offline -> "no connection"
-            CatalogFailure.Timeout -> "no answer in time"
-            is CatalogFailure.RateLimited -> "asked to wait"
-            is CatalogFailure.Http -> "error ${f.status}"
-            is CatalogFailure.SchemaChanged -> "answer not understood (needs an update)"
-            CatalogFailure.Disabled -> "off"
-            is CatalogFailure.Unexpected -> "something went wrong (${f.kind})"
-        } + " · your library plays on"
     }
     val shown = online.candidates.filter { it.stage != CandidateStage.QUEUED }.take(5)
     Column(
@@ -631,29 +719,55 @@ private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette, unkep
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                seedLine,
-                fontSize = 11.5.sp,
-                lineHeight = 15.sp,
-                color = palette.muted,
+                status,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
             )
             if (unkept > 0) {
                 Text(
-                    if (unkept == 1) "Keep" else "Keep all $unkept",
+                    if (unkept == 1) "Save to library" else "Save all to library ($unkept)",
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = palette.accent,
                     modifier = Modifier
                         .padding(start = 8.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(role = Role.Button, onClickLabel = "Keep the online songs of the queue in your library", onClick = onKeepAll)
+                        .clickable(role = Role.Button, onClickLabel = "Save the online songs of the queue to your library", onClick = onKeepAll)
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
             }
         }
-        shown.forEach { c ->
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                seedLine.orEmpty(),
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                color = palette.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (shown.isNotEmpty()) {
+                Text(
+                    if (details) "Hide details" else "Details",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = palette.accent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button, onClickLabel = if (details) "Hide each song's state" else "Show each song's state") { details = !details }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
+        }
+        if (details) shown.forEach { c ->
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     c.track.title + " · " + c.track.artist,
@@ -673,6 +787,39 @@ private fun OnlineMixPanel(online: OnlineMixState, palette: PlayerPalette, unkep
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The one line that says what happens to the music: for an Online mix with
+ * nothing queued after the song playing, that playback goes on by itself; when
+ * nothing online can come, that the library plays on and why.
+ */
+internal fun statusLine(progress: OnlineProgress, source: MixSource, upcomingEmpty: Boolean): String {
+    val startsByItself = if (upcomingEmpty) " · playback starts by itself when it's ready" else ""
+    return when (progress) {
+        OnlineProgress.Finding -> "Finding this song on YouTube Music…"
+        is OnlineProgress.Preparing -> "Preparing “${progress.track.title}”" +
+            (progress.progress?.let { " · ${(it * 100).toInt()}%" } ?: "…") + startsByItself
+        is OnlineProgress.Ready -> "“${progress.track.title}” is ready and joins the queue next"
+        OnlineProgress.Working -> "Getting the next online song ready…$startsByItself"
+        is OnlineProgress.Stopped -> {
+            val lead = if (source == MixSource.ONLINE) "The mix continues from your library" else "Your library plays on"
+            val why = when (progress.reason) {
+                StopReason.NOT_FOUND -> when (progress.detail) {
+                    MatchVerdict.AMBIGUOUS.name -> "several recordings of this song match on YouTube Music"
+                    MatchVerdict.UNCERTAIN.name -> "not sure which YouTube Music song this is"
+                    else -> "this song isn't on YouTube Music"
+                }
+                StopReason.NO_CONNECTION -> "no connection to YouTube Music"
+                StopReason.CATALOG_ERROR -> "YouTube Music's answer wasn't understood"
+                StopReason.NEEDS_SIGN_IN -> "a download service needs sign-in or verification (open Downloads)"
+                StopReason.WAITING_FOR_WIFI -> "online songs download on Wi-Fi only (Settings)"
+                StopReason.HELD -> progress.detail ?: "downloads are on hold"
+                StopReason.NONE_LEFT -> "no more recommendations could be downloaded"
+            }
+            "$lead · $why"
         }
     }
 }

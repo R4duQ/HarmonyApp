@@ -20,8 +20,7 @@ import com.harmony.domain.online.OnlineMixFeed
 import com.harmony.domain.online.OnlineMixState
 import com.harmony.domain.online.ReadyPick
 import com.harmony.domain.online.SeedTrack
-import com.harmony.domain.online.CandidateStage
-import com.harmony.domain.online.SeedStatus
+import com.harmony.domain.online.canDeliver
 import com.harmony.domain.playback.KeepStatus
 import com.harmony.domain.playback.OnlineSongKeeper
 import com.harmony.domain.playback.OnlineSongs
@@ -1228,17 +1227,7 @@ class SmartQueueManager @Inject constructor(
      * turned down or is held (waiting for Wi-Fi, no space): then an ONLINE mix
      * lets the library fill in rather than fall silent.
      */
-    private fun onlineCanDeliver(): Boolean {
-        val s = online.state.value
-        return when (s.seed) {
-            SeedStatus.Idle, SeedStatus.Identifying -> true
-            is SeedStatus.NotIdentified, is SeedStatus.Failed -> false
-            is SeedStatus.Identified -> s.candidates.isEmpty() || s.candidates.any { c ->
-                c.ready || c.stage == CandidateStage.FOUND || c.stage == CandidateStage.PREPARING ||
-                    (c.stage == CandidateStage.RETRY_LATER && c.retryAtMillis != null)
-            }
-        }
-    }
+    private fun onlineCanDeliver(): Boolean = online.state.value.canDeliver()
 
     /** COMBINED: one library song, then an online one every third place, the rest in order. */
     private fun interleave(local: List<Song>, fromOnline: List<Song>): List<Song> {
