@@ -82,11 +82,11 @@ class OnlineSongKeeperImpl @Inject constructor(
                 set(videoId, null)
                 throw e
             } catch (e: KeepException) {
-                set(videoId, KeepStatus.Failed(e.message ?: "Not kept"))
+                set(videoId, KeepStatus.Failed(e.message ?: "Not saved"))
                 DiagnosticsLog.line("KEEP", "failed video=$videoId ${e.message}")
                 null
             } catch (e: Exception) {
-                set(videoId, KeepStatus.Failed("Not kept (${e.javaClass.simpleName})"))
+                set(videoId, KeepStatus.Failed("Not saved (${e.javaClass.simpleName})"))
                 DiagnosticsLog.error("KEEP", "keeping an online song failed", e)
                 null
             }
@@ -105,7 +105,7 @@ class OnlineSongKeeperImpl @Inject constructor(
     private suspend fun copyIntoLibrary(videoId: String, song: Song): Song {
         val downloads = downloadsLazy.get()
         val source = OnlineSongs.fileFor(context.cacheDir, videoId)
-        if (!source.isFile) throw KeepException("No longer on the phone: play it in a mix again to keep it")
+        if (!source.isFile) throw KeepException("No longer on the phone: play it in a mix again to save it")
         val staging = File(context.cacheDir, STAGING).apply { mkdirs() }
         val copy = File(staging, "$videoId.flac")
         try {

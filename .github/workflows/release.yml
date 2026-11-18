@@ -183,6 +183,16 @@ jobs:
               "dist/Harmony-v${VERSION_NAME}-arm64-v8a.apk#Harmony v${VERSION_NAME} — Android arm64-v8a" \
               "dist/SHA256SUMS.txt#SHA-256 checksums" \
               "dist/APK-SIGNATURE.txt#APK signing certificate details"
+            # An APK this app no longer ships (the Mornye and emulator APKs of builds up to 164)
+            # goes, so nobody installs an old build by mistake: the release carries one phone APK.
+            # Only *.apk files are touched; the iOS IPA and the checksum and signature files stay.
+            keep="Harmony-v${VERSION_NAME}-arm64-v8a.apk"
+            gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name' | while read -r name; do
+              if [[ "$name" == *.apk && "$name" != "$keep" ]]; then
+                echo "Removing $name: this app no longer ships it"
+                gh release delete-asset "${RELEASE_TAG}" "$name" --yes
+              fi
+            done
           else
             gh release create "${RELEASE_TAG}" \
               --title "$RELEASE_TITLE" \

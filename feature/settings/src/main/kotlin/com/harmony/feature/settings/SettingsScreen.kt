@@ -124,15 +124,7 @@ class SettingsViewModel @Inject constructor(
     fun setOnlineMixOnMobileData(on: Boolean) = launch { settings.setOnlineMixOnMobileData(on) }
     fun setOnlineMixAutoKeep(on: Boolean) = launch { settings.setOnlineMixAutoKeep(on) }
 
-    /** Combined → Online → Offline → Combined. */
-    fun cycleOnlineMixSource(current: String) = launch {
-        val next = when (current) {
-            "COMBINED" -> "ONLINE"
-            "ONLINE" -> "OFFLINE"
-            else -> "COMBINED"
-        }
-        settings.setOnlineMixSource(next)
-    }
+    fun setOnlineMixSource(source: String) = launch { settings.setOnlineMixSource(source) }
     fun setKeepPlayingAfterSwipe(on: Boolean) = launch { settings.setKeepPlayingAfterSwipe(on) }
     fun setCrossfade(seconds: Int) = launch { settings.setCrossfadeSeconds(seconds) }
     fun setReplayGain(mode: ReplayGainMode) = launch { settings.setReplayGainMode(mode) }
@@ -489,19 +481,23 @@ fun SettingsScreen(
         )
 
         if (state.onlineMixEnabled) {
+            val sources = listOf("OFFLINE", "COMBINED", "ONLINE")
             EditorialSettingRow(
-                title = "Mix source: " + when (state.onlineMixSource) {
-                    "ONLINE" -> "Online"
-                    "OFFLINE" -> "Offline"
-                    else -> "Combined"
-                },
+                title = "Mix source",
                 subtitle = when (state.onlineMixSource) {
-                    "ONLINE" -> "Only songs YouTube Music recommends, each as soon as it is ready; your library only if none can come"
-                    "OFFLINE" -> "Your library only. Nothing is asked online"
-                    else -> "Your library's mix with about one online song in three"
-                } + ". Tap to change",
+                    "ONLINE" -> "Only songs YouTube Music recommends, each as soon as it's ready; your library only if none can come"
+                    "OFFLINE" -> "Your own songs only. Nothing is asked online"
+                    else -> "Your library, with about one YouTube Music pick in three"
+                } + ". Also on the mix card in the queue",
                 palette = palette,
-                onClick = { viewModel.cycleOnlineMixSource(state.onlineMixSource) },
+                content = {
+                    EditorialChoiceChips(
+                        options = listOf("Library", "Combined", "Online"),
+                        selectedIndex = sources.indexOf(state.onlineMixSource).takeIf { it >= 0 } ?: 1,
+                        onSelect = { viewModel.setOnlineMixSource(sources[it]) },
+                        palette = palette,
+                    )
+                },
             )
             EditorialSettingRow(
                 title = "Prepare online songs on mobile data",
@@ -512,9 +508,9 @@ fun SettingsScreen(
                 },
             )
             EditorialSettingRow(
-                title = "Keep songs you finish twice",
+                title = "Save songs you finish twice",
                 subtitle = "An online song you play to the end twice is saved to your library by itself. " +
-                    "Any online song can also be kept from the queue",
+                    "Any online song can also be saved from the queue",
                 palette = palette,
                 trailing = {
                     EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)

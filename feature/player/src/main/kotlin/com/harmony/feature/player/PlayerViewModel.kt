@@ -265,9 +265,33 @@ class PlayerViewModel @Inject constructor(
     /** The online side of the mix (when online mixes are on): the seed's status and each recommendation's stage. */
     val onlineMix: StateFlow<com.harmony.domain.online.OnlineMixState> = queueManager.onlineMix
 
-    /** "Mix from this song": a radio from the song playing. */
+    /**
+     * Where "Start mix" draws from, as Settings has it: null while online
+     * mixes are off (then a mix is the library's only and there is nothing to
+     * choose). The queue sheet shows it on the mix card and changes it there.
+     */
+    val mixSourceChoice: StateFlow<com.harmony.core.model.MixSource?> = settings.settings
+        .map { s ->
+            if (!s.onlineMixEnabled) null
+            else runCatching { com.harmony.core.model.MixSource.valueOf(s.onlineMixSource) }
+                .getOrDefault(com.harmony.core.model.MixSource.COMBINED)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** "Mix from this song": a radio from the song playing, from the source chosen on the card. */
     fun onStartMix() {
-        queueManager.startMix()
+        queueManager.startMix(mixSourceChoice.value ?: com.harmony.core.model.MixSource.OFFLINE)
+    }
+
+    /**
+     * The source chosen on the mix card: saved as the setting (so Settings and
+     * the card agree), and a mix already running starts again from the song
+     * playing with it.
+     */
+    fun onChooseMixSource(source: com.harmony.core.model.MixSource) {
+        viewModelScope.launch { settings.setOnlineMixSource(source.name) }
+        val running = queueManager.mix.value
+        if (running != null && running.source != source) queueManager.startMix(source)
     }
 
     /** "Stop mix": back to the shuffle mode from before the mix. */
@@ -276,10 +300,10 @@ class PlayerViewModel @Inject constructor(
     /** By video id: online songs being kept in the library, kept, or not. */
     val keepStatus: StateFlow<Map<String, com.harmony.domain.playback.KeepStatus>> = queueManager.keepStatus
 
-    /** "Keep": an online mix's song is saved to the library (its file is already on the phone). */
+    /** "Save to library": an online mix's song is saved to the library (its file is already on the phone). */
     fun onKeep(song: com.harmony.core.model.Song) = queueManager.keep(listOf(song))
 
-    /** "Keep all": every online song in the queue. */
+    /** "Save all to library": every online song in the queue. */
     fun onKeepAll() = queueManager.keepAllOnline()
 
     // -- Queue --------------------------------------------------------------

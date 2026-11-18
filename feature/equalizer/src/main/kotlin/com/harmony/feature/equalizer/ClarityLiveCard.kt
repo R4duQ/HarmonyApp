@@ -3,6 +3,7 @@ package com.harmony.feature.equalizer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -29,6 +31,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
@@ -78,8 +81,8 @@ internal fun ClarityLiveCard(
                 Text(
                     when {
                         status.bitPerfect -> "Off while bit-perfect: the DAC gets the file untouched"
-                        on -> "Every band sets itself to what the music needs, live"
-                        else -> "Off: 24 bands that adjust themselves while the song plays"
+                        on -> "Balances the frequencies automatically while you listen"
+                        else -> "Off · balances the frequencies automatically while you listen"
                     },
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -111,17 +114,32 @@ internal fun ClarityLiveCard(
                 palette = palette,
             )
         }
+        // The technical account, for whoever wants it: one tap away, not in the way of the sound.
+        var howItWorks by remember { mutableStateOf(false) }
         Text(
-            "Clarity Live listens to the music about 190 times a second through a model of hearing, in 24 bands " +
-                "spaced the way the ear resolves pitch (40 Hz to 16 kHz). Each band moves on its own: what is " +
-                "covered up by louder sounds nearby comes forward (up to 4 dB at the default), what pushes forward " +
-                "(a ringing resonance, harshness, boom) is held back, and the loudness stays where it was. Your " +
-                "sliders still apply on top; Auto rests while it runs. Nothing is added to the latency.",
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            color = palette.muted,
-            modifier = Modifier.padding(top = 10.dp),
+            if (howItWorks) "Hide how it works" else "How it works",
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Recover,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button) { howItWorks = !howItWorks }
+                .padding(vertical = 6.dp, horizontal = 2.dp),
         )
+        if (howItWorks) {
+            Text(
+                "Clarity Live listens to the music about 190 times a second through a model of hearing, in 24 bands " +
+                    "spaced the way the ear resolves pitch (40 Hz to 16 kHz). Each band moves on its own: what is " +
+                    "covered up by louder sounds nearby comes forward (up to 4 dB at the default), what pushes forward " +
+                    "(a ringing resonance, harshness, boom) is held back, and the loudness stays where it was. Your " +
+                    "sliders still apply on top; Auto rests while it runs. Nothing is added to the latency.",
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = palette.muted,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
 
