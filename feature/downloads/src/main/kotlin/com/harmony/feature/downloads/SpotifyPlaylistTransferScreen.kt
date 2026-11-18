@@ -1,5 +1,11 @@
 package com.harmony.feature.downloads
 
+import com.harmony.core.ui.theme.Catalog
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
 import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -261,35 +267,6 @@ fun SpotifyPlaylistTransferScreen(
         }
     }
 
-    if (state.showTransferConfirmation) {
-        val count = state.selectedMissingCount
-        AlertDialog(
-            onDismissRequest = viewModel::dismissTransferConfirmation,
-            containerColor = palette.field,
-            titleContentColor = palette.ink,
-            textContentColor = palette.muted,
-            title = { Text(if (count == 0) "Create Harmony playlist?" else "Transfer $count track${if (count == 1) "" else "s"}?") },
-            text = {
-                Text(
-                    if (count == 0) {
-                        "Harmony will create the playlist from the ${state.localMatchCount} tracks already in your library."
-                    } else {
-                        "Harmony will use ${state.source.displayName} for every selected missing track. It will not switch engines automatically."
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::confirmTransfer) {
-                    Text(if (count == 0) "Create" else "Start", color = palette.ink)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissTransferConfirmation) {
-                    Text("Cancel", color = palette.muted)
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -665,7 +642,7 @@ private fun DownloadMethodCard(
 }
 
 @Composable
-private fun SelectionAndTransferCard(
+internal fun SelectionAndTransferCard(
     state: SpotifyPlaylistTransferState,
     palette: EditorialPalette,
     onSelectAll: () -> Unit,
@@ -677,11 +654,15 @@ private fun SelectionAndTransferCard(
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("${state.selectedMissingCount} missing selected", color = palette.ink, fontWeight = FontWeight.Bold)
                     Text(
-                        "Local matches are included automatically in the original order.",
+                        "${state.selectedMissingCount} missing song${if (state.selectedMissingCount == 1) "" else "s"} selected",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = palette.ink,
+                    )
+                    Text(
+                        "${state.localMatchCount} already in your library, used as ${if (state.localMatchCount == 1) "it is" else "they are"}, in the playlist's order.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = palette.muted,
-                        fontSize = 12.sp,
                     )
                 }
                 EditorialTextAction("All", onSelectAll, palette)
@@ -696,23 +677,34 @@ private fun SelectionAndTransferCard(
                     modifier = Modifier.padding(top = 10.dp),
                 )
             }
-            EditorialPill(
-                text = when {
-                    state.isTransferring -> "Transferring…"
-                    state.selectedMissingCount == 0 -> "Create playlist"
-                    else -> "Transfer selected"
-                },
-                icon = Icons.Rounded.Sync,
+            // The one primary action, saying exactly what it does: how many songs
+            // get downloaded and with which source, or that the playlist is made
+            // from what is already in the library.
+            val missing = state.selectedMissingCount
+            Button(
                 onClick = onTransfer,
-                palette = palette,
-                modifier = Modifier.padding(top = 14.dp),
-            )
+                enabled = !state.isTransferring && !state.isCheckingVerification,
+                colors = ButtonDefaults.buttonColors(containerColor = palette.accent, contentColor = palette.onAccent),
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp).heightIn(min = 52.dp),
+            ) {
+                Icon(if (missing == 0) Icons.Rounded.CheckCircle else Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(
+                    when {
+                        state.isTransferring -> "Transferring…"
+                        missing == 0 -> "Create the playlist"
+                        else -> "Download $missing missing song${if (missing == 1) "" else "s"} with ${state.source.displayName}"
+                    },
+                    maxLines = 2,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun TransferTrackRow(
+internal fun TransferTrackRow(
     row: PlaylistTransferTrack,
     palette: EditorialPalette,
     enabled: Boolean,
@@ -733,11 +725,9 @@ private fun TransferTrackRow(
                 fontSize = 12.sp,
                 modifier = Modifier.width(26.dp),
             )
-            AsyncImage(
-                model = row.remote.artworkUrl,
-                contentDescription = null,
-                modifier = Modifier.size(44.dp),
-            )
+            // The shared artwork component: a cover, or the music-note well when
+            // Spotify gave none (a bare AsyncImage left an empty 44dp gap).
+            com.harmony.core.ui.component.Artwork(row.remote.artworkUrl, null, Modifier.size(44.dp), cornerRadius = 6.dp)
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 Text(
                     row.remote.title,
@@ -755,24 +745,24 @@ private fun TransferTrackRow(
                 )
                 Text(
                     row.detail ?: statusText(row.status),
-                    color = palette.muted,
-                    fontSize = 11.sp,
+                    color = if (row.status == PlaylistTransferTrackStatus.FAILED) MaterialTheme.colorScheme.error else palette.muted,
+                    style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             when (row.status) {
                 PlaylistTransferTrackStatus.IN_LIBRARY,
-                PlaylistTransferTrackStatus.DOWNLOADED -> Icon(Icons.Rounded.CheckCircle, null, tint = palette.ink)
+                PlaylistTransferTrackStatus.DOWNLOADED -> Icon(Icons.Rounded.CheckCircle, statusText(row.status), tint = palette.accent)
                 PlaylistTransferTrackStatus.SEARCHING,
                 PlaylistTransferTrackStatus.DOWNLOADING -> CircularProgressIndicator(
                     modifier = Modifier.size(22.dp),
                     strokeWidth = 2.dp,
-                    color = palette.ink,
+                    color = Catalog.red,
                 )
                 PlaylistTransferTrackStatus.WAITING_FOR_VERIFICATION ->
                     Icon(Icons.Rounded.HourglassTop, null, tint = palette.ink)
-                PlaylistTransferTrackStatus.FAILED -> Icon(Icons.Rounded.ErrorOutline, null, tint = palette.ink)
+                PlaylistTransferTrackStatus.FAILED -> Icon(Icons.Rounded.ErrorOutline, statusText(row.status), tint = MaterialTheme.colorScheme.error)
                 PlaylistTransferTrackStatus.READY -> Checkbox(
                     checked = row.selected,
                     onCheckedChange = { onToggle() },

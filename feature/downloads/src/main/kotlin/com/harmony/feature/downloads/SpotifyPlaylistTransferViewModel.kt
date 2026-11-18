@@ -417,7 +417,11 @@ class SpotifyPlaylistTransferViewModel @Inject constructor(
             _state.update { it.copy(error = "Connect Soulseek in Downloads before starting this batch.") }
             return
         }
-        _state.update { it.copy(showTransferConfirmation = true, error = null) }
+        // The button already names what happens ("Download 12 missing songs with
+        // SpotiFLAC"), so it starts; a dialog repeating the same sentence was a
+        // second tap for nothing. Cancel stays on the progress card.
+        _state.update { it.copy(showTransferConfirmation = false, error = null) }
+        startTransfer(checkSpotiFlacPreflight = true)
     }
 
     fun dismissTransferConfirmation() {
