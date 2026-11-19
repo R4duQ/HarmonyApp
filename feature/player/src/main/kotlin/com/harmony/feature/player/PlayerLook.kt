@@ -24,10 +24,10 @@ import androidx.compose.ui.unit.dp
 
 /**
  * The roles the Now Playing screen, the queue and the Smart Shuffle sheet
- * draw with, resolved from the catalogue so the player sits on the same
- * ground as every other screen: blue for what you can act on (shuffle,
- * repeat, favourite), red for the playhead and the played part of the
- * waveform, because that is what is playing now.
+ * draw with, from the Listening Room ([Room]): the page's ground, the amber
+ * play button (the one filled amber control), amber text for what you
+ * switched on and for the playhead (amber text passes 4.5:1 on the ground;
+ * the fill would not, in light), and the record, dark in both themes.
  */
 @Immutable
 data class PlayerPalette(
@@ -55,22 +55,22 @@ data class PlayerPalette(
     val artShadow: Color,
 )
 
-/** The player's palette for the current theme, from [Catalog]. */
+/** The player's palette for the current theme, from [Room]. */
 @Composable
 fun playerPalette(): PlayerPalette {
-    val c = Catalog
+    val r = com.harmony.core.ui.theme.Room
     return PlayerPalette(
-        background = c.ground,
-        ink = c.ink,
-        muted = c.muted,
-        control = c.surface,
-        controlEdge = c.line,
-        primaryControl = c.ink,
-        onPrimaryControl = c.ground,
-        accent = c.blue,
-        live = c.red,
-        track = c.line,
-        vinyl = if (c.isDark) Color(0xFF060708) else Color(0xFF15171B),
+        background = r.ground,
+        ink = r.ink,
+        muted = r.muted,
+        control = r.surface,
+        controlEdge = r.line,
+        primaryControl = r.amber,
+        onPrimaryControl = r.onAmber,
+        accent = r.amberText,
+        live = r.amberText,
+        track = r.line,
+        vinyl = r.record,
         vinylGroove = Color(0x1AFFFFFF),
         artShadow = Color.Black,
     )

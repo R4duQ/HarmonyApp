@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -68,7 +69,11 @@ fun VinylArtwork(
     // invisible. Pausing cancels the effect mid-lap and the Animatable simply
     // holds its current angle.
     val angle = remember { Animatable(0f) }
-    LaunchedEffect(isPlaying) {
+    // "Remove animations" (accessibility A15): the record stays still, label
+    // upright; it still tucks in when paused, without the spring.
+    val still = com.harmony.core.ui.theme.reducedMotion
+    LaunchedEffect(isPlaying, still) {
+        if (still) { angle.snapTo(0f); return@LaunchedEffect }
         if (!isPlaying) return@LaunchedEffect
         while (true) {
             angle.snapTo(angle.value % 360f)
@@ -81,7 +86,7 @@ fun VinylArtwork(
 
     val tuck by animateDpAsState(
         targetValue = if (isPlaying) 0.dp else (-18).dp,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+        animationSpec = if (still) snap() else spring(dampingRatio = Spring.DampingRatioLowBouncy),
         label = "record-tuck",
     )
 

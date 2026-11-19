@@ -9,6 +9,12 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.traversalIndex
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.IntrinsicSize
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
@@ -196,6 +202,10 @@ fun NowPlayingScreen(
 
     var showQueue by remember { mutableStateOf(false) }
     var showShuffleSheet by remember { mutableStateOf(false) }
+    var showSteer by remember { mutableStateOf(false) }
+    val energy by viewModel.energySliderValue.collectAsStateWithLifecycle()
+    val mood by viewModel.moodFilter.collectAsStateWithLifecycle()
+    val brain by viewModel.brainTelemetry.collectAsStateWithLifecycle()
     var showLyrics by remember { mutableStateOf(false) }
     var showPlayOn by rememberSaveable { mutableStateOf(openPlayOn) }
     val connectState by viewModel.connectState.collectAsStateWithLifecycle()
@@ -336,6 +346,19 @@ fun NowPlayingScreen(
         }
     }
 
+    // Large system text: the page scrolls and the record keeps a fixed size
+    // (accessibility A4), so the transport is never pushed off screen.
+    val largeText = LocalDensity.current.fontScale > 1.3f && !landscape
+    val steer = SteerCallbacks(
+        steerable = mix != null || state.shuffleMode == ShuffleMode.SMART,
+        energy = energy,
+        mood = mood,
+        onEnergy = viewModel::onEnergySliderChange,
+        onMood = viewModel::onMoodFilterSelected,
+        onJourney = { viewModel.onStartJourneyToMood(it, 5) },
+        onTune = { showShuffleSheet = true },
+        onStartMix = viewModel::onStartMix,
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -390,6 +413,7 @@ fun NowPlayingScreen(
                     onDragCancel = { gestureScope.launch { dragOffsetY.animateTo(0f) } },
                 )
             }
+            .then(if (largeText) Modifier.verticalScroll(rememberScrollState()) else Modifier)
             .padding(horizontal = sidePadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -409,6 +433,9 @@ fun NowPlayingScreen(
             playScale = playScale,
             mixOn = mix != null,
             mixStatus = mixStatusFor(mix, onlineMix, upcomingEmpty = state.queueIndex >= state.queue.lastIndex),
+            reason = pickReason(brain.nowPlaying?.takeIf { it.trace.trackId == song?.id }),
+            steer = steer,
+            scrollable = largeText,
             cb = NowPlayingCallbacks(
                 onBack = onBack,
                 onQueue = { showQueue = true },
@@ -425,9 +452,12 @@ fun NowPlayingScreen(
                 onScrub = { dragFraction = it },
                 onScrubFinished = onSeekCommit,
                 onScrubCancel = { dragFraction = null },
+                onSteer = { showSteer = true },
             ),
         )
     }
+
+    if (showSteer) SteerSheet(steer, onDismiss = { showSteer = false })
 
     if (showQueue) {
         ModalBottomSheet(onDismissRequest = { showQueue = false }) {
@@ -496,6 +526,8 @@ internal class NowPlayingCallbacks(
     val onScrub: (Float) -> Unit = {},
     val onScrubFinished: (Float) -> Unit = {},
     val onScrubCancel: () -> Unit = {},
+    /** Opens the steering sheet: Calmer, Livelier, moods, Tune. */
+    val onSteer: () -> Unit = {},
 )
 
 /**
@@ -524,8 +556,16 @@ internal fun ColumnScope.NowPlayingBody(
     mixOn: Boolean = false,
     /** What the mix is doing with the next song, from the player's real state; null when nothing to say. */
     mixStatus: MixStatusUi? = null,
+    /** Why the mix picked this song, in words; null when it did not. */
+    reason: String? = null,
+    /** Steering the mix; null hides the steering row. */
+    steer: SteerCallbacks? = null,
+    /** Large system text: the page scrolls and the record takes a fixed height. */
+    scrollable: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    var showDetails by rememberSaveable { mutableStateOf(false) }
+    val tag = formatTagFor(audioInfo, song?.bitDepth)
     val gestureScope = rememberCoroutineScope()
     val favoriteScale by animateFloatAsState(
         targetValue = if (isFavorite) 1.15f else 1f,
@@ -608,6 +648,8 @@ internal fun ColumnScope.NowPlayingBody(
                     gestureScope = gestureScope,
                     onNext = cb.onNext,
                     onPrevious = cb.onPrevious,
+                    onPlayPause = cb.onPlayPause,
+                    onQueue = cb.onQueue,
                     // The largest record of the right shape that fits the half's
                     // width and what the title leaves of its height.
                     modifier = Modifier
@@ -639,13 +681,10 @@ internal fun ColumnScope.NowPlayingBody(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                NowPlayingAudioQuality(
-                    info = audioInfo,
-                    bitDepth = song?.bitDepth,
-                    palette = palette,
-                    centered = true,
-                )
-                MetaRow(state, output, journeyProgress, palette, centered = true, showOutput = false, modifier = Modifier.padding(top = 4.dp))
+                ReasonFormatLine(reason, tag, palette, showDetails, { showDetails = !showDetails }, centered = true)
+                AnimatedVisibility(showDetails) {
+                    NowPlayingAudioQuality(info = audioInfo, bitDepth = song?.bitDepth, palette = palette, centered = true)
+                }
                 Spacer(Modifier.height(8.dp))
                 SeekBlock(
                     progress = progress,
@@ -692,8 +731,9 @@ internal fun ColumnScope.NowPlayingBody(
             gestureScope = gestureScope,
             onNext = cb.onNext,
             onPrevious = cb.onPrevious,
-            modifier = Modifier
-                .weight(1f)
+            onPlayPause = cb.onPlayPause,
+            onQueue = cb.onQueue,
+            modifier = (if (scrollable) Modifier.height(200.dp) else Modifier.weight(1f).heightIn(min = 160.dp))
                 .fillMaxWidth()
                 .wrapContentSize()
                 .aspectRatio(1f / 0.72f),
@@ -717,20 +757,11 @@ internal fun ColumnScope.NowPlayingBody(
                 palette = palette,
             )
         }
-        NowPlayingAudioQuality(
-            info = audioInfo,
-            bitDepth = song?.bitDepth,
-            palette = palette,
-            centered = false,
-            modifier = Modifier.padding(top = if (short) 8.dp else 12.dp),
-        )
-        MetaRow(
-            state, output, journeyProgress, palette,
-            centered = false,
-            showOutput = false,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Spacer(Modifier.height(if (short) 6.dp else 12.dp))
+        ReasonFormatLine(reason, tag, palette, showDetails, { showDetails = !showDetails })
+        AnimatedVisibility(showDetails) {
+            NowPlayingAudioQuality(info = audioInfo, bitDepth = song?.bitDepth, palette = palette, centered = false)
+        }
+        Spacer(Modifier.height(if (short) 4.dp else 8.dp))
         SeekBlock(
             progress = progress,
             waveform = waveform,
@@ -760,7 +791,10 @@ internal fun ColumnScope.NowPlayingBody(
             sideSize = if (short) 48 else 54,
         )
         if (mixStatus != null) MixStatusLine(mixStatus, palette, centered = true, modifier = Modifier.padding(top = 10.dp))
-        actions(Modifier.padding(top = if (short) 6.dp else 14.dp, bottom = if (short) 6.dp else 16.dp))
+        // Steering chips on screens tall enough for them (critique U1); shorter
+        // screens reach the same actions through Steer in the action row.
+        if (steer != null && !short) SteeringRow(steer, onOpenMoods = cb.onSteer, modifier = Modifier.padding(top = 10.dp))
+        actions(Modifier.padding(top = if (short) 6.dp else 10.dp, bottom = if (short) 6.dp else 16.dp))
     }
 }
 
@@ -815,11 +849,21 @@ private fun PlayerActionRow(
     cb: NowPlayingCallbacks,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        PlayerAction(Icons.AutoMirrored.Rounded.QueueMusic, if (upcoming > 0) "Queue · $upcoming" else "Queue", false, palette, cb.onQueue, Modifier.weight(1f))
-        PlayerAction(Icons.Rounded.AutoAwesome, "Mix", mixOn, palette, cb.onMixSheet, Modifier.weight(1f))
-        PlayerAction(deviceIcon, deviceLabel, onComputer, palette, cb.onPlayOn, Modifier.weight(1f), clickLabel = "Choose where to play")
-        cb.onEqualizer?.let { PlayerAction(Icons.Rounded.Equalizer, "Equalizer", false, palette, it, Modifier.weight(1f)) }
+    val items: List<@Composable (Modifier) -> Unit> = listOf<@Composable (Modifier) -> Unit>(
+        { m -> PlayerAction(Icons.AutoMirrored.Rounded.QueueMusic, if (upcoming > 0) "Queue · $upcoming" else "Queue", false, palette, cb.onQueue, m) },
+        { m -> PlayerAction(Icons.Rounded.AutoAwesome, "Steer", mixOn, palette, cb.onSteer, m, clickLabel = "Steer the mix") },
+        { m -> PlayerAction(deviceIcon, deviceLabel, onComputer, palette, cb.onPlayOn, m, clickLabel = "Choose where to play") },
+    ) + listOfNotNull(cb.onEqualizer).map { eq ->
+        @Composable { m: Modifier -> PlayerAction(Icons.Rounded.Equalizer, "Sound", false, palette, eq, m) }
+    }
+    // Large system text: two rows of two, so every label stays readable.
+    val perRow = if (LocalDensity.current.fontScale > 1.3f) 2 else items.size
+    Column(modifier.fillMaxWidth()) {
+        items.chunked(perRow).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                row.forEach { it(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 
@@ -1006,13 +1050,33 @@ private fun ArtworkPager(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     modifier: Modifier = Modifier,
+    onPlayPause: () -> Unit = {},
+    onQueue: () -> Unit = {},
 ) {
     val offsetX = remember { Animatable(0f) }
     var width by remember { mutableIntStateOf(1) }
+    // The record is a control (accessibility A9): tap to play or pause, and
+    // every swipe it answers is also an action a screen reader can pick.
+    val playLabel = androidx.compose.ui.res.stringResource(if (isPlaying) R.string.player_pause else R.string.player_play)
+    val nextLabel = androidx.compose.ui.res.stringResource(R.string.player_next)
+    val previousLabel = androidx.compose.ui.res.stringResource(R.string.player_previous)
+    val queueLabel = androidx.compose.ui.res.stringResource(R.string.np_open_queue)
+    val cover = song?.album?.let { "Cover of $it" } ?: "Album cover"
 
     Box(
         modifier = modifier
             .onSizeChanged { width = it.width }
+            .semantics {
+                contentDescription = cover
+                role = Role.Button
+                onClick(playLabel) { onPlayPause(); true }
+                customActions = listOf(
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(nextLabel) { onNext(); true },
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(previousLabel) { onPrevious(); true },
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(queueLabel) { onQueue(); true },
+                )
+            }
+            .pointerInput(Unit) { detectTapGestures(onTap = { onPlayPause() }) }
             .pointerInput(Unit) {
                 var total = 0f
                 detectHorizontalDragGestures(
@@ -1395,12 +1459,15 @@ private fun Transport(
     playSize: Int,
     sideSize: Int,
 ) {
+    // Read in the order you use them (accessibility A12): previous, play,
+    // next, then the two modes, though repeat and shuffle bracket the row.
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().semantics { isTraversalGroup = true },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         PlayerCircleButton(
+            modifier = Modifier.semantics { traversalIndex = 4f },
             onClick = onRepeat,
             contentDescription = "Repeat mode: ${state.repeatMode}",
             contentColor = repeatTint,
@@ -1423,6 +1490,7 @@ private fun Transport(
         }
 
         PlayerCircleButton(
+            modifier = Modifier.semantics { traversalIndex = 0f },
             onClick = onPrevious,
             contentDescription = "Previous",
             size = sideSize.dp,
@@ -1437,6 +1505,7 @@ private fun Transport(
         PlayerCircleButton(
             onClick = onPlayPause,
             contentDescription = if (state.isPlaying) "Pause" else "Play",
+            modifier = Modifier.semantics { traversalIndex = 1f },
             size = playSize.dp,
             containerColor = palette.primaryControl,
             contentColor = palette.onPrimaryControl,
@@ -1462,6 +1531,7 @@ private fun Transport(
         PlayerCircleButton(
             onClick = onNext,
             contentDescription = "Next",
+            modifier = Modifier.semantics { traversalIndex = 2f },
             size = sideSize.dp,
         ) {
             Icon(
@@ -1471,7 +1541,7 @@ private fun Transport(
             )
         }
 
-        ShuffleButton(
+        Box(Modifier.semantics { traversalIndex = 3f }) { ShuffleButton(
             mode = state.shuffleMode,
             smartStyle = smartStyle,
             journeyProgress = journeyProgress,
@@ -1479,7 +1549,7 @@ private fun Transport(
             palette = palette,
             onClick = onShuffle,
             onLongClick = onShuffleLongPress,
-        )
+        ) }
     }
 }
 

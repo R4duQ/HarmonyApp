@@ -145,19 +145,7 @@ internal fun miniTelemetryLine(
 ): String? {
     if (mixStatus != null) return mixStatus.text
     val parts = buildList {
-        decision?.let {
-            add(
-                when (it.trace.reason) {
-                    com.harmony.core.model.ReasonTag.VIBE_MATCH -> "Sounds like the last song · ${it.vibeMatchPct}% match"
-                    com.harmony.core.model.ReasonTag.MARKOV_FAVORITE -> "Often follows your last song"
-                    com.harmony.core.model.ReasonTag.BANDIT_GEM -> "One you haven't played in a while"
-                    com.harmony.core.model.ReasonTag.POST_SKIP_PIVOT -> "A change of direction after your skip"
-                    com.harmony.core.model.ReasonTag.PROVEN_FAVORITE -> "One of your favourites"
-                    com.harmony.core.model.ReasonTag.SONIC_ADVENTURE -> "Further from your usual"
-                    com.harmony.core.model.ReasonTag.COLD_START -> "A fresh pick"
-                },
-            )
-        }
+        pickReason(decision)?.let(::add)
         if (liveSpectralEq) add("Equalizer tuning to this song")
     }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
