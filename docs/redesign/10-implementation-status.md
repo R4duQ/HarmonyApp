@@ -30,26 +30,40 @@ screen calls functions that already existed.
 | `NowPlayingScreenShots` | Portrait, short phone, landscape (two sizes) and 200% text, light and dark |
 | `PlayerAccessibilityTest` | The mini player as one node with its actions; the record's tap and actions |
 
+## Rebuilt in the second pass
+
+| Area | What changed | Where |
+|---|---|---|
+| **Get music** (sources page) | Songs · Albums · YouTube link on one segmented control. The source is a "From: SpotiFLAC ▾" line with a sheet to change it. SpotiFLAC results have Get on every row. The provider check shows only when it needs you. Problems come in three parts, with Details behind a button. Soulseek: sign in, then the same search and results, with options and folders folded away. YouTube: paste, check the title, convert, with the lossy note. A YouTube link typed on Add goes straight to the converter. | `GetMusicContent.kt`, `SoulseekSongs.kt`, `DownloadsScreen.kt` |
+| **Album page** | Cover, status and one main action (Get N songs, Pause, Resume, Retry). Source, format and Wi-Fi only sit under a "From:" line. Each track says its state in words. Album search gives each edition Get album and Choose songs. | `AlbumDownloadScreen.kt`, `AlbumSearchSection.kt`, `AlbumDownloadsShelf.kt` |
+| **From Spotify** | A 3-step setup guide: create an app, copy Harmony's address, paste the Client ID. Then a link field or your playlists. For a chosen playlist: the counts in three numbers, source and format chips, and one button. | `SpotifyPlaylistTransferScreen.kt` |
+| **Queue** | The room's type throughout (nothing under 12 sp). Sections read Up next, You added and From the mix. Keep and In your library; a clearer empty state. | `QueueSheet.kt` |
+| **Settings** | Sections Look, Playback, Mixes, Library, Adding music, Tools, Privacy, About. The whole row toggles. Sliders with words at both ends. English and Romanian. | `SettingsScreen.kt`, `SettingsRows.kt` |
+| **Discover** | The 3-step builder on the room's type scale, with amber actions and soft-amber chips. The unreachable taste-round and album screens are removed. | `feature/discover/ui` |
+
+Removed legacy pieces:
+
+- the Cyber-Glass album components;
+- the old download source rail and selector;
+- the old YouTube panel;
+- the Soulseek connect card;
+- the notification pill;
+- the download banner;
+- the old Discover screens.
+
+**Note on Spotify.** Spotify's Web API needs the connected account even for a
+pasted playlist link, so "paste a link without an account" (spec §2.11) is
+not possible without a backend change. The guided setup comes first instead.
+
 ## Not yet rebuilt
 
-These screens wear the new palette and fonts through the compat layer, but
-keep their previous layout:
-
-- **Discover:** taste rounds and the playlist builder. The icon-only actions
-  should become labelled buttons (spec §2.12).
-- **Downloads sources page:** search results with Get, the three-part errors
-  of `06` §7, and the source preferences behind a gear.
-- **Spotify transfer:** the 3-step Client ID guide, and "paste a link" as the
-  default.
-- **Settings:** the sections of spec §2.16.
-- **Sound "Simple" segment:** presets plus Auto, remembered segment (U5).
-- **Queue sheet:** grouping by origin with the room's look.
-- **Tag editor, FLAC check, Tidy up, album and artist detail.**
-- **Strings of the older screens** are still English literals, so the
-  Romanian translation covers only the new screens.
-- **Album tint** (`04` §1.2) is not implemented.
-- **"Moods are almost ready"**: the state exists in the UI, but nothing
-  feeds it, because analysis progress is not in `HomeUiState`.
+- **Library internals:** song rows, album and artist detail. They have the
+  new palette and type, but their layout is the old one.
+- **Tag editor, FLAC check, Tidy up, Identify:** same as the Library
+  internals.
+- **Sound** (equalizer) gains no "Simple" segment yet; the Winamp screen is
+  preserved by requirement.
+- **Album tint** and the "Moods are almost ready" feed.
 
 ## Still to verify on a phone
 
