@@ -1,44 +1,27 @@
 package com.harmony.feature.downloads
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.harmony.core.ui.component.GlassCard
-import com.harmony.core.ui.component.EditorialPalette
-import androidx.compose.ui.graphics.Color
+import com.harmony.core.ui.room.RoomButton
+import com.harmony.core.ui.room.RoomButtonKind
+import com.harmony.core.ui.room.RoomCard
+import com.harmony.core.ui.room.StatusLine
+import com.harmony.core.ui.room.StatusTone
+import com.harmony.core.ui.theme.Room
+import com.harmony.core.ui.theme.RoomType
+import androidx.compose.material3.Text
 import java.util.Locale
 
-// LiveGreen in SoulseekConnectCard.kt is file-private, so it cannot be reused
-// here. Same value on purpose: "connected" and "sharing" are both live-state
-// indicators and should read identically.
-private val SharingGreen = Color(0xFF2E7D4F)
-
 /**
- * Share exactly one file back to the network.
- *
- * Soulseek is reciprocal by convention, and Harmony announced zero shared
- * files at login — accurate, but it is why some peers refuse or park queue
- * requests forever. This lets the share count be honestly non-zero without
- * Harmony ever indexing storage: the file arrives from the system
- * single-document picker, so no directory handle exists and nothing else on
- * the device is readable.
+ * Sharing back on Soulseek. The network runs on give-and-take and some people
+ * refuse to send to someone who shares nothing, so the card says that, and
+ * says plainly what picking a folder gives Harmony access to.
  */
 @Composable
 fun SoulseekSharingCard(
@@ -47,138 +30,43 @@ fun SoulseekSharingCard(
     onPick: () -> Unit,
     onRefresh: () -> Unit,
     onClear: () -> Unit,
-    palette: EditorialPalette,
+    @Suppress("UNUSED_PARAMETER") palette: com.harmony.core.ui.component.EditorialPalette? = null,
     modifier: Modifier = Modifier,
 ) {
-    GlassCard(palette = palette, modifier = modifier) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(if (sharedFolder != null) SharingGreen else palette.muted),
-                )
-                Text(
-                    when {
-                        isIndexing -> "Indexing…"
-                        sharedFolder != null -> "Sharing ${sharedFolder.fileCount} files"
-                        else -> "Sharing nothing"
-                    }.uppercase(Locale.US),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.8.sp,
-                    color = if (sharedFolder != null) SharingGreen else palette.muted,
-                    modifier = Modifier.padding(start = 7.dp),
-                )
+    val r = Room
+    RoomCard(modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.share_title), style = RoomType.title, color = r.ink)
+            when {
+                isIndexing -> StatusLine(StatusTone.Info, stringResource(R.string.share_indexing))
+                sharedFolder == null -> {
+                    Text(stringResource(R.string.share_nothing), style = RoomType.bodySmall, color = r.muted)
+                    Text(stringResource(R.string.share_access_note), style = RoomType.bodySmall, color = r.muted)
+                }
+                else -> {
+                    StatusLine(
+                        StatusTone.Success,
+                        stringResource(R.string.share_sharing, sharedFolder.displayName),
+                        body = stringResource(R.string.share_counts, sharedFolder.fileCount, sharedFolder.folderCount, size(sharedFolder.totalBytes)) +
+                            if (sharedFolder.truncated) "\n" + stringResource(R.string.share_truncated) else "",
+                    )
+                }
             }
-
-            if (sharedFolder == null) {
-                Text(
-                    "Give something back",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.ink,
-                    modifier = Modifier.padding(top = 10.dp),
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                RoomButton(
+                    stringResource(if (sharedFolder == null) R.string.share_choose else R.string.share_change),
+                    onPick, kind = RoomButtonKind.Tonal, enabled = !isIndexing,
                 )
-                Text(
-                    "Soulseek runs on reciprocity, and Harmony currently tells the server you " +
-                        "share nothing. Some peers refuse transfers on that basis. Pick a folder " +
-                        "and the count becomes honest.",
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                Text(
-                    "Harmony reads audio files inside the folder you pick, and nothing outside " +
-                        "it. Choosing a folder does grant access to everything under it — so " +
-                        "pick your music folder, not your whole storage.",
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 7.dp),
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    GatedPill(
-                        text = if (isIndexing) "Indexing…" else "Choose a folder",
-                        enabled = !isIndexing,
-                        onClick = onPick,
-                        palette = palette,
-                    )
-                }
-            } else {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(palette.ink.copy(alpha = 0.06f))
-                        .padding(horizontal = 10.dp, vertical = 9.dp),
-                ) {
-                    Text(
-                        sharedFolder.displayName,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.ink,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "${sharedFolder.fileCount} audio files in ${sharedFolder.folderCount} " +
-                            "folders · ${formatFileSize(sharedFolder.totalBytes)}",
-                        fontSize = 11.sp,
-                        color = palette.muted,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                    if (sharedFolder.truncated) {
-                        Text(
-                            "Stopped at ${SoulseekShareIndexer.MAX_FILES} files — pick a narrower " +
-                                "folder to control exactly what is shared.",
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp,
-                            color = palette.muted,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                }
-                Text(
-                    "Peers can browse these files and download them from you. They still won't " +
-                        "appear in search results — Harmony doesn't join the distributed search " +
-                        "network, so your share is reachable by browsing you directly, not by " +
-                        "searching.",
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onClear) { Text("Stop sharing") }
-                    TextButton(onClick = onRefresh, enabled = !isIndexing) { Text("Rescan") }
-                    GatedPill(
-                        text = if (isIndexing) "Indexing…" else "Change folder",
-                        enabled = !isIndexing,
-                        onClick = onPick,
-                        palette = palette,
-                    )
+                if (sharedFolder != null) {
+                    RoomButton(stringResource(R.string.share_rescan), onRefresh, kind = RoomButtonKind.Text, enabled = !isIndexing)
+                    RoomButton(stringResource(R.string.share_stop), onClear, kind = RoomButtonKind.Text)
                 }
             }
         }
     }
 }
 
-private fun formatFileSize(bytes: Long): String = when {
+private fun size(bytes: Long): String = when {
     bytes >= 1_000_000_000L -> String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0)
     bytes >= 1_000_000L -> String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0)
     bytes >= 1_000L -> String.format(Locale.US, "%.0f KB", bytes / 1_000.0)

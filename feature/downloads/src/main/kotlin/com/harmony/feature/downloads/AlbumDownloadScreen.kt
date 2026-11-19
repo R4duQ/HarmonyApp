@@ -1,5 +1,29 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import com.harmony.core.ui.room.RoomButton
+import com.harmony.core.ui.room.RoomButtonKind
+import com.harmony.core.ui.room.RoomCard
+import com.harmony.core.ui.room.RoomChip
+import com.harmony.core.ui.room.RoomSectionTitle
+import com.harmony.core.ui.room.RoomTopBar
+import com.harmony.core.ui.room.StatusLine
+import com.harmony.core.ui.room.StatusTone
+import com.harmony.core.ui.theme.Room
+import com.harmony.core.ui.theme.RoomType
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -32,11 +56,11 @@ import com.harmony.core.ui.theme.CyberGlassColors
 import com.harmony.core.ui.theme.CyberGlassPalette
 
 /**
- * One album, in Cyber-Glass: choose the edition, then its header with the
- * master progress and one main action (Download All / Pause All / Resume /
- * Retry failed), the source and format, and the numbered tracklist with
- * each track's live state. Reached from Downloads (Albums), from the album
- * card in the queue, and from Discover.
+ * One album (docs/redesign/05 §2.9): pick the edition, then the album's
+ * cover and one main action (Get N songs, Pause, Resume, Retry), the source
+ * and format folded under "Options", and the tracklist with each track's
+ * state in words. Reached from Get music (Albums), the Activity sheet and
+ * Discover. Same AlbumDownloadViewModel calls as before.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -60,13 +84,12 @@ fun AlbumDownloadScreen(
     var sourceName by rememberSaveable(albumId) { mutableStateOf(album?.source ?: "SPOTIFLAC") }
     var formatName by rememberSaveable(albumId) { mutableStateOf(album?.format ?: "FLAC_LOSSLESS") }
     var wifiOnly by rememberSaveable(albumId) { mutableStateOf(false) }
+    var showOptions by rememberSaveable(albumId) { mutableStateOf(false) }
     var browserError by remember { mutableStateOf<String?>(null) }
-    // Soulseek is the only engine here that can be *selected* but unusable:
-    // the provider engine needs no session to queue an album.
-    val soulseekBlocked = sourceName == "SOULSEEK" &&
-        soulseekConnection.status != SoulseekConnectionStatus.CONNECTED
-    val glass = CyberGlassColors
-    val palette = CyberGlassPalette
+    // Soulseek is the only engine here that can be chosen but unusable: the
+    // provider engine needs no session to queue an album.
+    val soulseekBlocked = sourceName == "SOULSEEK" && soulseekConnection.status != SoulseekConnectionStatus.CONNECTED
+    val r = Room
     val context = LocalContext.current
     LaunchedEffect(albumId, internet.ready, busy) {
         if (album == null) viewModel.search(albumId, title, artist, artistAliases)
@@ -75,31 +98,28 @@ fun AlbumDownloadScreen(
     val format = SpotiFlacOutputFormat.fromName(formatName)
 
     LazyColumn(
-        Modifier.fillMaxSize().background(glass.Page),
-        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = LocalFloatingChromeHeight.current + 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize().background(r.ground),
+        contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current + 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = glass.TextPrimary) }
-                Text("ALBUM DOWNLOAD", color = glass.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.4.sp)
-            }
-        }
+        item { RoomTopBar(stringResource(R.string.album_title), onBack = onBack) }
         if (message != null || browserError != null) item {
-            CyberNotice(browserError ?: message.orEmpty(), error = browserError != null || message?.contains("not", true) == true,
-                onDismiss = { browserError = null; viewModel.dismissMessage() })
+            StatusLine(
+                if (browserError != null) StatusTone.Error else StatusTone.Info,
+                title = browserError ?: message.orEmpty(),
+                action = stringResource(R.string.activity_dismiss),
+                onAction = { browserError = null; viewModel.dismissMessage() },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
         }
-        if (!internet.ready) item { InternetNotice(internet) }
+        if (!internet.ready) item { Box(Modifier.padding(horizontal = 16.dp)) { InternetNotice(internet) } }
 
         if (album == null) {
             item {
-                CyberGlassPanel {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(title, color = glass.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text(artist, color = glass.TextSecondary, fontSize = 13.sp)
-                        Text("Choose an edition. You'll see its complete tracklist before downloading.",
-                            color = glass.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                    }
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(title, style = RoomType.nameL, color = r.ink)
+                    Text(artist, style = RoomType.glance, color = r.muted)
+                    Text(stringResource(R.string.album_choose_edition), style = RoomType.bodySmall, color = r.muted, modifier = Modifier.padding(top = 8.dp))
                 }
             }
             if (internet.ready) {
@@ -108,137 +128,238 @@ fun AlbumDownloadScreen(
                 }
                 item {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        if (busy) CircularProgressIndicator(color = glass.Cyan)
-                        else TextButton(onClick = { viewModel.retrySearch(albumId, title, artist, artistAliases) }) { Text("Search again", color = glass.Cyan) }
+                        if (busy) CircularProgressIndicator(color = r.amberText)
+                        else RoomButton(stringResource(R.string.album_search_again), { viewModel.retrySearch(albumId, title, artist, artistAliases) }, kind = RoomButtonKind.Text)
                     }
                 }
             }
         } else if (batch != null) {
             item {
-                AlbumBatchHeader(
-                    batch = batch,
-                    quality = qualityBadgeFor(format),
-                    engine = engine,
-                    masterEnabled = !busy && internet.ready && !(batch.canDownload && !batch.active && (soulseekBlocked || batch.total == 0)),
-                    onMaster = {
-                        when {
-                            batch.canPause -> viewModel.pause(albumId)
-                            batch.canResume || batch.canRetryFailed -> viewModel.resume(albumId)
-                            batch.canDownload -> viewModel.start(albumId, DownloadSource.valueOf(sourceName), format, wifiOnly)
-                        }
-                    },
-                )
-            }
-            if (batch.canCancel) item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    NeonPillButton("Cancel album", Icons.Rounded.Close, { viewModel.cancel(albumId) }, enabled = !busy, prominent = false, destructive = true)
+                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AlbumArtwork(batch.coverUrl.ifBlank { null }, 112.dp, corner = 12.dp)
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(batch.title, style = RoomType.nameL, color = r.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text(batch.artist, style = RoomType.glance, color = r.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            listOf(batch.year, pluralStringResource(R.plurals.album_tracks, batch.tracks.size, batch.tracks.size))
+                                .filter { it.isNotBlank() }.joinToString(" · "),
+                            style = RoomType.caption, color = r.muted,
+                        )
+                    }
                 }
             }
-            if (otherActive && !batch.active) item {
-                CyberNotice("Another album is downloading. This one will wait its turn in the queue.")
+            item {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(batch.statusLabel, style = RoomType.title, color = r.ink, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    if (batch.active) {
+                        LinearProgressIndicator(
+                            progress = { batch.fraction.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                            color = r.amber, trackColor = r.raised, gapSize = 0.dp, drawStopIndicator = {},
+                        )
+                    }
+                    val missing = album.selectedMissing.size
+                    val masterLabel = when {
+                        batch.canPause -> stringResource(R.string.album_pause)
+                        batch.canResume -> stringResource(R.string.album_resume)
+                        batch.canRetryFailed -> stringResource(R.string.album_retry_failed, batch.failed)
+                        batch.canDownload -> pluralStringResource(R.plurals.album_get_songs, missing, missing)
+                        else -> null
+                    }
+                    if (masterLabel != null) {
+                        RoomButton(
+                            masterLabel,
+                            onClick = {
+                                when {
+                                    batch.canPause -> viewModel.pause(albumId)
+                                    batch.canResume || batch.canRetryFailed -> viewModel.resume(albumId)
+                                    batch.canDownload -> viewModel.start(albumId, DownloadSource.valueOf(sourceName), format, wifiOnly)
+                                }
+                            },
+                            kind = if (batch.canPause) RoomButtonKind.Tonal else RoomButtonKind.Filled,
+                            enabled = !busy && internet.ready && !(batch.canDownload && !batch.active && (soulseekBlocked || batch.total == 0)),
+                            prominent = true, fillWidth = true,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (album.availableCount > 0) {
+                            RoomButton(pluralStringResource(R.plurals.album_play, album.availableCount, album.availableCount),
+                                { if (!busy) viewModel.play(albumId) }, kind = RoomButtonKind.Tonal, icon = Icons.Rounded.PlayArrow)
+                        }
+                        if (batch.canCancel) {
+                            RoomButton(stringResource(R.string.album_stop), { viewModel.cancel(albumId) }, kind = RoomButtonKind.Text, enabled = !busy)
+                        }
+                    }
+                    if (otherActive && !batch.active) StatusLine(StatusTone.Waiting, title = stringResource(R.string.album_waits_turn))
+                    if (album.availableCount > 0 && !batch.active) {
+                        RoomButton(stringResource(R.string.album_manage_keep), { onReview(albumId) }, kind = RoomButtonKind.Text)
+                    }
+                }
             }
             if (!batch.active) item {
-                CyberGlassPanel {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("SOURCE & QUALITY", color = glass.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp)
-                        // TransferCapableSources: an album resolves each track from metadata,
-                        // which the converter can't do (it needs a pasted URL per track).
-                        DownloadSourceSelector(DownloadSource.valueOf(sourceName), {
-                            sourceName = it.name
-                            if (it == DownloadSource.SOULSEEK && formatName == SpotiFlacOutputFormat.FLAC_HI_RES_96.name) {
-                                formatName = SpotiFlacOutputFormat.FLAC_LOSSLESS.name
-                            }
-                        }, palette, enabled = internet.ready && !busy, sources = TransferCapableSources)
-                        val formats = remember(sourceName) {
-                            SpotiFlacOutputFormat.entries.filter { sourceName == "SPOTIFLAC" || it != SpotiFlacOutputFormat.FLAC_HI_RES_96 }
-                        }
-                        EditorialChoiceChips(
-                            options = formats.map { if (sourceName == "SOULSEEK") it.historyLabel.removeSuffix(" 320 kbps") else it.label },
-                            selectedIndex = formats.indexOfFirst { it.name == formatName }.coerceAtLeast(0),
-                            onSelect = { formatName = formats[it].name },
-                            palette = palette,
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(role = Role.Button) { showOptions = !showOptions }
+                            .heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.get_from), style = RoomType.bodySmall, color = r.muted)
+                        Spacer(Modifier.width(4.dp))
+                        Text("$engine · ${stringResource(format.plainLabel())}", style = RoomType.labelSmall, color = r.amberText, modifier = Modifier.weight(1f))
+                        Icon(if (showOptions) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = stringResource(R.string.album_options), tint = r.amberText)
+                    }
+                    if (soulseekBlocked) {
+                        StatusLine(
+                            StatusTone.Waiting,
+                            title = stringResource(if (soulseekConnection.status == SoulseekConnectionStatus.CONNECTING) R.string.album_slsk_connecting else R.string.album_slsk_needed),
+                            body = stringResource(R.string.album_slsk_body),
+                            action = stringResource(R.string.album_slsk_open),
+                            onAction = onOpenDownloads,
                         )
-                        Text(if (sourceName == "SPOTIFLAC" && formatName == "MP3_320")
-                            "Smaller files on your phone. $engine downloads lossless audio first, then converts it to MP3."
-                            else if (sourceName == "SOULSEEK") "Fast available peers first. Connect your Soulseek account in Downloads."
-                            else "${format.summary} Downloaded with $engine; album, artist, track and disc numbers, date and cover are written into every file.",
-                            color = glass.TextSecondary, fontSize = 12.sp)
-                        if (soulseekBlocked) {
-                            CyberNotice(
-                                (if (soulseekConnection.status == SoulseekConnectionStatus.CONNECTING) "Connecting to Soulseek… " else "Soulseek is not connected. ") +
-                                    "Sign in to the peer network in Downloads, then come back; the tracks you picked are kept.",
-                                error = true,
-                            )
-                            TextButton(onClick = onOpenDownloads, enabled = internet.ready) { Text("Open Soulseek settings", color = glass.Cyan) }
-                        }
-                        Row(
-                            Modifier.clip(CircleShape).clickable(enabled = internet.ready && !busy, role = Role.Checkbox) { wifiOnly = !wifiOnly },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(wifiOnly, null, enabled = internet.ready && !busy,
-                                colors = CheckboxDefaults.colors(checkedColor = glass.Cyan, checkmarkColor = glass.OnAccent, uncheckedColor = glass.ChipBorder))
-                            Text("Unmetered network only", color = glass.TextPrimary, fontSize = 13.sp)
-                        }
-                        if (sourceName == "SPOTIFLAC") {
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(onClick = { viewModel.verify(albumId) }, enabled = internet.ready && !busy) {
-                                    Text("Provider verification", color = glass.Cyan)
+                    }
+                    if (showOptions) {
+                        RoomCard(Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(stringResource(R.string.album_source), style = RoomType.labelSmall, color = r.muted)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    // An album resolves each track from metadata, which the converter can't do.
+                                    TransferCapableSources.forEach { source ->
+                                        RoomChip(source.displayName, selected = sourceName == source.name, enabled = internet.ready && !busy, onClick = {
+                                            sourceName = source.name
+                                            if (source == DownloadSource.SOULSEEK && formatName == SpotiFlacOutputFormat.FLAC_HI_RES_96.name) {
+                                                formatName = SpotiFlacOutputFormat.FLAC_LOSSLESS.name
+                                            }
+                                        })
+                                    }
                                 }
-                                verificationUrl?.let { url -> TextButton(onClick = {
-                                    val uri = Uri.parse(url)
-                                    if (uri.scheme == "https") runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                                        .onFailure { browserError = "Could not open a browser. Enable one and try again." }
-                                    else browserError = "The provider returned an unsupported verification link."
-                                }, enabled = internet.ready) { Text("Open verification in browser", color = glass.Cyan) } }
+                                Text(stringResource(R.string.get_save_as), style = RoomType.labelSmall, color = r.muted)
+                                val formats = remember(sourceName) {
+                                    SpotiFlacOutputFormat.entries.filter { sourceName == "SPOTIFLAC" || it != SpotiFlacOutputFormat.FLAC_HI_RES_96 }
+                                }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    formats.forEach { f ->
+                                        RoomChip(stringResource(f.plainLabel()), selected = formatName == f.name, enabled = !busy, onClick = { formatName = f.name })
+                                    }
+                                }
+                                Text(stringResource(R.string.album_tags_note), style = RoomType.bodySmall, color = r.muted)
+                                RoomChip(stringResource(R.string.album_wifi_only), selected = wifiOnly, enabled = internet.ready && !busy, onClick = { wifiOnly = !wifiOnly })
+                                if (sourceName == "SPOTIFLAC") {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        RoomButton(stringResource(R.string.album_check_sources), { viewModel.verify(albumId) }, kind = RoomButtonKind.Text, enabled = internet.ready && !busy)
+                                        verificationUrl?.let { url ->
+                                            RoomButton(stringResource(R.string.get_open_browser), {
+                                                val uri = Uri.parse(url)
+                                                if (uri.scheme == "https") runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                                                    .onFailure { browserError = context.getString(R.string.album_no_browser) }
+                                                else browserError = context.getString(R.string.album_bad_link)
+                                            }, kind = RoomButtonKind.Tonal, enabled = internet.ready)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-            if (album.availableCount > 0) item {
-                CyberGlassPanel {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        NeonPillButton("Play ${album.availableCount} tracks in order", Icons.Rounded.PlayArrow,
-                            { if (!busy) viewModel.play(albumId) }, Modifier.fillMaxWidth(), prominent = false)
-                        Text("After you've heard at least 90% of every track on the full album, Harmony will ask what you want to keep. " +
-                            "For a partial download, you can manage the songs below at any time.", color = glass.TextSecondary, fontSize = 12.sp)
-                        TextButton(onClick = { onReview(albumId) }, enabled = !batch.active) { Text("Manage songs to keep", color = glass.Cyan) }
-                    }
-                }
-            }
             item {
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("TRACKS", color = glass.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.4.sp,
-                        modifier = Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RoomSectionTitle(stringResource(R.string.album_tracks_heading), Modifier.weight(1f))
                     if (!batch.active) {
-                        Text("${album.selectedMissing.size} missing selected", color = glass.TextSecondary, fontSize = 12.sp)
-                        TextButton(onClick = { viewModel.select(albumId, selected = true) }, enabled = !busy) { Text("All", color = glass.Cyan) }
-                        TextButton(onClick = { viewModel.select(albumId, selected = false) }, enabled = !busy) { Text("None", color = glass.TextSecondary) }
+                        RoomButton(stringResource(R.string.album_all), { viewModel.select(albumId, selected = true) }, kind = RoomButtonKind.Text, enabled = !busy)
+                        RoomButton(stringResource(R.string.album_none), { viewModel.select(albumId, selected = false) }, kind = RoomButtonKind.Text, enabled = !busy)
                     }
                 }
             }
-            item {
-                CyberGlassPanel(corner = 18.dp) {
-                    Column(Modifier.padding(vertical = 4.dp)) {
-                        batch.tracks.forEach { row ->
-                            AlbumTrackLine(
-                                row = row,
-                                selectable = !batch.active,
-                                onToggle = { viewModel.select(albumId, row.track.id, it) },
-                                onRetry = { if (row.phase == AlbumTrackPhase.VERIFY) viewModel.verify(albumId) else viewModel.retryTrack(albumId, row.track.id) },
-                                onSkip = { viewModel.skipTrack(albumId, row.track.id) },
-                                controlsEnabled = !busy && !(row.canRetry && batch.active),
-                                trailing = row.track.uri?.let { uri -> @Composable {
-                                    IconButton(onClick = { viewModel.toggleFavorite(uri) }, enabled = !busy, modifier = Modifier.size(36.dp)) {
-                                        Icon(if (uri in favoriteUris) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                            "Favorite ${row.track.title}", tint = if (uri in favoriteUris) glass.Purple else glass.TextSecondary,
-                                            modifier = Modifier.size(20.dp))
-                                    }
-                                } },
-                            )
-                        }
-                    }
-                }
+            items(batch.tracks, key = { it.track.id }) { row ->
+                TrackLine(
+                    row = row,
+                    selectable = !batch.active,
+                    favorite = row.track.uri?.let { it in favoriteUris },
+                    enabled = !busy && !(row.canRetry && batch.active),
+                    onToggle = { viewModel.select(albumId, row.track.id, it) },
+                    onRetry = { if (row.phase == AlbumTrackPhase.VERIFY) viewModel.verify(albumId) else viewModel.retryTrack(albumId, row.track.id) },
+                    onSkip = { viewModel.skipTrack(albumId, row.track.id) },
+                    onFavorite = { row.track.uri?.let(viewModel::toggleFavorite) },
+                )
+            }
+        }
+    }
+}
+
+/** A track's state in words, with an icon, so it never rests on colour. */
+@Composable
+private fun phaseWords(phase: AlbumTrackPhase): Pair<String, androidx.compose.ui.graphics.Color> {
+    val r = Room
+    return when (phase) {
+        AlbumTrackPhase.WAITING -> stringResource(R.string.album_phase_waiting) to r.muted
+        AlbumTrackPhase.DOWNLOADING -> stringResource(R.string.album_phase_getting) to r.amberText
+        AlbumTrackPhase.INDEXING -> stringResource(R.string.album_phase_analysing) to r.muted
+        AlbumTrackPhase.INDEXED, AlbumTrackPhase.SAVED -> stringResource(R.string.album_phase_added) to r.moss
+        AlbumTrackPhase.IN_LIBRARY -> stringResource(R.string.album_phase_in_library) to r.moss
+        AlbumTrackPhase.FAILED -> stringResource(R.string.album_phase_failed) to r.wine
+        AlbumTrackPhase.VERIFY -> stringResource(R.string.album_phase_verify) to r.slate
+        AlbumTrackPhase.SKIPPED -> stringResource(R.string.album_phase_skipped) to r.muted
+        AlbumTrackPhase.NOT_SELECTED -> stringResource(R.string.album_phase_not_selected) to r.faint
+    }
+}
+
+@Composable
+private fun TrackLine(
+    row: AlbumTrackRow,
+    selectable: Boolean,
+    favorite: Boolean?,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onRetry: () -> Unit,
+    onSkip: () -> Unit,
+    onFavorite: () -> Unit,
+) {
+    val r = Room
+    val (words, color) = phaseWords(row.phase)
+    val checked = row.phase != AlbumTrackPhase.NOT_SELECTED
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (selectable && row.track.uri == null) Modifier.toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = onToggle) else Modifier)
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selectable && row.track.uri == null) {
+            Checkbox(checked, onCheckedChange = null, enabled = enabled,
+                colors = CheckboxDefaults.colors(checkedColor = r.amberText, checkmarkColor = r.surface, uncheckedColor = r.outline))
+        } else {
+            Text(row.number, style = RoomType.caption, color = r.muted, modifier = Modifier.width(40.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(row.track.title, style = RoomType.title, color = r.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOfNotNull(words, row.fraction?.takeIf { row.phase == AlbumTrackPhase.DOWNLOADING }?.let { "${(it * 100).toInt()}%" }, row.detail)
+                    .joinToString(" · "),
+                style = RoomType.bodySmall, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            if (row.phase == AlbumTrackPhase.DOWNLOADING && row.fraction != null) {
+                LinearProgressIndicator(
+                    progress = { row.fraction.coerceIn(0f, 1f) },
+                    modifier = Modifier.padding(top = 4.dp).fillMaxWidth().height(3.dp).clip(CircleShape),
+                    color = r.amber, trackColor = r.raised, gapSize = 0.dp, drawStopIndicator = {},
+                )
+            }
+        }
+        if (row.canRetry) RoomButton(stringResource(R.string.get_try_again), onRetry, kind = RoomButtonKind.Text, enabled = enabled)
+        if (row.canSkip && !selectable) RoomButton(stringResource(R.string.album_skip), onSkip, kind = RoomButtonKind.Text, enabled = enabled)
+        if (favorite != null) {
+            IconButton(onClick = onFavorite, enabled = enabled) {
+                Icon(
+                    if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = stringResource(if (favorite) R.string.album_unfavourite else R.string.album_favourite, row.track.title),
+                    tint = if (favorite) r.amberText else r.muted,
+                )
             }
         }
     }
@@ -247,19 +368,19 @@ fun AlbumDownloadScreen(
 /** An edition to choose: cover, title, artist, track count. */
 @Composable
 private fun EditionRow(edition: AlbumEdition, enabled: Boolean, onChoose: () -> Unit) {
-    val glass = CyberGlassColors
-    CyberGlassPanel(corner = 18.dp) {
-        Row(
-            Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onChoose).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AlbumArtwork(edition.cover, 56.dp, corner = 12.dp)
+    val r = Room
+    RoomCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp), onClick = if (enabled) onChoose else null, contentPadding = PaddingValues(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AlbumArtwork(edition.cover, 56.dp, corner = 8.dp)
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(edition.title, color = glass.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOf(edition.artist, if (edition.trackCount > 0) "${edition.trackCount} tracks" else null).filterNotNull().joinToString(" · "),
-                    color = glass.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(edition.title, style = RoomType.title, color = r.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull(edition.artist, if (edition.trackCount > 0) pluralStringResource(R.plurals.album_tracks, edition.trackCount, edition.trackCount) else null)
+                        .joinToString(" · "),
+                    style = RoomType.bodySmall, color = r.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
-            Icon(Icons.Rounded.ChevronRight, "Choose ${edition.title}", tint = glass.Cyan)
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = r.amberText)
         }
     }
 }

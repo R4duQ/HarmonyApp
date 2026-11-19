@@ -1,5 +1,7 @@
 package com.harmony.feature.settings
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -166,7 +168,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val palette = stonePalette()
+    val palette = com.harmony.core.ui.component.catalogPalette()
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -183,394 +185,121 @@ fun SettingsScreen(
         }
     }
 
+    val rescanStatus by viewModel.rescan.collectAsStateWithLifecycle()
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    // Granted folders, with removal; refreshKey re-reads them after a grant or revoke.
+    val grantedTrees = remember(refreshKey) {
+        context.contentResolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri }
+    }
+    val r = com.harmony.core.ui.theme.Room
+    val T = com.harmony.core.ui.theme.RoomType
+
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.field)
+            .background(r.ground)
             .verticalScroll(rememberScrollState())
-            .padding(bottom = LocalFloatingChromeHeight.current),
+            .padding(bottom = LocalFloatingChromeHeight.current + 24.dp),
     ) {
-        Row(
-            Modifier.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 14.dp),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        ) {
-            if (onBack != null) {
-                EditorialCircleButton(
-                    onClick = onBack,
-                    contentDescription = "Back",
-                    palette = palette,
-                    modifier = Modifier.padding(end = 14.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = null,
-                        modifier = Modifier.size(19.dp),
-                    )
+        com.harmony.core.ui.room.RoomTopBar(stringResource(R.string.settings_title), onBack = onBack)
+
+        SettingsSection(stringResource(R.string.settings_look)) {
+            SettingChoice(
+                stringResource(R.string.settings_theme), null,
+                listOf(stringResource(R.string.settings_theme_system), stringResource(R.string.settings_theme_light), stringResource(R.string.settings_theme_dark)),
+                ThemeMode.entries.indexOf(state.themeMode),
+            ) { viewModel.setThemeMode(ThemeMode.entries[it]) }
+            SettingSwitch(stringResource(R.string.settings_black), stringResource(R.string.settings_black_body), state.amoledDark, viewModel::setAmoled)
+            SettingSwitch(stringResource(R.string.settings_wallpaper), stringResource(R.string.settings_wallpaper_body), state.dynamicColors, viewModel::setDynamicColors)
+        }
+
+        SettingsSection(stringResource(R.string.settings_playback)) {
+            SettingSwitch(
+                stringResource(R.string.settings_crossfade),
+                if (state.crossfadeSeconds > 0) stringResource(R.string.settings_crossfade_on, state.crossfadeSeconds) else stringResource(R.string.settings_crossfade_off),
+                state.crossfadeSeconds > 0,
+            ) { on -> viewModel.setCrossfade(if (on) 5 else 0) }
+            if (state.crossfadeSeconds > 0) {
+                SettingSlider(
+                    stringResource(R.string.settings_crossfade_length), "1 s", "12 s",
+                    state.crossfadeSeconds.toFloat(), { viewModel.setCrossfade(it.toInt().coerceAtLeast(1)) },
+                    valueRange = 1f..12f, steps = 10, spoken = "${state.crossfadeSeconds} s",
+                )
+            }
+            SettingChoice(
+                stringResource(R.string.settings_levelling), stringResource(R.string.settings_levelling_body),
+                listOf(stringResource(R.string.settings_off), stringResource(R.string.settings_per_song), stringResource(R.string.settings_per_album)),
+                ReplayGainMode.entries.indexOf(state.replayGainMode),
+            ) { viewModel.setReplayGain(ReplayGainMode.entries[it]) }
+            SettingSwitch(
+                stringResource(R.string.settings_keep_playing),
+                stringResource(if (state.keepPlayingAfterSwipe) R.string.settings_keep_playing_on else R.string.settings_keep_playing_off),
+                state.keepPlayingAfterSwipe, viewModel::setKeepPlayingAfterSwipe,
+            )
+            SettingLink(stringResource(R.string.settings_sound), stringResource(R.string.settings_sound_body), onOpenEqualizer)
+        }
+
+        SettingsSection(stringResource(R.string.settings_mixes)) {
+            SettingSlider(stringResource(R.string.settings_familiar), stringResource(R.string.settings_familiar_low), stringResource(R.string.settings_familiar_high),
+                state.smartShuffleFamiliarity, viewModel::setSmartFamiliarity)
+            SettingSlider(stringResource(R.string.settings_discovery), stringResource(R.string.settings_discovery_low), stringResource(R.string.settings_discovery_high),
+                state.smartShuffleDiscovery, viewModel::setSmartDiscovery)
+            SettingSlider(stringResource(R.string.settings_variety), stringResource(R.string.settings_variety_low), stringResource(R.string.settings_variety_high),
+                state.smartShuffleVariety, viewModel::setSmartVariety)
+            SettingSwitch(stringResource(R.string.settings_online), stringResource(R.string.settings_online_body), state.onlineMixEnabled, viewModel::setOnlineMixEnabled)
+            if (state.onlineMixEnabled) {
+                val sources = listOf("OFFLINE", "COMBINED", "ONLINE")
+                SettingChoice(
+                    stringResource(R.string.settings_mix_source),
+                    stringResource(when (state.onlineMixSource) {
+                        "ONLINE" -> R.string.settings_mix_online_body
+                        "OFFLINE" -> R.string.settings_mix_library_body
+                        else -> R.string.settings_mix_combined_body
+                    }),
+                    listOf(stringResource(R.string.settings_mix_library), stringResource(R.string.settings_mix_combined), stringResource(R.string.settings_mix_online)),
+                    sources.indexOf(state.onlineMixSource).takeIf { it >= 0 } ?: 1,
+                ) { viewModel.setOnlineMixSource(sources[it]) }
+                SettingSwitch(stringResource(R.string.settings_mobile_data), stringResource(R.string.settings_mobile_data_body),
+                    state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData)
+                SettingSwitch(stringResource(R.string.settings_auto_keep), stringResource(R.string.settings_auto_keep_body),
+                    state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep)
+            }
+        }
+
+        SettingsSection(stringResource(R.string.settings_library)) {
+            SettingLink(stringResource(R.string.settings_add_folder), stringResource(R.string.settings_add_folder_body), { folderPicker.launch(null) })
+            grantedTrees.forEach { treeUri ->
+                SettingLink(treeUri.lastPathSegment ?: treeUri.toString(), stringResource(R.string.settings_included_folder), {}) {
+                    com.harmony.core.ui.room.RoomButton(stringResource(R.string.settings_remove), {
+                        context.contentResolver.releasePersistableUriPermission(treeUri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        refreshKey++
+                    }, kind = com.harmony.core.ui.room.RoomButtonKind.Text)
                 }
             }
-            Text(
-                "Settings",
-                fontSize = 40.sp,
-                lineHeight = 44.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-1).sp,
-                color = palette.ink,
-            )
+            SettingLink(
+                stringResource(R.string.settings_rescan), rescanStatus ?: stringResource(R.string.settings_rescan_body), viewModel::rescanLibrary,
+            ) {
+                if (rescanStatus != null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = r.amberText)
+            }
+            SettingSwitch(stringResource(R.string.settings_charging), stringResource(R.string.settings_charging_body),
+                state.chargingOnlyAnalysis, viewModel::setChargingOnly)
         }
 
-        // ---- Appearance ----
-        EditorialSectionLabel(
-            "Appearance",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialSettingRow(
-            title = "Theme",
-            subtitle = "Follow the system, or pin it",
-            palette = palette,
-            content = {
-                EditorialChoiceChips(
-                    options = ThemeMode.entries.map { it.label() },
-                    selectedIndex = ThemeMode.entries.indexOf(state.themeMode),
-                    onSelect = { viewModel.setThemeMode(ThemeMode.entries[it]) },
-                    palette = palette,
-                )
-            },
-        )
-        EditorialSettingRow(
-            title = "AMOLED black",
-            subtitle = "True black backgrounds in dark mode",
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.amoledDark, viewModel::setAmoled, palette)
-            },
-        )
-        EditorialSettingRow(
-            title = "Dynamic colors",
-            subtitle = "Buttons and selection take your wallpaper's colour (Android 12+). " +
-                "What's playing stays red, so it reads the same everywhere.",
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.dynamicColors, viewModel::setDynamicColors, palette)
-            },
-        )
-
-        EditorialSectionGap()
-
-        // ---- Playback ----
-        EditorialSectionLabel(
-            "Playback",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialSettingRow(
-            title = "Crossfade",
-            subtitle = if (state.crossfadeSeconds > 0) {
-                "${state.crossfadeSeconds}s between tracks"
-            } else {
-                "Off — tracks change instantly"
-            },
-            palette = palette,
-            trailing = {
-                EditorialSwitch(
-                    checked = state.crossfadeSeconds > 0,
-                    onCheckedChange = { on -> viewModel.setCrossfade(if (on) 5 else 0) },
-                    palette = palette,
-                )
-            },
-            content = {
-                // The slider grows and shrinks with the toggle instead of
-                // popping in and shoving the rows below it.
-                AnimatedContent(
-                    targetState = state.crossfadeSeconds > 0,
-                    transitionSpec = {
-                        (fadeIn(tween(220)) + expandVertically())
-                            .togetherWith(fadeOut(tween(150)) + shrinkVertically())
-                    },
-                    label = "crossfade-setting",
-                ) { enabled ->
-                    if (enabled) {
-                        EditorialSlider(
-                            value = state.crossfadeSeconds.toFloat(),
-                            onValueChange = { viewModel.setCrossfade(it.toInt().coerceAtLeast(1)) },
-                            palette = palette,
-                            valueRange = 1f..12f,
-                            steps = 10,
-                        )
-                    } else {
-                        EditorialSectionGap(0)
-                    }
-                }
-            },
-        )
-        EditorialSettingRow(
-            title = "Keep playing after closing the app",
-            subtitle = if (state.keepPlayingAfterSwipe) {
-                "Swiping Harmony away from recent apps leaves the music playing; " +
-                    "a paused player is closed with its notification"
-            } else {
-                "Swiping Harmony away from recent apps stops the music and removes " +
-                    "its notification"
-            },
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.keepPlayingAfterSwipe, viewModel::setKeepPlayingAfterSwipe, palette)
-            },
-        )
-        EditorialSettingRow(
-            title = "ReplayGain",
-            subtitle = "Even out volume differences between tracks",
-            palette = palette,
-            content = {
-                EditorialChoiceChips(
-                    options = ReplayGainMode.entries.map { it.label() },
-                    selectedIndex = ReplayGainMode.entries.indexOf(state.replayGainMode),
-                    onSelect = { viewModel.setReplayGain(ReplayGainMode.entries[it]) },
-                    palette = palette,
-                )
-            },
-        )
-
-        EditorialSettingRow(
-            title = "Equalizer",
-            subtitle = "10 bands, presets and the tone dial. Applied to everything playing.",
-            palette = palette,
-            onClick = onOpenEqualizer,
-        )
-
-        EditorialSectionGap()
-
-        // ---- Smart Shuffle -----------------------------------------------
-        EditorialSectionLabel(
-            "Smart Shuffle & mixes",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialSettingRow(
-            title = "Familiarity",
-            subtitle = "Higher values favor favourites and songs you usually finish",
-            palette = palette,
-            content = {
-                EditorialSlider(
-                    value = state.smartShuffleFamiliarity,
-                    onValueChange = viewModel::setSmartFamiliarity,
-                    palette = palette,
-                    valueRange = 0f..1f,
-                )
-            },
-        )
-        EditorialSettingRow(
-            title = "Discovery",
-            subtitle = "Bring back rare, unplayed and long-unheard tracks",
-            palette = palette,
-            content = {
-                EditorialSlider(
-                    value = state.smartShuffleDiscovery,
-                    onValueChange = viewModel::setSmartDiscovery,
-                    palette = palette,
-                    valueRange = 0f..1f,
-                )
-            },
-        )
-        EditorialSettingRow(
-            title = "Variety",
-            subtitle = "Low stays focused; high explores more of the candidate pool",
-            palette = palette,
-            content = {
-                EditorialSlider(
-                    value = state.smartShuffleVariety,
-                    onValueChange = viewModel::setSmartVariety,
-                    palette = palette,
-                    valueRange = 0f..1f,
-                )
-            },
-        )
-
-        EditorialSettingRow(
-            title = "Online mixes (experimental)",
-            subtitle = "Mixes can add songs YouTube Music recommends: played from your library when you " +
-                "have them, otherwise prepared as lossless FLAC. No account. What is sent: see Privacy",
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.onlineMixEnabled, viewModel::setOnlineMixEnabled, palette)
-            },
-        )
-
-        if (state.onlineMixEnabled) {
-            val sources = listOf("OFFLINE", "COMBINED", "ONLINE")
-            EditorialSettingRow(
-                title = "Mix source",
-                subtitle = when (state.onlineMixSource) {
-                    "ONLINE" -> "Only songs YouTube Music recommends, each as soon as it's ready; your library only if none can come"
-                    "OFFLINE" -> "Your own songs only. Nothing is asked online"
-                    else -> "Your library, with about one YouTube Music pick in three"
-                } + ". Also on the mix card in the queue",
-                palette = palette,
-                content = {
-                    EditorialChoiceChips(
-                        options = listOf("Library", "Combined", "Online"),
-                        selectedIndex = sources.indexOf(state.onlineMixSource).takeIf { it >= 0 } ?: 1,
-                        onSelect = { viewModel.setOnlineMixSource(sources[it]) },
-                        palette = palette,
-                    )
-                },
-            )
-            EditorialSettingRow(
-                title = "Prepare online songs on mobile data",
-                subtitle = "Off: online songs are downloaded over Wi-Fi only",
-                palette = palette,
-                trailing = {
-                    EditorialSwitch(state.onlineMixOnMobileData, viewModel::setOnlineMixOnMobileData, palette)
-                },
-            )
-            EditorialSettingRow(
-                title = "Save songs you finish twice",
-                subtitle = "An online song you play to the end twice is saved to your library by itself. " +
-                    "Any online song can also be saved from the queue",
-                palette = palette,
-                trailing = {
-                    EditorialSwitch(state.onlineMixAutoKeep, viewModel::setOnlineMixAutoKeep, palette)
-                },
-            )
+        SettingsSection(stringResource(R.string.settings_adding)) {
+            SettingSwitch(stringResource(R.string.settings_parallel), stringResource(R.string.settings_parallel_body),
+                state.experimentalParallelDownloads, viewModel::setExperimentalParallelDownloads)
+            Text(stringResource(R.string.settings_sources_note), style = T.bodySmall, color = r.muted,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         }
 
-        EditorialSectionGap()
-
-        // ---- Library ----
-        EditorialSectionLabel(
-            "Library",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialSettingRow(
-            title = "Add music folder",
-            subtitle = "Include a USB drive or custom folder in your library",
-            palette = palette,
-            onClick = { folderPicker.launch(null) },
-        )
-
-        // Granted folders, with removal. refreshKey forces recomposition after
-        // grant/revoke since persistedUriPermissions isn't observable.
-        var refreshKey by remember { mutableIntStateOf(0) }
-        val grantedTrees = remember(refreshKey) {
-            context.contentResolver.persistedUriPermissions
-                .filter { it.isReadPermission }
-                .map { it.uri }
-        }
-        grantedTrees.forEach { treeUri ->
-            EditorialSettingRow(
-                title = treeUri.lastPathSegment ?: treeUri.toString(),
-                subtitle = "Included folder",
-                palette = palette,
-                trailing = {
-                    EditorialTextAction(
-                        text = "Remove",
-                        onClick = {
-                            context.contentResolver.releasePersistableUriPermission(
-                                treeUri,
-                                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                            )
-                            refreshKey++
-                        },
-                        palette = palette,
-                    )
-                },
-            )
+        SettingsSection(stringResource(R.string.settings_tools)) {
+            SettingLink(stringResource(R.string.settings_edit_tags), stringResource(R.string.settings_edit_tags_body), onOpenTagEditor)
+            SettingLink(stringResource(R.string.settings_check_file), stringResource(R.string.settings_check_file_body), onOpenFlacCheck)
+            SettingLink(stringResource(R.string.settings_diagnostics), stringResource(R.string.settings_diagnostics_body), { showDiagnostics = true })
         }
 
-        val rescanStatus by viewModel.rescan.collectAsStateWithLifecycle()
-        EditorialSettingRow(
-            title = "Rescan library",
-            subtitle = rescanStatus
-                ?: "Re-read every file. Use after album grouping changes. " +
-                "Playlists and favourites are kept.",
-            palette = palette,
-            onClick = viewModel::rescanLibrary,
-            trailing = {
-                if (rescanStatus != null) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = palette.ink,
-                    )
-                }
-            },
-        )
-
-        EditorialSettingRow(
-            title = "Analyze only while charging",
-            subtitle = "Audio analysis pauses on battery power",
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.chargingOnlyAnalysis, viewModel::setChargingOnly, palette)
-            },
-        )
-
-        EditorialSectionGap()
-
-        // ---- Downloads ----
-        EditorialSectionLabel(
-            "Downloads",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialSettingRow(
-            title = "Two album tracks at once (experimental)",
-            subtitle = "Mornye build only. One at a time while music plays. Off by default",
-            palette = palette,
-            trailing = {
-                EditorialSwitch(state.experimentalParallelDownloads, viewModel::setExperimentalParallelDownloads, palette)
-            },
-        )
-
-        EditorialSectionGap()
-
-        // ---- Tools ----
-        EditorialSectionLabel(
-            "Tools",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialSettingRow(
-            title = "Edit tags",
-            subtitle = "Fix a song's title, artist, album or artwork. Applies " +
-                "everywhere in Harmony; the files aren't changed.",
-            palette = palette,
-            onClick = onOpenTagEditor,
-        )
-
-        // Crashes, caught errors and the online mix's steps, readable on the phone.
-        var showDiagnostics by remember { mutableStateOf(false) }
-        EditorialSettingRow(
-            title = "Diagnostics log",
-            subtitle = "Crashes and errors, with the online mix's steps. Open it to copy or share it",
-            palette = palette,
-            onClick = { showDiagnostics = true },
-        )
-        if (showDiagnostics) {
-            DiagnosticsLogDialog(onDismiss = { showDiagnostics = false })
-        }
-
-        EditorialSettingRow(
-            title = "Check a file",
-            subtitle = "Inspect a track's spectrum — see if a FLAC is really lossless, " +
-                "plus its sample rate, bit depth and bitrate",
-            palette = palette,
-            onClick = onOpenFlacCheck,
-        )
-
-        EditorialSectionGap()
-
-        // ---- Privacy ----
-        EditorialSectionLabel(
-            "Privacy",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialCard(
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp),
-        ) {
+        SettingsSection(stringResource(R.string.settings_privacy)) {
             Text(
                 "Harmony has no Harmony cloud account, analytics, or ads. Local playback " +
                     "and audio analysis stay on this device. Online features such as Downloads " +
@@ -579,142 +308,59 @@ fun SettingsScreen(
                     "a sound fingerprint of 12 seconds of it (never the audio) is sent to Shazam to name it, " +
                     "and its name is searched for on Deezer and YouTube Music; phones with Gemini Nano also " +
                     "guess from the name with their own AI.",
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                color = palette.muted,
-                modifier = Modifier.padding(16.dp),
+                style = T.bodySmall, color = r.muted, modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
 
-        EditorialSectionGap()
-
-        // ---- About & legal ----
-        EditorialSectionLabel(
-            "About & legal",
-            palette,
-            Modifier.padding(start = 22.dp, bottom = 8.dp),
-        )
-        EditorialCard(
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp),
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    "Harmony",
-                    fontSize = 22.sp,
-                    lineHeight = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.ink,
-                )
-                // Read from the installed package so this always matches the build.
+        SettingsSection(stringResource(R.string.settings_about)) {
+            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val versionName = remember(context) {
-                    runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
-                        .getOrNull() ?: "1.0"
+                    runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "1.0"
                 }
-                Text(
-                    "Version $versionName",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                Text(
-                    "Owner / Administrator: r4duq",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.ink,
-                    modifier = Modifier.padding(top = 14.dp),
-                )
-                Text(
-                    "© 2026 r4duq. All rights reserved.",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.ink,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                Text("Harmony", style = T.nameL, color = r.ink)
+                Text(stringResource(R.string.settings_version, versionName), style = T.bodySmall, color = r.muted)
+                Text("Owner / Administrator: r4duq", style = T.title, color = r.ink)
+                Text("© 2026 r4duq. All rights reserved.", style = T.title, color = r.ink)
                 Text(
                     "Harmony's original source code, user interface, branding and original " +
                         "assets are copyright r4duq. Unauthorized copying, redistribution or " +
                         "representation of Harmony's proprietary components as another person's " +
                         "work is prohibited except where permitted by applicable law or an " +
                         "applicable third-party license.",
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 10.dp),
+                    style = T.bodySmall, color = r.muted,
                 )
                 Text(
                     "Harmony does not grant rights to music or other third-party content. " +
                         "Online download and peer-to-peer features should only be used for " +
                         "content you are permitted to access or download.",
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    color = palette.muted,
-                    modifier = Modifier.padding(top = 10.dp),
+                    style = T.bodySmall, color = r.muted,
                 )
-            }
-        }
-
-        EditorialSectionLabel(
-            "Third-party software",
-            palette,
-            Modifier.padding(start = 22.dp, top = 18.dp, bottom = 8.dp),
-        )
-        EditorialCard(
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp),
-        ) {
-            Column(Modifier.padding(16.dp)) {
+                Text("Third-party software", style = T.nameM, color = r.ink, modifier = Modifier.padding(top = 8.dp))
                 Text(
                     "Harmony includes open-source components. Copyright and license rights " +
                         "for these components remain with their respective authors and projects.",
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    color = palette.muted,
+                    style = T.bodySmall, color = r.muted,
                 )
-                ThirdPartyLine(
-                    "AndroidX / Jetpack Compose / Media3 / Room / WorkManager / DataStore",
-                    "Apache License 2.0",
-                    palette,
-                )
+                ThirdPartyLine("AndroidX / Jetpack Compose / Media3 / Room / WorkManager / DataStore", "Apache License 2.0", palette)
                 ThirdPartyLine("Kotlin / kotlinx.coroutines", "Apache License 2.0", palette)
                 ThirdPartyLine("Dagger / Hilt", "Apache License 2.0", palette)
                 ThirdPartyLine("Coil", "Apache License 2.0", palette)
+                ThirdPartyLine("Figtree, Bricolage Grotesque", "SIL Open Font License 1.1", palette)
                 ThirdPartyLine("youtubedl-android 0.18.1", "GNU GPL v3", palette)
                 ThirdPartyLine("yt-dlp", "The Unlicense / public-domain dedication", palette)
-                ThirdPartyLine(
-                    "FFmpeg",
-                    "LGPL v2.1+; optional GPL components may apply to a particular build",
-                    palette,
+                ThirdPartyLine("FFmpeg", "LGPL v2.1+; optional GPL components may apply to a particular build", palette)
+                Text("Third-party services", style = T.nameM, color = r.ink, modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Soulseek, YouTube, Google, SHFL and other third-party service names, trademarks " +
+                        "and content belong to their respective owners. Harmony and r4duq are not " +
+                        "affiliated with, sponsored by, or endorsed by those services or by the " +
+                        "open-source projects listed above.",
+                    style = T.bodySmall, color = r.muted,
                 )
             }
         }
-
-        EditorialSectionLabel(
-            "Third-party services",
-            palette,
-            Modifier.padding(start = 22.dp, top = 18.dp, bottom = 8.dp),
-        )
-        EditorialCard(
-            palette = palette,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp),
-        ) {
-            Text(
-                "Soulseek, YouTube, Google, SHFL and other third-party service names, trademarks " +
-                    "and content belong to their respective owners. Harmony and r4duq are not " +
-                    "affiliated with, sponsored by, or endorsed by those services or by the " +
-                    "open-source projects listed above.",
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = palette.muted,
-                modifier = Modifier.padding(16.dp),
-            )
-        }
-
-        EditorialSectionGap(28)
     }
+    if (showDiagnostics) DiagnosticsLogDialog(onDismiss = { showDiagnostics = false })
 }
 
 @Composable
@@ -726,16 +372,13 @@ private fun ThirdPartyLine(
     Column(Modifier.padding(top = 12.dp)) {
         Text(
             name,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = palette.ink,
+            style = com.harmony.core.ui.theme.RoomType.title,
+            color = com.harmony.core.ui.theme.Room.ink,
         )
         Text(
             license,
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            color = palette.muted,
+            style = com.harmony.core.ui.theme.RoomType.bodySmall,
+            color = com.harmony.core.ui.theme.Room.muted,
             modifier = Modifier.padding(top = 1.dp),
         )
     }
@@ -776,8 +419,8 @@ private fun DiagnosticsLogDialog(onDismiss: () -> Unit) {
             ) {
                 androidx.compose.material3.Text(
                     text.ifBlank { "Nothing logged yet." },
-                    fontSize = 10.5.sp,
-                    lineHeight = 13.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                 )
             }

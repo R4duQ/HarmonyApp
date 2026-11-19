@@ -6,6 +6,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -18,10 +19,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.ui.theme.CyberGlassColors
 
 /**
- * The Albums tab in Downloads: search an album, then either Download Album
- * (the whole album joins the queue in one tap) or Tracks (open it to choose
- * songs). The query and results live in [AlbumSearchViewModel], kept with
- * the Downloads screen, so switching to Tracks and back keeps them.
+ * Albums on the Get music page: one search, then each edition with Get album
+ * (the whole album joins the queue in one tap) or Choose songs (open it to
+ * pick). The query and results live in [AlbumSearchViewModel], so switching
+ * to Songs and back keeps them.
  */
 @Composable
 internal fun AlbumSearchSection(
@@ -33,65 +34,53 @@ internal fun AlbumSearchSection(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val batches by queue.batches.collectAsStateWithLifecycle()
-    val glass = CyberGlassColors
-    val outputFormat = AlbumDownloadPolicy.formatFor(source, format)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        CyberGlassPanel {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Download an album", color = glass.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Text("Find the album, then download all of it in one tap, or open it to pick songs. " +
-                    "Audio: ${if (source == DownloadSource.SOULSEEK) "Soulseek" else queue.engineName}.",
-                    color = glass.TextSecondary, fontSize = 13.sp)
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = viewModel::setQuery,
-                    placeholder = { Text("Album title and artist", color = glass.TextQuiet) },
-                    singleLine = true,
-                    enabled = !state.busy,
-                    shape = RoundedCornerShape(16.dp),
-                    leadingIcon = { Icon(Icons.Rounded.Search, null, tint = glass.TextPlaceholder) },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { viewModel.search() }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = glass.TextPrimary, unfocusedTextColor = glass.TextPrimary, disabledTextColor = glass.TextSecondary,
-                        focusedContainerColor = glass.Surface, unfocusedContainerColor = glass.Surface, disabledContainerColor = glass.Surface,
-                        focusedBorderColor = glass.Cyan, unfocusedBorderColor = glass.Indigo, disabledBorderColor = glass.ChipBorder,
-                        cursorColor = glass.Cyan,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                NeonPillButton(
-                    text = if (state.searching) "Searching albums…" else "Search albums",
-                    icon = Icons.Rounded.Search,
-                    onClick = viewModel::search,
-                    enabled = !state.busy && state.query.trim().length >= 2,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (state.searching) LinearProgressIndicator(Modifier.fillMaxWidth(), color = glass.Cyan, trackColor = glass.Cyan.copy(alpha = 0.12f))
-                Text("Album search uses public metadata; it doesn't download anything until you tap Download Album.",
-                    color = glass.TextQuiet, fontSize = 11.sp)
-            }
-        }
-        state.notice?.let { CyberNotice(it, onDismiss = viewModel::dismissNotice) }
-        state.error?.let { CyberNotice(it, error = true) }
+    val r = com.harmony.core.ui.theme.Room
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        GetSearchField(state.query, viewModel::setQuery, viewModel::search,
+            androidx.compose.ui.res.stringResource(R.string.albums_search_label), enabled = !state.busy)
+        com.harmony.core.ui.room.RoomButton(
+            androidx.compose.ui.res.stringResource(R.string.get_search), viewModel::search, icon = Icons.Rounded.Search,
+            enabled = !state.busy && state.query.trim().length >= 2, loading = state.searching,
+        )
+        Text(androidx.compose.ui.res.stringResource(R.string.albums_search_note), style = com.harmony.core.ui.theme.RoomType.bodySmall, color = r.muted)
+        state.notice?.let { com.harmony.core.ui.room.StatusLine(com.harmony.core.ui.room.StatusTone.Info, it,
+            action = androidx.compose.ui.res.stringResource(R.string.activity_dismiss), onAction = viewModel::dismissNotice) }
+        state.error?.let { com.harmony.core.ui.room.StatusLine(com.harmony.core.ui.room.StatusTone.Error, it) }
         if (state.searched && state.results.isEmpty() && !state.busy && state.error == null) {
-            CyberNotice("No albums found. Try the artist and a shorter album title.")
+            com.harmony.core.ui.room.StatusLine(com.harmony.core.ui.room.StatusTone.Info,
+                androidx.compose.ui.res.stringResource(R.string.albums_none_found), body = androidx.compose.ui.res.stringResource(R.string.albums_none_found_body))
         }
-        if (state.results.isNotEmpty()) {
-            Text("${state.results.size} EDITIONS", color = glass.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.2.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
-        }
+        if (state.results.isNotEmpty()) com.harmony.core.ui.room.RoomSectionTitle(androidx.compose.ui.res.stringResource(R.string.get_results))
         state.results.forEach { edition ->
             val batch = batches.firstOrNull { b -> viewModel.albumIdFor(edition) == b.albumId }
-            AlbumSearchCard(
-                edition = edition,
-                quality = qualityBadgeFor(outputFormat),
-                busy = state.busy,
-                loading = state.openingId == edition.id,
-                onOpen = { viewModel.open(edition, source, format, onOpenAlbum) },
-                onDownloadAll = { viewModel.downloadAll(edition, source, format) },
-                queuedLabel = batch?.takeIf { it.active || it.state == AlbumBatchState.COMPLETED }?.statusLabel,
-            )
+            val queued = batch?.takeIf { it.active || it.state == AlbumBatchState.COMPLETED }?.statusLabel
+            com.harmony.core.ui.room.RoomCard(Modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        AlbumArtwork(edition.cover, 64.dp, corner = 8.dp)
+                        androidx.compose.foundation.layout.Spacer(Modifier.padding(start = 12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(edition.title, style = com.harmony.core.ui.theme.RoomType.title, color = r.ink, maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(listOfNotNull(edition.artist, if (edition.trackCount > 0)
+                                androidx.compose.ui.res.pluralStringResource(R.plurals.album_tracks, edition.trackCount, edition.trackCount) else null)
+                                .joinToString(" · "), style = com.harmony.core.ui.theme.RoomType.bodySmall, color = r.muted, maxLines = 1)
+                            if (queued != null) Text(queued, style = com.harmony.core.ui.theme.RoomType.bodySmall, color = r.amberText)
+                        }
+                    }
+                    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        com.harmony.core.ui.room.RoomButton(
+                            androidx.compose.ui.res.stringResource(R.string.albums_get_album), { viewModel.downloadAll(edition, source, format) },
+                            kind = com.harmony.core.ui.room.RoomButtonKind.Tonal, icon = Icons.Rounded.Download,
+                            enabled = !state.busy && queued == null,
+                        )
+                        com.harmony.core.ui.room.RoomButton(
+                            androidx.compose.ui.res.stringResource(R.string.albums_choose_songs), { viewModel.open(edition, source, format, onOpenAlbum) },
+                            kind = com.harmony.core.ui.room.RoomButtonKind.Text, enabled = !state.busy, loading = state.openingId == edition.id,
+                        )
+                    }
+                }
+            }
         }
     }
 }

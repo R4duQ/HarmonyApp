@@ -1,5 +1,8 @@
 package com.harmony.feature.downloads
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.material3.MaterialTheme
@@ -25,12 +28,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.ui.theme.CyberGlassColors
 
 /**
- * Album downloads in the Downloads queue: one collapsible card per album
- * (a 15-track album is one card, not 15 rows), the running and queued ones
- * first. Tap a card's arrow for its tracks, the card for the album sheet.
- *
- * Finished albums show the latest few; "Show all" lists every album you
- * opened or downloaded (Discover's included).
+ * The albums on their way, in the same words as the Activity sheet: running
+ * and waiting first, then the latest finished. Tap one for its page; Pause,
+ * Resume and Stop sit on the row.
  */
 @Composable
 fun AlbumDownloadsShelf(
@@ -39,41 +39,54 @@ fun AlbumDownloadsShelf(
 ) {
     val batches by viewModel.batches.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
-    // Which cards are open survives the Tracks/Albums switch and rotation.
-    var expanded by rememberSaveable { mutableStateOf(listOf<String>()) }
     var showAll by rememberSaveable { mutableStateOf(false) }
     if (batches.isEmpty()) return
-    val glass = CyberGlassColors
+    val r = com.harmony.core.ui.theme.Room
     val ordered = batches.sortedWith(compareBy<AlbumBatch> { rank(it.state) })
     val shown = if (showAll) ordered else ordered.filter { it.active || it.state == AlbumBatchState.PAUSED || it.failed > 0 } +
         ordered.filterNot { it.active || it.state == AlbumBatchState.PAUSED || it.failed > 0 }.take(RECENT_FINISHED)
-    val active = batches.count { it.active }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Album downloads", color = glass.TextPrimary, style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f).padding(start = 4.dp).semantics { heading() })
-            if (active > 0) Text(if (active == 1) "1 in progress" else "$active in progress", color = glass.LiveInk,
-                style = MaterialTheme.typography.labelMedium)
-        }
-        message?.let { CyberNotice(it, error = true, onDismiss = viewModel::dismissMessage) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        com.harmony.core.ui.room.RoomSectionTitle(androidx.compose.ui.res.stringResource(R.string.albums_on_the_way))
+        message?.let { com.harmony.core.ui.room.StatusLine(com.harmony.core.ui.room.StatusTone.Error, it,
+            action = androidx.compose.ui.res.stringResource(R.string.activity_dismiss), onAction = viewModel::dismissMessage) }
         shown.forEach { batch ->
-            AlbumBatchCard(
-                batch = batch,
-                expanded = batch.albumId in expanded,
-                onToggle = { expanded = if (batch.albumId in expanded) expanded - batch.albumId else expanded + batch.albumId },
-                onOpen = { onOpenAlbum(batch.albumId) },
-                onPause = { viewModel.pause(batch.albumId) },
-                onResume = { viewModel.resume(batch.albumId) },
-                onCancel = { viewModel.cancel(batch.albumId) },
-                onRetryTrack = { viewModel.retryTrack(batch.albumId, it) },
-                onSkipTrack = { viewModel.skipTrack(batch.albumId, it) },
-            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { onOpenAlbum(batch.albumId) }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AlbumArtwork(batch.coverUrl.ifBlank { null }, 56.dp, corner = 8.dp)
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(batch.title, style = com.harmony.core.ui.theme.RoomType.title, color = r.ink, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    Text("${batch.artist} · ${batch.statusLabel}", style = com.harmony.core.ui.theme.RoomType.bodySmall,
+                        color = if (batch.failed > 0) r.wine else r.muted, maxLines = 2)
+                    if (batch.active) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { batch.fraction.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(3.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                            color = r.amber, trackColor = r.raised, gapSize = 0.dp, drawStopIndicator = {},
+                        )
+                    }
+                }
+                when {
+                    batch.canPause -> com.harmony.core.ui.room.RoomButton(androidx.compose.ui.res.stringResource(R.string.activity_pause),
+                        { viewModel.pause(batch.albumId) }, kind = com.harmony.core.ui.room.RoomButtonKind.Text)
+                    batch.canResume -> com.harmony.core.ui.room.RoomButton(androidx.compose.ui.res.stringResource(R.string.activity_resume),
+                        { viewModel.resume(batch.albumId) }, kind = com.harmony.core.ui.room.RoomButtonKind.Tonal)
+                }
+            }
         }
         if (ordered.size > shown.size || showAll) {
-            TextButton(onClick = { showAll = !showAll }) {
-                Text(if (showAll) "Show fewer" else "Show all ${ordered.size} albums", color = glass.Cyan)
-            }
+            com.harmony.core.ui.room.RoomButton(
+                if (showAll) androidx.compose.ui.res.stringResource(R.string.albums_show_fewer)
+                else androidx.compose.ui.res.stringResource(R.string.albums_show_all, ordered.size),
+                { showAll = !showAll }, kind = com.harmony.core.ui.room.RoomButtonKind.Text,
+            )
         }
     }
 }

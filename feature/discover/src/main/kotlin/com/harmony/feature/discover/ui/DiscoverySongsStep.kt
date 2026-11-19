@@ -106,8 +106,8 @@ internal fun SongsStep(
             DiscoverCard(palette, Modifier.padding(horizontal = Gutter).testTag(DiscoveryTags.NOTES)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (state.showingSaved) Text("Saved results · made ${ago(draft.generatedAt)}. Connect to refresh.",
-                        color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.testTag(DiscoveryTags.SAVED))
-                    state.notes.take(3).forEach { Text(it, color = palette.muted, fontSize = 13.sp, lineHeight = 17.sp) }
+                        color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = Modifier.testTag(DiscoveryTags.SAVED))
+                    state.notes.take(3).forEach { Text(it, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall) }
                 }
             }
         }
@@ -121,7 +121,7 @@ internal fun SongsStep(
                 }
                 val close = items.count { it.kind == CandidateKind.CLOSE }
                 Text("$close close to your taste · ${items.size - close} discoveries" +
-                    if (state.generating) " · updating…" else "", color = palette.muted, fontSize = 13.sp)
+                    if (state.generating) " · updating…" else "", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
             }
         }
         item(key = "pager") {
@@ -190,10 +190,10 @@ private fun FocusCard(
             }
             val text: @Composable (Modifier) -> Unit = { m ->
                 Column(m.semantics(mergeDescendants = true) {}) {
-                    Text("${page + 1} of $total", color = palette.muted, fontSize = 12.sp)
-                    Text(item.song.title, color = palette.ink, fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold,
+                    Text("${page + 1} of $total", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
+                    Text(item.song.title, color = palette.ink, style = com.harmony.core.ui.theme.RoomType.nameM, fontWeight = FontWeight.Bold,
                         maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    Text(item.song.artist, color = palette.ink.copy(alpha = 0.8f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    Text(item.song.artist, color = palette.ink.copy(alpha = 0.8f), style = com.harmony.core.ui.theme.RoomType.title, fontWeight = FontWeight.Medium,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -202,7 +202,7 @@ private fun FocusCard(
             else Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 cover(); text(Modifier.weight(1f))
             }
-            Text(item.reason.text, color = palette.muted, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(item.reason.text, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Badge(if (item.kind == CandidateKind.CLOSE) "Close to your taste" else "Discovery", palette)
                 if (item.song.localUri != null) Badge("In your library", palette, Icons.Rounded.CheckCircle)
@@ -222,7 +222,7 @@ private fun FocusCard(
                 enabled = !replacing,
                 modifier = Modifier.fillMaxWidth().testTag(DiscoveryTags.PREVIEW),
             )
-            mine?.message?.let { Text(it, color = palette.muted, fontSize = 12.sp, modifier = Modifier.testTag(DiscoveryTags.PREVIEW_NOTE)) }
+            mine?.message?.let { Text(it, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = Modifier.testTag(DiscoveryTags.PREVIEW_NOTE)) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RoundAction(Icons.Rounded.PushPin, if (item.kept) "Stop keeping" else "Keep when regenerating", palette,
                     { actions.toggleKeep(item.key) }, enabled = !replacing, active = item.kept, caption = if (item.kept) "Kept" else "Keep", modifier = Modifier.testTag(DiscoveryTags.KEEP))
@@ -247,16 +247,16 @@ private fun SongRow(index: Int, item: DraftItem, replacing: Boolean, palette: Ed
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("${index + 1}", color = palette.muted, fontSize = 13.sp, modifier = Modifier.widthIn(min = 22.dp))
+        Text("${index + 1}", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = Modifier.widthIn(min = 22.dp))
         Box {
             Cover(item.song.artwork, palette, Modifier.size(48.dp))
             if (replacing) Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(palette.field.copy(alpha = 0.6f)),
                 contentAlignment = Alignment.Center) { Spinner(palette.ink, Modifier.size(18.dp)) }
         }
         Column(Modifier.weight(1f)) {
-            Text(item.song.title, color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(item.song.artist, color = palette.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(item.reason.text, color = palette.muted.copy(alpha = 0.85f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.song.title, color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.song.artist, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.reason.text, color = palette.muted.copy(alpha = 0.85f), style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (item.kept) Icon(Icons.Rounded.PushPin, "Kept", tint = palette.accent, modifier = Modifier.size(18.dp))
         if (item.song.localUri != null) Icon(Icons.Rounded.CheckCircle, "In your library", tint = palette.ink.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
@@ -271,7 +271,7 @@ internal fun Badge(text: String, palette: EditorialPalette, icon: androidx.compo
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (icon != null) Icon(icon, null, tint = palette.ink, modifier = Modifier.size(14.dp))
-        Text(text, color = palette.ink, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text, color = palette.ink, style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

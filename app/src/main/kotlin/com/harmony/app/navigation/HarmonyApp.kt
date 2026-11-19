@@ -387,6 +387,7 @@ fun HarmonyApp(
                         onOpenAlbum = { open("album_download/${android.net.Uri.encode(it)}") },
                         onOpenRecognize = { open(Routes.RECOGNIZE) },
                         initialQuery = entry.arguments?.getString("q"),
+                        onBack = { navController.popIfCurrent(entry) },
                     )
                 }
                 page(Routes.ALBUM_DOWNLOAD, arguments = listOf(navArgument("discoverId") { type = NavType.StringType })) { entry ->

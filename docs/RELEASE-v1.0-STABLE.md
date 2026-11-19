@@ -1,8 +1,31 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **174**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 173), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **175**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 174), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 175 — Getting music, albums, Spotify, the queue, Settings and Discover in the new look
+
+- **Get music is one page.** Songs, Albums or a YouTube link on top; the source is a
+  quiet "From: SpotiFLAC" line you can change. Every result has **Get**. The provider
+  check only shows when it needs you. A failed download says what happened, what
+  Harmony already tried and what you can do, with the technical text behind Details.
+  Soulseek: sign in once, then the same search; options and folders are folded away.
+  YouTube: paste, check the title, convert. A YouTube link typed on Add goes straight
+  to the converter.
+- **Albums.** Each album page shows the cover and one main action (Get N songs,
+  Pause, Resume, Try the failed again); every song says its state in words. Album
+  search gives each edition **Get album** and **Choose songs**.
+- **From Spotify** walks you through connecting in three steps (create a free Spotify
+  app, copy Harmony's address with one tap, paste the Client ID). A playlist then
+  shows what you have, what is missing and what wasn't found, and one button gets the
+  missing songs and makes the playlist.
+- **The queue** reads Up next, You added and From the mix, with nothing under 12sp.
+- **Settings** regrouped: Look, Playback, Mixes, Library, Adding music, Tools,
+  Privacy, About; switches work on the whole row; sliders say what each end means.
+- **Discover** in the new look; the old album and swipe screens nobody could reach
+  are gone.
+- Downloads, playback, mixes and the Rust engines are unchanged.
 
 ## Build 174 — The Listening Room: Listen, Library, Add
 

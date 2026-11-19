@@ -37,8 +37,8 @@ class ImportDesignShots {
     private fun shot(name: String, content: @Composable () -> Unit) {
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            HarmonyTheme(darkTheme = false, dynamicColors = false) {
-                Column(Modifier.fillMaxSize().background(CyberGlassColors.Page), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() }
+            HarmonyTheme(darkTheme = false, dynamicColors = false, reducedMotion = true) {
+                Column(Modifier.fillMaxSize().background(com.harmony.core.ui.theme.Room.ground), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() }
             }
         }
         repeat(6) { Thread.sleep(120); rule.mainClock.advanceTimeBy(500); rule.waitForIdle() }
@@ -49,18 +49,20 @@ class ImportDesignShots {
         File(dir, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    @Test fun ytConverter() = shot("yt-link") {
-        YtConverterLayout(
-            state = DownloadsViewModel.State(query = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
-            palette = CyberGlassPalette, identity = DownloadSource.YTCONVERTER.identity(),
-            onUrlChange = {}, onIdentify = {}, onConvert = {}, onToggleErrorDetails = {},
-        )
+    @Test fun spotifyGuide() = shot("spotify-guide") {
+        SpotifyTransferContent(SpotifyPlaylistTransferState(clientId = ""), SpotifyTransferActions())
     }
 
-    @Test fun ytConverterEmpty() = shot("yt-empty") {
-        YtConverterLayout(
-            state = DownloadsViewModel.State(), palette = CyberGlassPalette, identity = DownloadSource.YTCONVERTER.identity(),
-            onUrlChange = {}, onIdentify = {}, onConvert = {}, onToggleErrorDetails = {},
+    @Test fun spotifyPlaylists() = shot("spotify-playlists") {
+        SpotifyTransferContent(
+            SpotifyPlaylistTransferState(
+                connected = true,
+                playlists = listOf(
+                    SpotifyPlaylistSummary("p1", "Road Trip", "", "radu", 40, null, null, null, canImportItems = true),
+                    SpotifyPlaylistSummary("p2", "Discover Weekly", "", "Spotify", 30, null, null, null, canImportItems = false),
+                ),
+            ),
+            SpotifyTransferActions(),
         )
     }
 
@@ -70,14 +72,18 @@ class ImportDesignShots {
         )
         val tracks = listOf(
             t(0, "Night Ferry", PlaylistTransferTrackStatus.IN_LIBRARY, local = 1),
-            t(1, "Slow Weather", PlaylistTransferTrackStatus.DOWNLOADING),
-            t(2, "Paper Moons", PlaylistTransferTrackStatus.FAILED, detail = "No provider had this recording"),
+            t(1, "Slow Weather", PlaylistTransferTrackStatus.READY),
+            t(2, "Paper Moons", PlaylistTransferTrackStatus.FAILED, detail = "No source had this recording"),
             t(3, "Afterglow Street", PlaylistTransferTrackStatus.READY),
             t(4, "Glass Harbour", PlaylistTransferTrackStatus.READY),
         )
-        val state = SpotifyPlaylistTransferState(tracks = tracks)
-        val palette = greenPalette()
-        SelectionAndTransferCard(state, palette, onSelectAll = {}, onClear = {}, onRetry = {}, onTransfer = {})
-        tracks.forEach { TransferTrackRow(it, palette, enabled = true, onToggle = {}) }
+        SpotifyTransferContent(
+            SpotifyPlaylistTransferState(
+                connected = true,
+                selectedPlaylist = SpotifyPlaylistSummary("p1", "Road Trip", "", "radu", 5, null, null, null, canImportItems = true),
+                tracks = tracks,
+            ),
+            SpotifyTransferActions(),
+        )
     }
 }
