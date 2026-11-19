@@ -1,8 +1,39 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **173**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 172), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **174**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 173), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 174 — The Listening Room: Listen, Library, Add
+
+- **A new, warm look.** One amber accent (a valve amp's glow) on walnut and paper
+  neutrals, in light and dark. Song, album and screen names are set in Bricolage
+  Grotesque, everything else in Figtree; seven text sizes, nothing under 12sp. The
+  record and the Winamp equalizer stay as they were.
+- **Three places instead of five.** **Listen** (what to play), **Library** (songs,
+  albums, artists and now **playlists**), **Add** (every way music comes in: one search,
+  Identify a song, From Spotify, Discover, From your computer). Discover, Downloads and
+  Identify are pages under them; nothing was removed.
+- **Listen starts sound in one tap:** the song that is playing or where you stopped,
+  **Mix my library**, or a mood (Calm, Focus, Energy, Happy, Late night, Party and more).
+  Then what you played lately, the playlists that build themselves, and your own.
+- **Activity in one place.** A small pill in every top bar shows what Harmony is doing
+  in the background; it opens the song being fetched and each album with Pause, Resume
+  and Stop. It replaces the banner above the mini player.
+- **Now Playing: steer the mix in words.** **Calmer**, **Livelier**, a mood (switch now
+  or ease into it over five songs) and **Tune** sit under the controls, or behind
+  **Steer** on smaller phones and in landscape. One line under the title says why the
+  mix picked the song and what the file is (tap it for the full format card). Tap the
+  record to play or pause.
+- **The mini player** is a solid dark block: the song's name larger, play/pause bigger
+  and at the right edge; swipe it sideways to skip, up to open.
+- **Accessibility.** TalkBack can play, pause and skip from the record and the mini
+  player, reads the transport in order, and gets ten real sliders on the Winamp
+  equalizer. With animations turned off the record stands still. With very large
+  text, Now Playing scrolls and nothing is cut off.
+- **Romanian.** The new screens are translated; the older ones follow.
+- Downloads (SpotiFLAC/Mornye, Soulseek, YT Converter), playback, mixes and the Rust
+  engines are unchanged.
 
 ## Build 173 — One look, the player in reach, every screen to its task
 
