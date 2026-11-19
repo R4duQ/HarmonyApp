@@ -162,18 +162,18 @@ internal fun ChoicePill(
         modifier
             .heightIn(min = 40.dp)
             .clip(shape)
-            .background(if (selected) palette.ink else glassFill(palette))
-            .border(1.dp, if (selected) palette.ink else palette.line, shape)
+            .background(if (selected) com.harmony.core.ui.theme.Room.amberSoft else com.harmony.core.ui.theme.Room.surface)
+            .border(1.dp, if (selected) com.harmony.core.ui.theme.Room.amberSoft else palette.line, shape)
             .pressable(onClick, enabled = enabled, role = Role.Checkbox, pressedScale = 0.95f)
             .semantics { this.selected = selected; stateDescription = if (selected) "Selected" else "Not selected" }
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        val ink = if (selected) palette.field else palette.ink
+        val ink = if (selected) com.harmony.core.ui.theme.Room.onAmberSoft else palette.ink
         if (selected) Icon(Icons.Rounded.Check, null, tint = ink, modifier = Modifier.size(16.dp))
         else if (leading != null) Icon(leading, null, tint = ink, modifier = Modifier.size(16.dp))
-        Text(text, color = if (enabled) ink else ink.copy(alpha = 0.5f), fontSize = 14.sp, fontWeight = FontWeight.Medium,
+        Text(text, color = if (enabled) ink else ink.copy(alpha = 0.5f), style = com.harmony.core.ui.theme.RoomType.bodySmall, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -192,19 +192,18 @@ internal fun PrimaryButton(
     val shape = RoundedCornerShape(percent = 50)
     Row(
         modifier
-            .heightIn(min = 52.dp)
-            .then(if (enabled) Modifier.shadow(10.dp, shape, ambientColor = palette.accent, spotColor = palette.accent) else Modifier)
+            .heightIn(min = 56.dp)
             .clip(shape)
-            .background(if (enabled) palette.accent else palette.line)
+            .background(if (enabled) com.harmony.core.ui.theme.Room.amber else com.harmony.core.ui.theme.Room.raised)
             .pressable(onClick, enabled = enabled && !busy)
             .padding(horizontal = 22.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val ink = if (enabled) palette.onAccent else palette.muted
+        val ink = if (enabled) com.harmony.core.ui.theme.Room.onAmber else com.harmony.core.ui.theme.Room.muted
         if (busy) Spinner(ink, Modifier.size(18.dp)) else if (icon != null) Icon(icon, null, tint = ink, modifier = Modifier.size(20.dp))
         if (busy || icon != null) Spacer(Modifier.width(8.dp))
-        Text(text, color = ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+        Text(text, color = ink, style = com.harmony.core.ui.theme.RoomType.label, maxLines = 3, overflow = TextOverflow.Ellipsis,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
@@ -233,7 +232,7 @@ internal fun GlassButton(
     ) {
         val ink = if (enabled) palette.ink else palette.muted.copy(alpha = 0.6f)
         if (icon != null) { Icon(icon, null, tint = ink, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
-        Text(text, color = ink, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(text, color = ink, fontWeight = FontWeight.Medium, style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -283,7 +282,7 @@ internal fun RoundAction(
 internal fun SectionTitle(text: String, palette: EditorialPalette, modifier: Modifier = Modifier, trailing: @Composable RowScope.() -> Unit = {}) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         val large = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f
-        Text(text, color = palette.ink, fontSize = if (large) 15.sp else 19.sp, fontWeight = FontWeight.Bold,
+        Text(text, color = palette.ink, style = com.harmony.core.ui.theme.RoomType.nameM,
             modifier = Modifier.weight(1f).semantics { heading() })
         trailing()
     }
@@ -296,7 +295,7 @@ internal fun StepIndicator(current: Int, palette: EditorialPalette, modifier: Mo
     val description = "Step ${current + 1} of 3: ${names[current]}"
     // Large text: one line that always fits, instead of three squeezed labels.
     if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
-        Text("Step ${current + 1} of 3 · ${names[current]}", color = palette.muted, fontSize = 13.sp,
+        Text("Step ${current + 1} of 3 · ${names[current]}", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall,
             modifier = modifier.semantics { contentDescription = description })
         return
     }
@@ -314,9 +313,9 @@ internal fun StepIndicator(current: Int, palette: EditorialPalette, modifier: Mo
                     contentAlignment = Alignment.Center,
                 ) {
                     if (done) Icon(Icons.Rounded.Check, null, tint = palette.onAccent, modifier = Modifier.size(14.dp))
-                    else Text("${i + 1}", color = if (here) palette.onAccent else palette.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    else Text("${i + 1}", color = if (here) palette.onAccent else palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, fontWeight = FontWeight.Bold)
                 }
-                Text(name, color = if (here) palette.ink else palette.muted, fontSize = 12.sp,
+                Text(name, color = if (here) palette.ink else palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall,
                     fontWeight = if (here) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -340,9 +339,9 @@ internal fun StepHeader(
     }
     val text: @Composable (Modifier) -> Unit = { m ->
         Column(m) {
-            Text(title, color = palette.ink, fontSize = if (large) 18.sp else 28.sp, fontWeight = FontWeight.Bold,
+            Text(title, color = palette.ink, style = if (large) com.harmony.core.ui.theme.RoomType.nameL else com.harmony.core.ui.theme.RoomType.nameXL,
                 modifier = Modifier.semantics { heading() })
-            subtitle?.let { Text(it, color = palette.muted, fontSize = 14.sp, modifier = subtitleModifier) }
+            subtitle?.let { Text(it, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = subtitleModifier) }
         }
     }
     if (large) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { back(); text(Modifier) }
@@ -365,8 +364,8 @@ internal fun ConnectionNotice(state: DiscoveryUiState, palette: EditorialPalette
         Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
             Icon(icon, null, tint = palette.ink, modifier = Modifier.size(22.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Text(body, color = palette.muted, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(title, color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title)
+                Text(body, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
             }
         }
     }

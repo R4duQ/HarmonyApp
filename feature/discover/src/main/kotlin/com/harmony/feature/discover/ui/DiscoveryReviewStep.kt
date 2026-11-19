@@ -96,7 +96,7 @@ internal fun ReviewStep(
         item(key = "availability") {
             DiscoverCard(palette, Modifier.testTag(DiscoveryTags.AVAILABILITY)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("$available of $total in your library", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                    Text("$available of $total in your library", color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title)
                     if (progress != null && missing > 0) {
                         val failed = progress.failed.count { it !in progress.skipped }
                         val parts = listOfNotNull(
@@ -105,9 +105,9 @@ internal fun ReviewStep(
                             failed.takeIf { it > 0 }?.let { "$it failed" },
                             skipped.takeIf { it > 0 }?.let { "$it not downloading" },
                         )
-                        Text(parts.joinToString(" · "), color = palette.muted, fontSize = 14.sp)
+                        Text(parts.joinToString(" · "), color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                         Text("Found in a catalog doesn't mean there's a file. A song joins the playlist once it's downloaded and scanned.",
-                            color = palette.muted, fontSize = 12.sp, lineHeight = 16.sp)
+                            color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                     }
                     CreateAction(batch, progress, available, total, state.creating, palette, actions)
                 }
@@ -117,10 +117,10 @@ internal fun ReviewStep(
             DiscoverCard(palette, Modifier.testTag(DiscoveryTags.DOWNLOADS)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(if (skipped == 0) "Download the missing $missing" else "Download $selected of the $missing missing",
-                        color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
+                        color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title,
                         modifier = Modifier.testTag(DiscoveryTags.DOWNLOAD_COUNT))
                     Text("Tick the songs you want in the list below. Unticked songs aren't downloaded.",
-                        color = palette.muted, fontSize = 13.sp, lineHeight = 17.sp)
+                        color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                     val keys = progress?.missing.orEmpty().filter { it != progress?.downloading }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { actions.setDownload(keys, true) }, enabled = skipped > 0,
@@ -142,11 +142,11 @@ internal fun ReviewStep(
                 else Modifier.semantics(mergeDescendants = true) {}
             Row(Modifier.fillMaxWidth().then(rowModifier).testTag(DiscoveryTags.reviewRow(song.key)),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("${index + 1}", color = palette.muted, fontSize = 13.sp, modifier = Modifier.widthIn(min = 22.dp))
+                Text("${index + 1}", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = Modifier.widthIn(min = 22.dp))
                 Cover(song.artwork, palette, Modifier.size(44.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(song.title, color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(song.artist, color = palette.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(song.title, color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(song.artist, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val detail = when (status) {
                         SongAvailability.IN_LIBRARY -> "In your library"
                         SongAvailability.DOWNLOADING -> "Downloading…"
@@ -154,8 +154,8 @@ internal fun ReviewStep(
                         SongAvailability.NEEDS_DOWNLOAD -> "Needs download"
                         SongAvailability.SKIPPED -> "Won't be downloaded"
                     }
-                    Text(detail, color = palette.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    batch.reasons[song.key]?.let { Text(it, color = palette.muted.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    Text(detail, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    batch.reasons[song.key]?.let { Text(it, color = palette.muted.copy(alpha = 0.8f), style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
                 if (canChoose) {
                     if (status == SongAvailability.FAILED) Icon(Icons.Rounded.ErrorOutline, null, tint = palette.muted, modifier = Modifier.size(18.dp))
@@ -192,7 +192,7 @@ private fun SummaryCard(batch: DiscoveryBatch, palette: EditorialPalette, action
                         known > 0 -> "${batch.songs.size} songs · ${formatDuration(knownMs)} for the $known with a known length"
                         else -> "${batch.songs.size} songs · length unknown"
                     },
-                    color = palette.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    color = palette.ink, style = com.harmony.core.ui.theme.RoomType.title, fontWeight = FontWeight.Medium,
                     modifier = m.testTag(DiscoveryTags.DURATION),
                 ) }
             if (large) { MosaicCover(art, palette, Modifier.size(84.dp)); meta(Modifier) }
@@ -233,26 +233,26 @@ private fun CreateAction(batch: DiscoveryBatch, progress: BatchProgress?, availa
             PrimaryButton("Open playlist", palette, actions.createPlaylist, Modifier.fillMaxWidth().testTag(DiscoveryTags.OPEN_PLAYLIST),
                 icon = Icons.AutoMirrored.Rounded.QueueMusic)
             Text(if (missing > 0) "Saved. The other $missing join the same playlist when they're downloaded, even after a restart.$skippedNote"
-                else batch.status, color = palette.muted, fontSize = 12.sp)
+                else batch.status, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
         }
         batch.playlistDeleted -> Text("You deleted this playlist. Downloads keep their files but no longer add to it.",
-            color = palette.muted, fontSize = 13.sp)
+            color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
         available == 0 -> {
             PrimaryButton("Create playlist", palette, {}, Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE), enabled = false,
                 icon = Icons.AutoMirrored.Rounded.PlaylistAdd)
             Text(if (missing == 0) "None of these songs is in your library, and none is ticked for download. Tick some below."
-                else "None of these songs is in your library yet. Download them below first.", color = palette.muted, fontSize = 12.sp,
+                else "None of these songs is in your library yet. Download them below first.", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall,
                 modifier = Modifier.testTag(DiscoveryTags.CREATE_REASON))
         }
         missing == 0 -> {
             PrimaryButton("Create playlist", palette, actions.createPlaylist, Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE),
                 icon = Icons.AutoMirrored.Rounded.PlaylistAdd, busy = creating)
-            if (skipped > 0) Text("Saves the $available in your library.$skippedNote", color = palette.muted, fontSize = 12.sp)
+            if (skipped > 0) Text("Saves the $available in your library.$skippedNote", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
         }
         else -> {
             PrimaryButton("Create playlist with the $available available songs", palette, actions.createPlaylist,
                 Modifier.fillMaxWidth().testTag(DiscoveryTags.CREATE), icon = Icons.AutoMirrored.Rounded.PlaylistAdd, busy = creating)
-            Text("The other $missing stay here and join the same playlist when they're downloaded.$skippedNote", color = palette.muted, fontSize = 12.sp)
+            Text("The other $missing stay here and join the same playlist when they're downloaded.$skippedNote", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
         }
     }
 }

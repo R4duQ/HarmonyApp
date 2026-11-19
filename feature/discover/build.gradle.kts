@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.harmony.feature.discover"
     buildFeatures { compose = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     defaultConfig {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -34,6 +35,11 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     // android.jar's org.json is a stub in local unit tests; the catalog tests parse real JSON.
     testImplementation("org.json:json:20240303")
+    // Design screenshots of the flow in Robolectric.
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.compose.ui:ui-test-manifest")
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

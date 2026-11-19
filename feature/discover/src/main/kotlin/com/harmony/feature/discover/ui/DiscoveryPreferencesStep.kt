@@ -85,9 +85,9 @@ internal fun PreferencesStep(
     ) {
         item(key = "header") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Discover.", color = palette.ink, fontSize = if (large) 30.sp else 38.sp, fontWeight = FontWeight.Bold,
+                Text("Discover", color = palette.ink, style = com.harmony.core.ui.theme.RoomType.display,
                     modifier = Modifier.semantics { heading() })
-                Text("A playlist built from what you actually listen to.", color = palette.muted, fontSize = 15.sp)
+                Text("A playlist built from what you actually listen to.", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.title)
                 StepIndicator(0, palette)
             }
         }
@@ -100,7 +100,7 @@ internal fun PreferencesStep(
                     Icon(Icons.Rounded.History, null, tint = palette.ink)
                     Column(Modifier.weight(1f)) {
                         Text("Your selection is saved", color = palette.ink, fontWeight = FontWeight.SemiBold)
-                        Text("${draft.items.size} songs · ${draft.keptCount} kept", color = palette.muted, fontSize = 13.sp)
+                        Text("${draft.items.size} songs · ${draft.keptCount} kept", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                     }
                     GlassButton("Continue", palette, actions.resume, Modifier.testTag(DiscoveryTags.RESUME))
                 }
@@ -122,7 +122,7 @@ internal fun PreferencesAction(state: DiscoveryUiState, palette: EditorialPalett
     val needsPick = state.taste.loaded && !state.taste.hasHistory && state.draft?.pickedArtists.isNullOrEmpty() &&
         state.draft?.pickedGenres.isNullOrEmpty() && !state.online
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (work != null) Text(work.message, color = palette.muted, fontSize = 13.sp, modifier = Modifier.testTag(DiscoveryTags.WORK))
+        if (work != null) Text(work.message, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = Modifier.testTag(DiscoveryTags.WORK))
         PrimaryButton(
             text = when {
                 work != null -> "Finding songs…"
@@ -139,9 +139,9 @@ internal fun PreferencesAction(state: DiscoveryUiState, palette: EditorialPalett
             modifier = Modifier.fillMaxWidth().testTag(DiscoveryTags.GENERATE),
         )
         when {
-            state.libraryEmpty && !state.online -> Text("Offline with an empty library: connect to find new songs.", color = palette.muted, fontSize = 12.sp)
-            needsPick -> Text("Pick an artist or genre first.", color = palette.muted, fontSize = 12.sp)
-            state.connection == Connection.RECONNECTING -> Text("Waiting for the connection to settle…", color = palette.muted, fontSize = 12.sp)
+            state.libraryEmpty && !state.online -> Text("Offline with an empty library: connect to find new songs.", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
+            needsPick -> Text("Pick an artist or genre first.", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
+            state.connection == Connection.RECONNECTING -> Text("Waiting for the connection to settle…", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
         }
     }
 }
@@ -162,29 +162,29 @@ private fun TasteCard(state: DiscoveryUiState, palette: EditorialPalette, action
             if (taste.hasHistory && (taste.artists.isNotEmpty() || taste.genres.isNotEmpty())) {
                 SectionTitle("Built from your listening", palette)
                 Text("History, favorites, playlists, skips and your Discover choices. Recent listening counts more.",
-                    color = palette.muted, fontSize = 13.sp, lineHeight = 18.sp)
+                    color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                 taste.artists.take(4).forEach { (name, reason) ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.semantics(mergeDescendants = true) {}) {
                         Box(Modifier.size(8.dp).clip(CircleShape).background(palette.accent))
                         Column(Modifier.weight(1f)) {
                             Text(name, color = palette.ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(reason, color = palette.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(reason, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
-                if (taste.genres.isNotEmpty()) Text("Genres: " + taste.genres.joinToString(", "), color = palette.muted, fontSize = 13.sp)
+                if (taste.genres.isNotEmpty()) Text("Genres: " + taste.genres.joinToString(", "), color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                 GlassButton(if (adding) "Done adding" else "Add artists or genres", palette, { adding = !adding },
                     icon = if (adding) Icons.Rounded.ExpandLess else Icons.Rounded.Add, modifier = Modifier.testTag(DiscoveryTags.ADD_PICKS))
             } else {
                 SectionTitle("What do you like?", palette)
                 Text("There's no listening history yet. Pick a few artists or genres and Harmony starts from there.",
-                    color = palette.muted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.testTag(DiscoveryTags.COLD_START))
+                    color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall, modifier = Modifier.testTag(DiscoveryTags.COLD_START))
             }
             val showPickers = adding || !taste.hasHistory || (taste.artists.isEmpty() && taste.genres.isEmpty())
             if (showPickers) Pickers(state, palette, actions)
             val picked = draft?.pickedArtists.orEmpty() + draft?.pickedGenres.orEmpty()
-            if (picked.isNotEmpty() && !showPickers) Text("Also using: " + picked.joinToString(", "), color = palette.muted, fontSize = 13.sp)
+            if (picked.isNotEmpty() && !showPickers) Text("Also using: " + picked.joinToString(", "), color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
         }
     }
 }
@@ -193,14 +193,14 @@ private fun TasteCard(state: DiscoveryUiState, palette: EditorialPalette, action
 @Composable
 private fun Pickers(state: DiscoveryUiState, palette: EditorialPalette, actions: DiscoveryActions) {
     val draft = state.draft
-    Text("Genres", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+    Text("Genres", color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.bodySmall)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         state.genres.take(18).forEach { g ->
             val on = draft?.pickedGenres.orEmpty().any { it.equals(g, true) }
             ChoicePill(g, on, palette, { actions.toggleGenre(g) })
         }
     }
-    Text("Artists", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+    Text("Artists", color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.bodySmall)
     OutlinedTextField(
         value = state.artistQuery,
         onValueChange = { actions.searchArtists(it.take(60)) },
@@ -246,8 +246,8 @@ private fun LevelPicker(level: ExplorationLevel, palette: EditorialPalette, onPi
                     if (on) Box(Modifier.size(10.dp).clip(CircleShape).background(palette.accent))
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(option.label, color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                    Text(levelText(option), color = palette.muted, fontSize = 13.sp, lineHeight = 17.sp)
+                    Text(option.label, color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title)
+                    Text(levelText(option), color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                 }
             }
         }
@@ -267,7 +267,7 @@ private fun SizePicker(size: Int, palette: EditorialPalette, onSize: (Int) -> Un
         SectionTitle("Playlist size", palette)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RoundAction(Icons.Rounded.Remove, "Fewer songs", palette, { onSize(size - 5) }, enabled = size > RecommendationMixer.MIN_SIZE)
-            Text("$size songs", color = palette.ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+            Text("$size songs", color = palette.ink, style = com.harmony.core.ui.theme.RoomType.nameM, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.testTag(DiscoveryTags.SIZE).semantics { contentDescription = "$size songs" })
             RoundAction(Icons.Rounded.Add, "More songs", palette, { onSize(size + 5) }, enabled = size < RecommendationMixer.MAX_SIZE)
         }
@@ -288,9 +288,9 @@ private fun FiltersCard(filter: DiscoveryFilter, genres: List<String>, palette: 
             Row(Modifier.fillMaxWidth().pressable({ open = !open }, pressedScale = 1f).semantics { stateDescription = if (open) "Expanded" else "Collapsed" },
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("More filters", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Text("More filters", color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title)
                     Text(if (filter == DiscoveryFilter()) "Optional · country, genre, playlist keyword" else filterSummary(filter),
-                        color = palette.muted, fontSize = 13.sp)
+                        color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                 }
                 Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = palette.ink)
             }
@@ -310,7 +310,7 @@ private fun FiltersCard(filter: DiscoveryFilter, genres: List<String>, palette: 
                         filter.vibe.isNotBlank() -> "Keywords search Deezer playlists by name. Harmony doesn't measure mood or tempo."
                         else -> "A country uses that country's Apple Music chart. It doesn't mean the artist is from there."
                     },
-                    color = palette.muted, fontSize = 12.sp, lineHeight = 16.sp,
+                    color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall,
                 )
                 if (filter != DiscoveryFilter()) TextButton(onClick = { onFilter(DiscoveryFilter()) }) { Text("Clear filters", color = palette.ink) }
             }
@@ -363,9 +363,9 @@ private fun SourcesCard(state: DiscoveryUiState, palette: EditorialPalette) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth().pressable({ open = !open }, pressedScale = 1f), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Where songs come from", color = palette.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Text("Where songs come from", color = palette.ink, fontWeight = FontWeight.SemiBold, style = com.harmony.core.ui.theme.RoomType.title)
                     Text("Harmony picks the songs. Catalogs only supply facts: artists, tracks, charts, previews.",
-                        color = palette.muted, fontSize = 13.sp, lineHeight = 17.sp)
+                        color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                 }
                 Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = palette.ink)
             }
@@ -380,8 +380,8 @@ private fun SourcesCard(state: DiscoveryUiState, palette: EditorialPalette) {
                     }
                     Box(Modifier.padding(top = 6.dp).size(8.dp).clip(CircleShape).background(dot))
                     Column(Modifier.weight(1f)) {
-                        Text("${s.name} · $label", color = palette.ink, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                        Text(s.note.ifBlank { s.role }, color = palette.muted, fontSize = 12.sp, lineHeight = 16.sp)
+                        Text("${s.name} · $label", color = palette.ink, fontWeight = FontWeight.Medium, style = com.harmony.core.ui.theme.RoomType.bodySmall)
+                        Text(s.note.ifBlank { s.role }, color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                     }
                 }
             }
@@ -398,7 +398,7 @@ private fun LazyListScope.recentSelections(state: DiscoveryUiState, palette: Edi
                 Column(Modifier.weight(1f)) {
                     Text(b.name, color = palette.ink, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(if (b.playlistId != null) "In Your playlists · ${b.availableCount} of ${b.songCount} songs"
-                        else "${b.availableCount} of ${b.songCount} songs available · not saved yet", color = palette.muted, fontSize = 13.sp)
+                        else "${b.availableCount} of ${b.songCount} songs available · not saved yet", color = palette.muted, style = com.harmony.core.ui.theme.RoomType.bodySmall)
                 }
             }
         }
