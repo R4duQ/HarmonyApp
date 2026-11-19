@@ -72,6 +72,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -340,11 +343,11 @@ internal fun QueueSheetContent(
                 Column {
                     when {
                         state.playNextCount > 0 && absolute == firstUpcoming ->
-                            QueueSectionLabel("Your picks", palette, accent = true)
+                            QueueSectionLabel("You added", palette, accent = true)
                         state.playNextCount > 0 && absolute == priorityEnd + 1 ->
-                            QueueSectionLabel("Then", palette)
+                            QueueSectionLabel(if (mix != null) "From the mix" else "Then", palette)
                         state.playNextCount == 0 && absolute == firstUpcoming ->
-                            QueueSectionLabel("Up next", palette)
+                            QueueSectionLabel(if (mix != null) "From the mix" else "Next", palette)
                     }
 
                     QueueRow(
@@ -478,22 +481,22 @@ internal fun QueueSheetContent(
 @Composable
 private fun QueueHeader(upcomingCount: Int, palette: PlayerPalette, shuffleMode: ShuffleMode = ShuffleMode.OFF, picks: Int = 0) {
     Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 14.dp)) {
-        Text("Queue", style = MaterialTheme.typography.headlineMedium, color = palette.ink)
+        Text("Up next", style = com.harmony.core.ui.theme.RoomType.nameL, color = palette.ink, modifier = Modifier.semantics { heading() })
         Text(
             when (upcomingCount) {
                 0 -> "Nothing after this"
                 1 -> "1 song up next"
                 else -> "$upcomingCount songs up next"
             },
-            style = MaterialTheme.typography.bodyMedium,
+            style = com.harmony.core.ui.theme.RoomType.bodySmall,
             color = palette.muted,
         )
         // Shuffle reorders what comes after your picks, never the picks: say so,
         // so a reshuffled list doesn't read as your selection being lost.
         if (shuffleMode != ShuffleMode.OFF && picks > 0) {
             Text(
-                "${shuffleName(shuffleMode)} is on · your ${if (picks == 1) "pick plays" else "$picks picks play"} first",
-                style = MaterialTheme.typography.bodySmall,
+                "${shuffleName(shuffleMode)} is on · the ${if (picks == 1) "song you added plays" else "$picks songs you added play"} first",
+                style = com.harmony.core.ui.theme.RoomType.bodySmall,
                 color = palette.accent,
                 modifier = Modifier.padding(top = 2.dp).testTag(QueueTags.SHUFFLE_NOTE),
             )
@@ -552,19 +555,14 @@ private fun NowPlayingCard(
                 )
                 Text(
                     "NOW PLAYING",
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.4.sp,
+                    style = com.harmony.core.ui.theme.RoomType.micro,
                     color = palette.accent,
                     modifier = Modifier.padding(start = 5.dp),
                 )
             }
             Text(
                 title,
-                fontSize = 15.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.Bold,
+                style = com.harmony.core.ui.theme.RoomType.title,
                 color = palette.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -572,8 +570,7 @@ private fun NowPlayingCard(
             )
             Text(
                 artist,
-                fontSize = 12.5.sp,
-                lineHeight = 17.sp,
+                style = com.harmony.core.ui.theme.RoomType.bodySmall,
                 color = palette.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -620,9 +617,7 @@ private fun MixBar(
         ) {
             Text(
                 if (mix != null) "Mix from ${mix.seedTitle}" else "Mix from this song",
-                fontSize = 14.sp,
-                lineHeight = 19.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = com.harmony.core.ui.theme.RoomType.title,
                 color = palette.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -631,8 +626,7 @@ private fun MixBar(
                 // Online mixes are off: the library is the only source, nothing to choose.
                 Text(
                     "From your library" + if (mix != null) " · learns from skips" else "",
-                    fontSize = 11.5.sp,
-                    lineHeight = 15.sp,
+                    style = com.harmony.core.ui.theme.RoomType.bodySmall,
                     color = palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -648,9 +642,7 @@ private fun MixBar(
                     ) {
                         Text(
                             sourceName(source),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = com.harmony.core.ui.theme.RoomType.labelSmall,
                             color = palette.accent,
                         )
                         Icon(
@@ -661,8 +653,7 @@ private fun MixBar(
                         )
                         Text(
                             sourceLine(source),
-                            fontSize = 11.5.sp,
-                            lineHeight = 15.sp,
+                            style = com.harmony.core.ui.theme.RoomType.bodySmall,
                             color = palette.muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -673,8 +664,8 @@ private fun MixBar(
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(sourceName(option), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text(sourceDescription(option), fontSize = 12.sp, lineHeight = 16.sp, color = palette.muted)
+                                        Text(sourceName(option), style = com.harmony.core.ui.theme.RoomType.title)
+                                        Text(sourceDescription(option), style = com.harmony.core.ui.theme.RoomType.bodySmall, color = palette.muted)
                                     }
                                 },
                                 leadingIcon = {
@@ -697,10 +688,11 @@ private fun MixBar(
         }
         Text(
             if (mix != null) "Stop mix" else "Start mix",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
+            style = com.harmony.core.ui.theme.RoomType.labelSmall,
             color = palette.accent,
             modifier = Modifier
+                .heightIn(min = 48.dp)
+                .wrapContentHeight()
                 .clip(RoundedCornerShape(10.dp))
                 .clickable(
                     role = Role.Button,
@@ -771,9 +763,7 @@ private fun OnlineMixPanel(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 status,
-                fontSize = 12.5.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = com.harmony.core.ui.theme.RoomType.labelSmall,
                 color = palette.ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -783,9 +773,8 @@ private fun OnlineMixPanel(
             )
             if (unkept > 0) {
                 Text(
-                    if (unkept == 1) "Save to library" else "Save all to library ($unkept)",
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold,
+                    if (unkept == 1) "Keep" else "Keep all ($unkept)",
+                    style = com.harmony.core.ui.theme.RoomType.labelSmall,
                     color = palette.accent,
                     modifier = Modifier
                         .padding(start = 8.dp)
@@ -798,8 +787,7 @@ private fun OnlineMixPanel(
         Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 seedLine.orEmpty(),
-                fontSize = 11.5.sp,
-                lineHeight = 15.sp,
+                style = com.harmony.core.ui.theme.RoomType.bodySmall,
                 color = palette.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -808,8 +796,7 @@ private fun OnlineMixPanel(
             if (shown.isNotEmpty()) {
                 Text(
                     if (details) "Hide details" else "Details",
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = com.harmony.core.ui.theme.RoomType.labelSmall,
                     color = palette.accent,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -822,8 +809,7 @@ private fun OnlineMixPanel(
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     c.track.title + " · " + c.track.artist,
-                    fontSize = 12.5.sp,
-                    lineHeight = 16.sp,
+                    style = com.harmony.core.ui.theme.RoomType.bodySmall,
                     color = palette.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -831,8 +817,7 @@ private fun OnlineMixPanel(
                 )
                 Text(
                     stageLabel(c),
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
+                    style = com.harmony.core.ui.theme.RoomType.bodySmall,
                     color = if (c.ready) palette.accent else palette.muted,
                     maxLines = 1,
                     modifier = Modifier.padding(start = 8.dp),
@@ -909,10 +894,7 @@ private fun QueueSectionLabel(
 ) {
     Text(
         label.uppercase(),
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.6.sp,
+        style = com.harmony.core.ui.theme.RoomType.micro,
         color = if (accent) palette.accent else palette.muted,
         modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
     )
@@ -961,8 +943,10 @@ private fun QueueRow(
             // press, so a plain tap here reaches this instead without the
             // two competing.
             .clickable(onClick = onClick)
+            .heightIn(min = 64.dp)
+            .padding(vertical = 4.dp)
             .semantics {
-                contentDescription = if (picked) "$title by $artist, your pick" else "$title by $artist"
+                contentDescription = if (picked) "$title by $artist, you added it" else "$title by $artist"
                 // Reordering by drag is impossible with a screen reader, so
                 // the same two moves are exposed as explicit actions.
                 customActions = buildList {
@@ -988,7 +972,7 @@ private fun QueueRow(
                 modifier = Modifier.size(22.dp),
             )
         }
-        Artwork(artworkUri, null, Modifier.size(42.dp), cornerRadius = 8.dp)
+        Artwork(artworkUri, null, Modifier.size(48.dp), cornerRadius = 8.dp)
         Column(
             Modifier
                 .weight(1f)
@@ -996,7 +980,7 @@ private fun QueueRow(
         ) {
             Text(
                 title,
-                style = MaterialTheme.typography.titleSmall,
+                style = com.harmony.core.ui.theme.RoomType.title,
                 color = palette.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1005,12 +989,12 @@ private fun QueueRow(
             Text(
                 buildAnnotatedString {
                     if (picked) {
-                        withStyle(SpanStyle(color = palette.accent, fontWeight = FontWeight.SemiBold)) { append("Your pick") }
+                        withStyle(SpanStyle(color = palette.accent, fontWeight = FontWeight.SemiBold)) { append("You added it") }
                         append("  ·  ")
                     }
                     append("$artist · ${formatDuration(durationMs)}")
                 },
-                style = MaterialTheme.typography.bodySmall,
+                style = com.harmony.core.ui.theme.RoomType.bodySmall,
                 color = palette.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1067,13 +1051,12 @@ private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, 
             }
             Text(
                 when (status) {
-                    null -> "Save to library"
-                    KeepStatus.Keeping -> "Saving…"
-                    is KeepStatus.Kept -> "In library"
+                    null -> "Keep"
+                    KeepStatus.Keeping -> "Keeping…"
+                    is KeepStatus.Kept -> "In your library"
                     is KeepStatus.Failed -> "Try again"
                 },
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.Bold,
+                style = com.harmony.core.ui.theme.RoomType.labelSmall,
                 color = if (status is KeepStatus.Failed) palette.muted else palette.accent,
                 maxLines = 1,
                 modifier = Modifier.padding(start = 5.dp),
@@ -1096,7 +1079,7 @@ private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, 
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Rounded.LibraryAddCheck, contentDescription = null, tint = palette.accent, modifier = Modifier.size(18.dp))
-                Text("In library", style = MaterialTheme.typography.labelMedium, color = palette.accent, modifier = Modifier.padding(start = 4.dp))
+                Text("In your library", style = com.harmony.core.ui.theme.RoomType.labelSmall, color = palette.accent, modifier = Modifier.padding(start = 4.dp))
             }
         } else {
             IconButton(
@@ -1133,15 +1116,13 @@ private fun QueueEmptyState(palette: PlayerPalette) {
         Spacer(Modifier.height(10.dp))
         Text(
             "Nothing up next",
-            fontSize = 16.sp,
-            lineHeight = 21.sp,
-            fontWeight = FontWeight.SemiBold,
+            style = com.harmony.core.ui.theme.RoomType.nameM,
             color = palette.ink,
         )
         Text(
-            "Turn on Smart Shuffle, or add songs with Play next.",
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
+            "Harmony stops after this song. Start a mix from this song, or add songs with Play next.",
+            style = com.harmony.core.ui.theme.RoomType.bodySmall,
+            textAlign = TextAlign.Center,
             color = palette.muted,
         )
     }
