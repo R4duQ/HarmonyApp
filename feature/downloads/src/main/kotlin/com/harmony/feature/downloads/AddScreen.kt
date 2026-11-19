@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -118,14 +119,21 @@ fun AddScreen(
             ),
         )
 
+        // Two by two; one per row when the system text is large, so nothing is squeezed.
+        val stacked = LocalDensity.current.fontScale > 1.3f
+        val doors: List<@Composable (Modifier) -> Unit> = listOf(
+            { m -> Door(Icons.Rounded.GraphicEq, stringResource(R.string.add_door_identify), stringResource(R.string.add_door_identify_body), m, actions.onIdentify) },
+            { m -> Door(Icons.Rounded.PlaylistAdd, stringResource(R.string.add_door_spotify), stringResource(R.string.add_door_spotify_body), m, actions.onSpotify) },
+            { m -> Door(Icons.Rounded.AutoAwesome, stringResource(R.string.add_door_discover), stringResource(R.string.add_door_discover_body), m, actions.onDiscover) },
+            { m -> Door(Icons.Rounded.Computer, stringResource(R.string.add_door_computer), stringResource(R.string.add_door_computer_body), m, actions.onComputer) },
+        )
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Door(Icons.Rounded.GraphicEq, stringResource(R.string.add_door_identify), stringResource(R.string.add_door_identify_body), Modifier.weight(1f), actions.onIdentify)
-                Door(Icons.Rounded.PlaylistAdd, stringResource(R.string.add_door_spotify), stringResource(R.string.add_door_spotify_body), Modifier.weight(1f), actions.onSpotify)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Door(Icons.Rounded.AutoAwesome, stringResource(R.string.add_door_discover), stringResource(R.string.add_door_discover_body), Modifier.weight(1f), actions.onDiscover)
-                Door(Icons.Rounded.Computer, stringResource(R.string.add_door_computer), stringResource(R.string.add_door_computer_body), Modifier.weight(1f), actions.onComputer)
+            if (stacked) {
+                doors.forEach { it(Modifier.fillMaxWidth()) }
+            } else {
+                doors.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { pair.forEach { it(Modifier.weight(1f)) } }
+                }
             }
         }
 
