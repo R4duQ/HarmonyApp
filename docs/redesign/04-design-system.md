@@ -85,7 +85,7 @@ pair falls below its threshold (P5: the colour comes from the music).
 
 ### 1.3 Measured contrast (WCAG 2.1)
 
-Measured with `scratchpad/ds/contrast.py`. Where a cell lists several
+Measured with `docs/redesign/contrast.py`. Where a cell lists several
 values, they are in the same order as the backgrounds named in that row.
 
 | Pair | Light | Dark | Needs |
