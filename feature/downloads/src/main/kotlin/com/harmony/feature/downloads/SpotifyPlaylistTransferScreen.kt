@@ -1,5 +1,29 @@
 package com.harmony.feature.downloads
 
+import com.harmony.core.ui.theme.RoomType
+import com.harmony.core.ui.theme.Room
+import com.harmony.core.ui.room.StatusTone
+import com.harmony.core.ui.room.StatusLine
+import com.harmony.core.ui.room.RoomTopBar
+import com.harmony.core.ui.room.RoomSectionTitle
+import com.harmony.core.ui.room.RoomChip
+import com.harmony.core.ui.room.RoomButtonKind
+import com.harmony.core.ui.room.RoomButton
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.OpenInBrowser
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.clickable
 import com.harmony.core.ui.theme.Catalog
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.foundation.layout.heightIn
@@ -78,6 +102,13 @@ import com.harmony.core.ui.component.EditorialTextAction
 import com.harmony.core.ui.component.greenPalette
 import com.harmony.core.ui.component.LocalFloatingChromeHeight
 
+/**
+ * Bring a Spotify playlist into Harmony (docs/redesign/05 §2.11): connect once
+ * with a guided 3-step setup, pick a playlist or paste its link, see in three
+ * numbers what you have and what is missing, then one button gets the
+ * missing songs and makes the playlist. Same SpotifyPlaylistTransferViewModel
+ * calls as before; Spotify's API needs the account even for a pasted link.
+ */
 @Composable
 fun SpotifyPlaylistTransferScreen(
     onBack: () -> Unit,
@@ -87,836 +118,362 @@ fun SpotifyPlaylistTransferScreen(
     viewModel: SpotifyPlaylistTransferViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val palette = greenPalette()
     val context = LocalContext.current
-
     LaunchedEffect(verificationReturnSignal) {
-        if (verificationReturnSignal > 0 && state.pausedForVerification) {
-            viewModel.resumeAfterProviderVerification()
-        }
+        if (verificationReturnSignal > 0 && state.pausedForVerification) viewModel.resumeAfterProviderVerification()
     }
+    val copiedText = stringResource(R.string.sp_copied)
+    SpotifyTransferContent(
+        state = state,
+        actions = SpotifyTransferActions(
+            onBack = onBack,
+            onClientId = viewModel::setClientId,
+            onConnect = {
+                viewModel.createSpotifyAuthorizationUri()?.let { uri ->
+                    if (!openExternalUri(context, uri.toString())) viewModel.spotifyBrowserLaunchFailed()
+                }
+            },
+            onOpenDashboard = { openExternalUri(context, SPOTIFY_DASHBOARD_URL) },
+            onCopyRedirect = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Spotify redirect address", SpotifyPlaylistClient.REDIRECT_URI))
+                Toast.makeText(context, copiedText, Toast.LENGTH_SHORT).show()
+            },
+            onHelp = viewModel::showSpotifyConnectionHelp,
+            onRefresh = viewModel::refreshPlaylists,
+            onDisconnect = viewModel::disconnectSpotify,
+            onLink = viewModel::setPlaylistLink,
+            onImportLink = viewModel::importPlaylistLink,
+            onImport = viewModel::importPlaylist,
+            onChooseAnother = viewModel::clearSelectedPlaylist,
+            onSource = viewModel::selectSource,
+            onFormat = viewModel::setSpotiFlacOutputFormat,
+            onOpenDownloads = onOpenDownloads,
+            onVerify = { state.verificationChallenge?.verificationUrl?.let { openExternalUri(context, it) } },
+            onCheckVerification = viewModel::resumeAfterProviderVerification,
+            onCancel = viewModel::cancelTransfer,
+            onOpenPlaylist = onOpenPlaylist,
+            onAll = { viewModel.selectAllMissing(true) },
+            onNone = { viewModel.selectAllMissing(false) },
+            onRetry = viewModel::retryFailedTracks,
+            onTransfer = viewModel::requestTransfer,
+            onToggle = viewModel::toggleTrack,
+        ),
+    )
+}
 
+internal class SpotifyTransferActions(
+    val onBack: () -> Unit = {},
+    val onClientId: (String) -> Unit = {},
+    val onConnect: () -> Unit = {},
+    val onOpenDashboard: () -> Unit = {},
+    val onCopyRedirect: () -> Unit = {},
+    val onHelp: () -> Unit = {},
+    val onRefresh: () -> Unit = {},
+    val onDisconnect: () -> Unit = {},
+    val onLink: (String) -> Unit = {},
+    val onImportLink: () -> Unit = {},
+    val onImport: (SpotifyPlaylistSummary) -> Unit = {},
+    val onChooseAnother: () -> Unit = {},
+    val onSource: (DownloadSource) -> Unit = {},
+    val onFormat: (SpotiFlacOutputFormat) -> Unit = {},
+    val onOpenDownloads: () -> Unit = {},
+    val onVerify: () -> Unit = {},
+    val onCheckVerification: () -> Unit = {},
+    val onCancel: () -> Unit = {},
+    val onOpenPlaylist: (Long) -> Unit = {},
+    val onAll: () -> Unit = {},
+    val onNone: () -> Unit = {},
+    val onRetry: () -> Unit = {},
+    val onTransfer: () -> Unit = {},
+    val onToggle: (String) -> Unit = {},
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun SpotifyTransferContent(state: SpotifyPlaylistTransferState, actions: SpotifyTransferActions) {
+    val r = Room
     LazyColumn(
-        modifier = Modifier.fillMaxSize().background(palette.field),
-        contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxSize().background(r.ground),
+        contentPadding = PaddingValues(bottom = LocalFloatingChromeHeight.current + 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            TransferHeader(onBack = onBack, palette = palette)
-        }
+        item { RoomTopBar(stringResource(R.string.sp_title), onBack = actions.onBack) }
+        state.error?.let { error -> item { StatusLine(StatusTone.Error, error, modifier = Modifier.padding(horizontal = 16.dp)) } }
+        state.message?.let { message -> item { StatusLine(StatusTone.Info, message, modifier = Modifier.padding(horizontal = 16.dp)) } }
 
-        state.error?.let { error ->
-            item {
-                NoticeCard(
-                    text = error,
-                    icon = Icons.Rounded.ErrorOutline,
-                    palette = palette,
-                )
-            }
-        }
-        state.message?.let { message ->
-            item {
-                NoticeCard(text = message, icon = Icons.Rounded.Sync, palette = palette)
-            }
-        }
-
-        if (!state.connected) {
-            item {
-                SpotifyConnectionCard(
-                    state = state,
-                    palette = palette,
-                    onClientIdChange = viewModel::setClientId,
-                    onConnect = {
-                        viewModel.createSpotifyAuthorizationUri()?.let { uri ->
-                            if (!openExternalUri(context, uri.toString())) viewModel.spotifyBrowserLaunchFailed()
+        when {
+            !state.connected -> item { ConnectGuide(state, actions) }
+            state.selectedPlaylist == null -> {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.CheckCircle, null, tint = r.moss, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.sp_connected), style = RoomType.bodySmall, color = r.ink, modifier = Modifier.weight(1f))
+                        RoomButton(stringResource(R.string.sp_refresh), actions.onRefresh, kind = RoomButtonKind.Text, enabled = !state.isLoadingPlaylists)
+                        RoomButton(stringResource(R.string.sp_disconnect), actions.onDisconnect, kind = RoomButtonKind.Text)
+                    }
+                }
+                item {
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        GetSearchField(state.playlistLink, actions.onLink, actions.onImportLink, stringResource(R.string.sp_link_label),
+                            leading = Icons.Rounded.Link, enabled = !state.isImportingPlaylist)
+                        RoomButton(stringResource(R.string.sp_open_link), actions.onImportLink, kind = RoomButtonKind.Tonal,
+                            enabled = state.playlistLink.isNotBlank() && !state.isImportingPlaylist, loading = state.isImportingPlaylist)
+                    }
+                }
+                item { RoomSectionTitle(stringResource(R.string.sp_your_playlists), Modifier.padding(horizontal = 16.dp)) }
+                if (state.isLoadingPlaylists) {
+                    item {
+                        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(20.dp), color = r.amberText, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text(stringResource(R.string.sp_loading), style = RoomType.body, color = r.muted)
                         }
-                    },
-                    onOpenDashboard = { openExternalUri(context, SPOTIFY_DASHBOARD_URL) },
-                    onCopyRedirect = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Spotify Redirect URI", SpotifyPlaylistClient.REDIRECT_URI))
-                        Toast.makeText(context, "Redirect URI copied", Toast.LENGTH_SHORT).show()
-                    },
-                    onConnectionHelp = viewModel::showSpotifyConnectionHelp,
-                )
-            }
-        } else if (state.selectedPlaylist == null) {
-            item {
-                ConnectedControls(
-                    state = state,
-                    palette = palette,
-                    onRefresh = viewModel::refreshPlaylists,
-                    onDisconnect = viewModel::disconnectSpotify,
-                )
-            }
-            item {
-                PlaylistLinkCard(
-                    value = state.playlistLink,
-                    loading = state.isImportingPlaylist,
-                    onValueChange = viewModel::setPlaylistLink,
-                    onImport = viewModel::importPlaylistLink,
-                    palette = palette,
-                )
-            }
-            if (state.isLoadingPlaylists) {
-                item { LoadingRow("Loading Spotify playlists…", palette) }
-            } else {
-                item {
-                    EditorialSectionLabel(
-                        text = "Your Spotify playlists",
-                        palette = palette,
-                        modifier = Modifier.padding(start = 22.dp, top = 8.dp),
-                    )
-                }
-                items(state.playlists, key = { it.id }) { playlist ->
-                    SpotifyPlaylistRow(
-                        playlist = playlist,
-                        palette = palette,
-                        enabled = !state.isImportingPlaylist,
-                        onClick = { viewModel.importPlaylist(playlist) },
-                    )
-                }
-            }
-        } else {
-            item {
-                ImportedPlaylistCard(
-                    state = state,
-                    palette = palette,
-                    onChooseAnother = viewModel::clearSelectedPlaylist,
-                    onOpenSpotify = {
-                        state.selectedPlaylist?.spotifyUrl?.let { openExternalUri(context, it) }
-                    },
-                )
-            }
-            item {
-                DownloadMethodCard(
-                    state = state,
-                    palette = palette,
-                    onSelectSource = viewModel::selectSource,
-                    onSelectFormat = viewModel::setSpotiFlacOutputFormat,
-                    onOpenDownloads = onOpenDownloads,
-                )
-            }
-            if (state.pausedForVerification) {
-                item {
-                    VerificationCard(
-                        state = state,
-                        palette = palette,
-                        onVerify = {
-                            state.verificationChallenge?.verificationUrl
-                                ?.let { openExternalUri(context, it) }
-                        },
-                        onCheck = viewModel::resumeAfterProviderVerification,
-                    )
-                }
-            }
-            if (state.isTransferring || state.isCheckingVerification) {
-                item { TransferProgressCard(state = state, palette = palette, onCancel = viewModel::cancelTransfer) }
-            }
-            state.resultPlaylistId?.let { playlistId ->
-                item {
-                    GlassCard(
-                        palette = palette,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                    ) {
+                    }
+                } else {
+                    items(state.playlists, key = { it.id }) { playlist ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !state.isImportingPlaylist, role = Role.Button) { actions.onImport(playlist) }
+                                .heightIn(min = 72.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Rounded.CheckCircle, null, tint = palette.ink)
-                            Text(
-                                "Harmony playlist is ready",
-                                color = palette.ink,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                            )
-                            EditorialTextAction(
-                                text = "Open",
-                                onClick = { onOpenPlaylist(playlistId) },
-                                palette = palette,
-                            )
+                            AlbumArtwork(playlist.imageUrl, 56.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(playlist.name, style = RoomType.title, color = r.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    listOf(pluralStringResource(R.plurals.album_tracks, playlist.totalTracks, playlist.totalTracks), playlist.ownerName)
+                                        .filter { it.isNotBlank() }.joinToString(" · "),
+                                    style = RoomType.bodySmall, color = r.muted, maxLines = 1,
+                                )
+                                if (!playlist.canImportItems) Text(stringResource(R.string.sp_not_yours), style = RoomType.bodySmall, color = r.slate)
+                            }
+                            Icon(Icons.Rounded.ChevronRight, null, tint = r.amberText)
                         }
                     }
                 }
             }
-            item {
-                SelectionAndTransferCard(
-                    state = state,
-                    palette = palette,
-                    onSelectAll = { viewModel.selectAllMissing(true) },
-                    onClear = { viewModel.selectAllMissing(false) },
-                    onRetry = viewModel::retryFailedTracks,
-                    onTransfer = viewModel::requestTransfer,
-                )
-            }
-            item {
-                EditorialSectionLabel(
-                    text = "Playlist order",
-                    palette = palette,
-                    modifier = Modifier.padding(start = 22.dp, top = 8.dp),
-                )
-            }
-            items(state.tracks, key = { it.remote.stableKey }) { row ->
-                TransferTrackRow(
-                    row = row,
-                    palette = palette,
-                    enabled = !state.isTransferring && !state.isCheckingVerification,
-                    onToggle = { viewModel.toggleTrack(row.remote.stableKey) },
-                )
-            }
-        }
-    }
-
-}
-
-@Composable
-private fun TransferHeader(onBack: () -> Unit, palette: EditorialPalette) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 20.dp, top = 14.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        EditorialCircleButton(
-            onClick = onBack,
-            contentDescription = "Back to playlists",
-            palette = palette,
-            modifier = Modifier.padding(top = 2.dp),
-        ) {
-            Icon(Icons.Rounded.ArrowBack, null, modifier = Modifier.size(20.dp))
-        }
-        Column(Modifier.padding(start = 14.dp).weight(1f)) {
-            Text(
-                "Playlist Transfer",
-                fontSize = 36.sp,
-                lineHeight = 40.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-1).sp,
-                color = palette.ink,
-            )
-            Text(
-                "Spotify order. Harmony files. Your chosen source.",
-                fontSize = 13.sp,
-                color = palette.muted,
-                modifier = Modifier.padding(top = 3.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SpotifyConnectionCard(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onClientIdChange: (String) -> Unit,
-    onConnect: () -> Unit,
-    onOpenDashboard: () -> Unit,
-    onCopyRedirect: () -> Unit,
-    onConnectionHelp: () -> Unit,
-) {
-    GlassCard(
-        palette = palette,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.MusicNote, null, tint = palette.ink)
-                Text(
-                    "Connect Spotify",
-                    color = palette.ink,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 10.dp),
-                )
-            }
-            Text(
-                "One-time setup: register a Spotify app to give Harmony access to your playlists. " +
-                    "Sign in to Spotify only in your browser.",
-                color = palette.muted,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                modifier = Modifier.padding(top = 10.dp),
-            )
-            Text(
-                "1. Open Developer Dashboard and create or select an app with Web API access.",
-                color = palette.ink,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 14.dp, bottom = 8.dp),
-            )
-            EditorialTextAction("Open Developer Dashboard", onOpenDashboard, palette)
-            Text(
-                "Spotify Development Mode requires the app owner to have Premium. " +
-                    "Add the account you sign in with under Users Management.",
-                color = palette.muted,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Text(
-                "2. In that app's Settings, add and save this exact Redirect URI:",
-                color = palette.ink,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 14.dp),
-            )
-            Text(
-                SpotifyPlaylistClient.REDIRECT_URI,
-                color = palette.muted,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
-            )
-            EditorialTextAction("Copy Redirect URI", onCopyRedirect, palette)
-            Text(
-                "3. Copy Client ID from Settings / Basic Information and paste it here.",
-                color = palette.ink,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 14.dp),
-            )
-            val clientIdError = state.clientId.takeIf(String::isNotBlank)
-                ?.let(SpotifyAuthorization::clientIdError)
-            OutlinedTextField(
-                value = state.clientId,
-                onValueChange = onClientIdChange,
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                singleLine = true,
-                label = { Text("Spotify Client ID") },
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.None,
-                    autoCorrect = false,
-                    keyboardType = KeyboardType.Ascii,
-                ),
-                isError = clientIdError != null,
-                supportingText = { Text(clientIdError ?: "32 characters copied from your Spotify app.") },
-            )
-            Text(
-                "Client Secret is not needed. A valid-looking ID can still be rejected by Spotify " +
-                    "if it belongs to no active app or is the wrong value.",
-                color = palette.muted,
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                EditorialPill(
-                    text = "Connect",
-                    icon = Icons.Rounded.Login,
-                    onClick = onConnect,
-                    palette = palette,
-                )
-                EditorialTextAction(
-                    text = "Connection help",
-                    onClick = onConnectionHelp,
-                    palette = palette,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectedControls(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onRefresh: () -> Unit,
-    onDisconnect: () -> Unit,
-) {
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.CheckCircle, null, tint = palette.ink)
-            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text("Spotify connected", color = palette.ink, fontWeight = FontWeight.Bold)
-                Text(
-                    "${state.playlists.size} playlist${if (state.playlists.size == 1) "" else "s"} available",
-                    color = palette.muted,
-                    fontSize = 12.sp,
-                )
-            }
-            EditorialCircleButton(onRefresh, "Refresh playlists", palette, size = 38.dp) {
-                Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            EditorialCircleButton(onDisconnect, "Disconnect Spotify", palette, size = 38.dp) {
-                Icon(Icons.Rounded.Logout, null, modifier = Modifier.size(18.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaylistLinkCard(
-    value: String,
-    loading: Boolean,
-    onValueChange: (String) -> Unit,
-    onImport: () -> Unit,
-    palette: EditorialPalette,
-) {
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Or paste a playlist link", color = palette.ink, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                singleLine = true,
-                enabled = !loading,
-                label = { Text("open.spotify.com/playlist/…") },
-                trailingIcon = { Icon(Icons.Rounded.Link, null) },
-            )
-            EditorialPill(
-                text = if (loading) "Importing…" else "Import link",
-                icon = Icons.Rounded.CloudDownload,
-                onClick = onImport,
-                palette = palette,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SpotifyPlaylistRow(
-    playlist: SpotifyPlaylistSummary,
-    palette: EditorialPalette,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    GlassCard(
-        palette = palette,
-        onClick = onClick.takeIf { enabled && playlist.canImportItems },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            PlaylistArtwork(playlist.imageUrl, playlist.name, palette)
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(
-                    playlist.name,
-                    color = palette.ink,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "${playlist.totalTracks} tracks · ${playlist.ownerName}",
-                    color = palette.muted,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (!playlist.canImportItems) {
-                    Text(
-                        "Items unavailable: not owned or collaborative",
-                        color = palette.muted,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
-            Icon(Icons.Rounded.CloudDownload, null, tint = if (playlist.canImportItems) palette.ink else palette.muted)
-        }
-    }
-}
-
-@Composable
-private fun PlaylistArtwork(url: String?, name: String, palette: EditorialPalette) {
-    Surface(
-        modifier = Modifier.size(58.dp),
-        shape = CircleShape,
-        color = palette.accent,
-        contentColor = palette.onAccent,
-    ) {
-        if (url != null) {
-            AsyncImage(model = url, contentDescription = "$name artwork", modifier = Modifier.fillMaxSize())
-        } else {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.MusicNote, null)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ImportedPlaylistCard(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onChooseAnother: () -> Unit,
-    onOpenSpotify: () -> Unit,
-) {
-    val playlist = state.selectedPlaylist ?: return
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PlaylistArtwork(playlist.imageUrl, playlist.name, palette)
-                Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(playlist.name, color = palette.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${state.tracks.size} importable · ${state.localMatchCount} already local · ${state.missingCount} missing",
-                        color = palette.muted,
-                        fontSize = 12.sp,
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                EditorialTextAction("Choose another", onChooseAnother, palette)
-                if (playlist.spotifyUrl != null) {
-                    EditorialTextAction("Open in Spotify", onOpenSpotify, palette)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadMethodCard(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onSelectSource: (DownloadSource) -> Unit,
-    onSelectFormat: (SpotiFlacOutputFormat) -> Unit,
-    onOpenDownloads: () -> Unit,
-) {
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            EditorialSectionLabel("Download method", palette)
-            Text(
-                "The selected engine is used for this batch. Harmony never silently switches between engines.",
-                color = palette.muted,
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
-                modifier = Modifier.padding(top = 5.dp),
-            )
-            EditorialChoiceChips(
-                // TransferCapableSources, not DownloadSource.entries: YT
-                // Converter resolves a track from a URL you paste, and a
-                // Spotify playlist arrives as names with no links, so it
-                // cannot take part in a batch transfer. Listing it here
-                // would offer a chip that fails on use.
-                options = TransferCapableSources.map { it.displayName },
-                selectedIndex = TransferCapableSources.indexOf(state.source).coerceAtLeast(0),
-                onSelect = { onSelectSource(TransferCapableSources[it]) },
-                palette = palette,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            if (state.source == DownloadSource.SPOTIFLAC) {
-                Text("Output & maximum quality", color = palette.ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 15.dp))
-                EditorialChoiceChips(
-                    options = SpotiFlacOutputFormat.entries.map { it.label },
-                    selectedIndex = SpotiFlacOutputFormat.entries.indexOf(state.spotiFlacOutputFormat),
-                    onSelect = { onSelectFormat(SpotiFlacOutputFormat.entries[it]) },
-                    palette = palette,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                Text(
-                    state.spotiFlacOutputFormat.summary,
-                    color = palette.muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            } else {
-                val connected = state.soulseekConnection.status == SoulseekConnectionStatus.CONNECTED
-                Text(
-                    if (connected) {
-                        "Connected as ${state.soulseekConnection.username} · ${state.soulseekFormatPreference.label}"
-                    } else {
-                        "Soulseek is not connected. Sign in once from Downloads."
-                    },
-                    color = if (connected) palette.ink else palette.muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                if (!connected) {
-                    EditorialTextAction(
-                        text = "Open Downloads",
-                        onClick = onOpenDownloads,
-                        palette = palette,
-                        modifier = Modifier.padding(top = 9.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SelectionAndTransferCard(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onSelectAll: () -> Unit,
-    onClear: () -> Unit,
-    onRetry: () -> Unit,
-    onTransfer: () -> Unit,
-) {
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "${state.selectedMissingCount} missing song${if (state.selectedMissingCount == 1) "" else "s"} selected",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = palette.ink,
-                    )
-                    Text(
-                        "${state.localMatchCount} already in your library, used as ${if (state.localMatchCount == 1) "it is" else "they are"}, in the playlist's order.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.muted,
-                    )
-                }
-                EditorialTextAction("All", onSelectAll, palette)
-                Spacer(Modifier.width(7.dp))
-                EditorialTextAction("None", onClear, palette)
-            }
-            if (state.failedCount > 0 && !state.isTransferring) {
-                EditorialTextAction(
-                    text = "Retry ${state.failedCount} failed",
-                    onClick = onRetry,
-                    palette = palette,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-            }
-            // The one primary action, saying exactly what it does: how many songs
-            // get downloaded and with which source, or that the playlist is made
-            // from what is already in the library.
-            val missing = state.selectedMissingCount
-            Button(
-                onClick = onTransfer,
-                enabled = !state.isTransferring && !state.isCheckingVerification,
-                colors = ButtonDefaults.buttonColors(containerColor = palette.accent, contentColor = palette.onAccent),
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp).heightIn(min = 52.dp),
-            ) {
-                Icon(if (missing == 0) Icons.Rounded.CheckCircle else Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(20.dp))
-                Text(
-                    when {
-                        state.isTransferring -> "Transferring…"
-                        missing == 0 -> "Create the playlist"
-                        else -> "Download $missing missing song${if (missing == 1) "" else "s"} with ${state.source.displayName}"
-                    },
-                    maxLines = 2,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun TransferTrackRow(
-    row: PlaylistTransferTrack,
-    palette: EditorialPalette,
-    enabled: Boolean,
-    onToggle: () -> Unit,
-) {
-    GlassCard(
-        palette = palette,
-        onClick = onToggle.takeIf { enabled && row.localSongId == null },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                (row.remote.position + 1).toString(),
-                color = palette.muted,
-                fontSize = 12.sp,
-                modifier = Modifier.width(26.dp),
-            )
-            // The shared artwork component: a cover, or the music-note well when
-            // Spotify gave none (a bare AsyncImage left an empty 44dp gap).
-            com.harmony.core.ui.component.Artwork(row.remote.artworkUrl, null, Modifier.size(44.dp), cornerRadius = 6.dp)
-            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text(
-                    row.remote.title,
-                    color = palette.ink,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    row.remote.artists,
-                    color = palette.muted,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    row.detail ?: statusText(row.status),
-                    color = if (row.status == PlaylistTransferTrackStatus.FAILED) MaterialTheme.colorScheme.error else palette.muted,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            when (row.status) {
-                PlaylistTransferTrackStatus.IN_LIBRARY,
-                PlaylistTransferTrackStatus.DOWNLOADED -> Icon(Icons.Rounded.CheckCircle, statusText(row.status), tint = palette.accent)
-                PlaylistTransferTrackStatus.SEARCHING,
-                PlaylistTransferTrackStatus.DOWNLOADING -> CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
-                    strokeWidth = 2.dp,
-                    color = Catalog.red,
-                )
-                PlaylistTransferTrackStatus.WAITING_FOR_VERIFICATION ->
-                    Icon(Icons.Rounded.HourglassTop, null, tint = palette.ink)
-                PlaylistTransferTrackStatus.FAILED -> Icon(Icons.Rounded.ErrorOutline, statusText(row.status), tint = MaterialTheme.colorScheme.error)
-                PlaylistTransferTrackStatus.READY -> Checkbox(
-                    checked = row.selected,
-                    onCheckedChange = { onToggle() },
-                    enabled = enabled,
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = palette.accent,
-                        checkmarkColor = palette.onAccent,
-                        uncheckedColor = palette.ink,
-                    ),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun VerificationCard(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onVerify: () -> Unit,
-    onCheck: () -> Unit,
-) {
-    val challenge = state.verificationChallenge
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.HourglassTop, null, tint = palette.ink)
-                Text(
-                    "Provider verification required",
-                    color = palette.ink,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 9.dp),
-                )
-            }
-            Text(
-                challenge?.instructions ?: "Complete the provider page once. Harmony will return here and continue the same track.",
-                color = palette.muted,
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Row(
-                modifier = Modifier.padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (challenge?.verificationUrl != null) {
-                    EditorialPill("Verify ${providerName(challenge.providerId)}", Icons.Rounded.OpenInNew, onVerify, palette)
-                }
-                EditorialTextAction(
-                    text = if (state.isCheckingVerification) "Checking…" else "Check & continue",
-                    onClick = onCheck,
-                    palette = palette,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransferProgressCard(
-    state: SpotifyPlaylistTransferState,
-    palette: EditorialPalette,
-    onCancel: () -> Unit,
-) {
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.CloudDownload, null, tint = palette.ink)
-                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                    Text(
-                        if (state.isCheckingVerification) "Checking provider" else "Playlist transfer",
-                        color = palette.ink,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        state.activeDetail ?: "Preparing…",
-                        color = palette.muted,
-                        fontSize = 12.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (state.isTransferring) {
-                    EditorialCircleButton(onCancel, "Pause playlist transfer", palette, size = 38.dp) {
-                        Icon(Icons.Rounded.PauseCircle, null, modifier = Modifier.size(19.dp))
+            else -> {
+                val playlist = state.selectedPlaylist
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AlbumArtwork(playlist.imageUrl, 88.dp, corner = 12.dp)
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(playlist.name, style = RoomType.nameL, color = r.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(playlist.ownerName, style = RoomType.bodySmall, color = r.muted)
+                            RoomButton(stringResource(R.string.sp_choose_another), actions.onChooseAnother, kind = RoomButtonKind.Text,
+                                enabled = !state.isTransferring)
+                        }
                     }
                 }
-            }
-            if (state.activeProgress != null) {
-                LinearProgressIndicator(
-                    progress = { state.activeProgress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    color = palette.ink,
-                    trackColor = palette.muted.copy(alpha = 0.25f),
-                )
-            } else {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    color = palette.ink,
-                    trackColor = palette.muted.copy(alpha = 0.25f),
-                )
-            }
-            if (state.attemptedDownloads > 0) {
-                Text(
-                    "${state.completedDownloads.coerceAtMost(state.attemptedDownloads)} of ${state.attemptedDownloads} processed",
-                    color = palette.muted,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
+                item {
+                    // The summary first, in three numbers (docs/redesign/05 §2.11).
+                    val notFound = state.failedCount
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Count(state.localMatchCount, stringResource(R.string.sp_count_have), Modifier.weight(1f))
+                        Count(state.selectedMissingCount, stringResource(R.string.sp_count_get), Modifier.weight(1f))
+                        Count(notFound, stringResource(R.string.sp_count_failed), Modifier.weight(1f))
+                    }
+                }
+                if (state.pausedForVerification) item {
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        StatusLine(StatusTone.Waiting,
+                            stringResource(R.string.get_check_needed, providerName(state.verificationChallenge?.providerId)),
+                            body = state.verificationChallenge?.instructions ?: stringResource(R.string.get_paused_until_check))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (state.verificationChallenge?.verificationUrl != null) {
+                                RoomButton(stringResource(R.string.get_open_browser), actions.onVerify, kind = RoomButtonKind.Tonal)
+                            }
+                            RoomButton(stringResource(R.string.get_check_again), actions.onCheckVerification, kind = RoomButtonKind.Text,
+                                loading = state.isCheckingVerification)
+                        }
+                    }
+                }
+                if (state.isTransferring || state.isCheckingVerification) item {
+                    Box(Modifier.padding(horizontal = 16.dp)) {
+                        TransferRow(
+                            title = state.tracks.firstOrNull { it.remote.stableKey == state.currentTrackKey }?.remote?.title
+                                ?: stringResource(R.string.sp_working),
+                            detail = (state.activeDetail ?: "") + " · " +
+                                stringResource(R.string.sp_done_of, state.completedDownloads, state.attemptedDownloads),
+                            fraction = state.activeProgress,
+                            onStop = actions.onCancel,
+                        )
+                    }
+                }
+                state.resultPlaylistId?.let { id ->
+                    item {
+                        StatusLine(StatusTone.Success, stringResource(R.string.sp_ready, playlist.name),
+                            action = stringResource(R.string.sp_open_playlist), onAction = { actions.onOpenPlaylist(id) },
+                            modifier = Modifier.padding(horizontal = 16.dp))
+                    }
+                }
+                if (!state.isTransferring) item {
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.sp_get_with), style = RoomType.labelSmall, color = r.muted)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // YT Converter needs a link per song, which a Spotify playlist doesn't have.
+                            TransferCapableSources.forEach { source ->
+                                RoomChip(source.displayName, selected = state.source == source, onClick = { actions.onSource(source) })
+                            }
+                        }
+                        if (state.source == DownloadSource.SPOTIFLAC) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                SpotiFlacOutputFormat.entries.forEach { f ->
+                                    RoomChip(stringResource(f.plainLabel()), selected = state.spotiFlacOutputFormat == f, onClick = { actions.onFormat(f) })
+                                }
+                            }
+                        } else if (state.soulseekConnection.status != SoulseekConnectionStatus.CONNECTED) {
+                            StatusLine(StatusTone.Waiting, stringResource(R.string.album_slsk_needed), body = stringResource(R.string.album_slsk_body),
+                                action = stringResource(R.string.album_slsk_open), onAction = actions.onOpenDownloads)
+                        }
+                    }
+                }
+                item {
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val missing = state.selectedMissingCount
+                        RoomButton(
+                            when {
+                                state.isTransferring -> stringResource(R.string.sp_transferring)
+                                missing == 0 -> stringResource(R.string.sp_create_only)
+                                else -> pluralStringResource(R.plurals.sp_get_and_create, missing, missing)
+                            },
+                            actions.onTransfer,
+                            enabled = !state.isTransferring && !state.isCheckingVerification,
+                            prominent = true, fillWidth = true,
+                        )
+                        if (state.failedCount > 0 && !state.isTransferring) {
+                            RoomButton(pluralStringResource(R.plurals.sp_retry_failed, state.failedCount, state.failedCount),
+                                actions.onRetry, kind = RoomButtonKind.Tonal)
+                        }
+                    }
+                }
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RoomSectionTitle(stringResource(R.string.sp_songs), Modifier.weight(1f))
+                        RoomButton(stringResource(R.string.album_all), actions.onAll, kind = RoomButtonKind.Text, enabled = !state.isTransferring)
+                        RoomButton(stringResource(R.string.album_none), actions.onNone, kind = RoomButtonKind.Text, enabled = !state.isTransferring)
+                    }
+                }
+                items(state.tracks, key = { it.remote.stableKey }) { row ->
+                    TrackRow(row, enabled = !state.isTransferring && !state.isCheckingVerification, onToggle = { actions.onToggle(row.remote.stableKey) })
+                }
             }
         }
     }
 }
 
+/** The 3-step setup, one step at a time in plain words, with the parts to copy one tap away. */
 @Composable
-private fun NoticeCard(text: String, icon: ImageVector, palette: EditorialPalette) {
-    GlassCard(palette, Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.Top) {
-            Icon(icon, null, tint = palette.ink, modifier = Modifier.size(19.dp))
+private fun ConnectGuide(state: SpotifyPlaylistTransferState, actions: SpotifyTransferActions) {
+    val r = Room
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(stringResource(R.string.sp_guide_title), style = RoomType.nameL, color = r.ink, modifier = Modifier.semantics { heading() })
+        Text(stringResource(R.string.sp_guide_body), style = RoomType.body, color = r.muted)
+        Step(1, stringResource(R.string.sp_step1), stringResource(R.string.sp_step1_body)) {
+            RoomButton(stringResource(R.string.sp_open_dashboard), actions.onOpenDashboard, kind = RoomButtonKind.Tonal, icon = Icons.Rounded.OpenInBrowser)
+        }
+        Step(2, stringResource(R.string.sp_step2), stringResource(R.string.sp_step2_body)) {
             Text(
-                text,
-                color = palette.ink,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                modifier = Modifier.padding(start = 10.dp),
+                SpotifyPlaylistClient.REDIRECT_URI,
+                style = RoomType.caption,
+                color = r.ink,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(r.raised)
+                    .padding(12.dp),
+            )
+            RoomButton(stringResource(R.string.sp_copy), actions.onCopyRedirect, kind = RoomButtonKind.Tonal, icon = Icons.Rounded.ContentCopy)
+        }
+        Step(3, stringResource(R.string.sp_step3), stringResource(R.string.sp_step3_body)) {
+            OutlinedTextField(
+                state.clientId, actions.onClientId, Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.sp_client_id)) }, singleLine = true, shape = RoundedCornerShape(12.dp),
+                textStyle = RoomType.body,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = r.surface, unfocusedContainerColor = r.surface,
+                    focusedBorderColor = r.ink, unfocusedBorderColor = r.outline,
+                    focusedLabelColor = r.ink, unfocusedLabelColor = r.muted, cursorColor = r.ink,
+                ),
             )
         }
+        RoomButton(stringResource(R.string.sp_connect), actions.onConnect, prominent = true, fillWidth = true, enabled = state.clientId.isNotBlank())
+        RoomButton(stringResource(R.string.sp_help), actions.onHelp, kind = RoomButtonKind.Text)
     }
 }
 
 @Composable
-private fun LoadingRow(text: String, palette: EditorialPalette) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(24.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = palette.ink)
-        Text(text, color = palette.muted, modifier = Modifier.padding(start = 10.dp))
+private fun Step(number: Int, title: String, body: String, content: @Composable () -> Unit) {
+    val r = Room
+    Row {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(r.amberSoft), contentAlignment = Alignment.Center) {
+            Text("$number", style = RoomType.labelSmall, color = r.onAmberSoft)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = RoomType.title, color = r.ink)
+            Text(body, style = RoomType.bodySmall, color = r.muted)
+            content()
+        }
     }
 }
 
-private fun statusText(status: PlaylistTransferTrackStatus): String = when (status) {
-    PlaylistTransferTrackStatus.IN_LIBRARY -> "Already in Harmony"
-    PlaylistTransferTrackStatus.READY -> "Ready to locate"
-    PlaylistTransferTrackStatus.SEARCHING -> "Searching…"
-    PlaylistTransferTrackStatus.DOWNLOADING -> "Downloading…"
-    PlaylistTransferTrackStatus.DOWNLOADED -> "Downloaded and added"
-    PlaylistTransferTrackStatus.WAITING_FOR_VERIFICATION -> "Waiting for verification"
-    PlaylistTransferTrackStatus.FAILED -> "Needs attention"
+@Composable
+private fun Count(value: Int, label: String, modifier: Modifier) {
+    val r = Room
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(r.surface)
+            .padding(12.dp)
+            .semantics(mergeDescendants = true) {},
+    ) {
+        Text("$value", style = RoomType.nameXL, color = r.ink)
+        Text(label, style = RoomType.bodySmall, color = r.muted)
+    }
 }
 
-private fun providerName(id: String): String = id.substringBefore('-')
-    .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+@Composable
+private fun TrackRow(row: PlaylistTransferTrack, enabled: Boolean, onToggle: () -> Unit) {
+    val r = Room
+    val (words, color) = when (row.status) {
+        PlaylistTransferTrackStatus.IN_LIBRARY -> stringResource(R.string.album_phase_in_library) to r.moss
+        PlaylistTransferTrackStatus.READY -> stringResource(if (row.selected) R.string.sp_to_get else R.string.album_phase_not_selected) to r.muted
+        PlaylistTransferTrackStatus.SEARCHING -> stringResource(R.string.sp_searching) to r.amberText
+        PlaylistTransferTrackStatus.DOWNLOADING -> stringResource(R.string.album_phase_getting) to r.amberText
+        PlaylistTransferTrackStatus.DOWNLOADED -> stringResource(R.string.album_phase_added) to r.moss
+        PlaylistTransferTrackStatus.WAITING_FOR_VERIFICATION -> stringResource(R.string.album_phase_verify) to r.slate
+        PlaylistTransferTrackStatus.FAILED -> stringResource(R.string.album_phase_failed) to r.wine
+    }
+    val toggleable = row.localSongId == null
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (toggleable) Modifier.toggleable(row.selected, enabled = enabled, role = Role.Checkbox, onValueChange = { onToggle() }) else Modifier)
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (toggleable) {
+            Checkbox(row.selected, onCheckedChange = null, enabled = enabled,
+                colors = CheckboxDefaults.colors(checkedColor = r.amberText, checkmarkColor = r.surface, uncheckedColor = r.outline))
+        } else {
+            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = r.moss, modifier = Modifier.padding(12.dp).size(24.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(row.remote.title, style = RoomType.title, color = r.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(row.remote.artists, words, row.detail).joinToString(" · "), style = RoomType.bodySmall, color = color,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
 
 private fun openExternalUri(context: Context, value: String): Boolean = runCatching {
     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(value)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
