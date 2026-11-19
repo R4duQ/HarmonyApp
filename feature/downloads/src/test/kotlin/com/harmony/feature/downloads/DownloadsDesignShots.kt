@@ -39,11 +39,11 @@ class DownloadsDesignShots {
         SpotiFlacSearchCandidate("3", "The Paper Coast", "Night Ferries", "Soft Machines", 190_000, null, 54, source = "Deezer"),
     )
 
-    private fun shot(name: String, content: @Composable () -> Unit) {
+    private fun shot(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            HarmonyTheme(darkTheme = false, dynamicColors = false) {
-                Column(Modifier.fillMaxSize().background(CyberGlassColors.Page)) { content() }
+            HarmonyTheme(darkTheme = dark, dynamicColors = false, reducedMotion = true) {
+                Column(Modifier.fillMaxSize().background(com.harmony.core.ui.theme.Room.ground)) { content() }
             }
         }
         repeat(6) { Thread.sleep(120); rule.mainClock.advanceTimeBy(500); rule.waitForIdle() }
@@ -55,12 +55,8 @@ class DownloadsDesignShots {
     }
 
     @Composable
-    private fun SpotiFlac(state: DownloadsViewModel.State) = SpotiFlacDownloadsLayout(
-        state = state, palette = CyberGlassPalette, context = LocalContext.current,
-        onQueryChange = {}, onSearch = {}, onSelect = {}, onOutputFormatChange = {}, onDownload = {}, onCancelDownload = {},
-        onPrepareVerification = {}, onVerificationOpened = {}, onVerificationLaunchFailed = {}, onRefreshVerification = {},
-        onCheckVerificationAndRetry = {}, onToggleErrorDetails = {},
-    )
+    private fun SpotiFlac(state: DownloadsViewModel.State, mode: GetMusicMode = GetMusicMode.Songs) =
+        GetMusicBody(state = state, mode = mode, onMode = {}, actions = GetMusicActions())
 
     @Test fun spotiflacReady() = shot("dl-spotiflac-ready") {
         SpotiFlac(DownloadsViewModel.State(query = "night ferry", spotiFlacPreflightReady = true, spotiFlacSearchResults = results))
@@ -75,14 +71,59 @@ class DownloadsDesignShots {
         )
     }
 
-    @Test fun soulseekSignedIn() = shot("dl-soulseek") {
-        SoulseekDownloadsLayout(
-            state = DownloadsViewModel.State(soulseekConnection = SoulseekConnectionState(SoulseekConnectionStatus.CONNECTED, "radu", "Connected")),
-            palette = CyberGlassPalette,
-            onUsernameChange = {}, onPasswordChange = {}, onConnect = {}, onDisconnect = {}, onQueryChange = {},
-            onSearchModeChange = {}, onFormatPreferenceChange = {}, onOnlyFreeSlotsChange = {}, onSearch = {}, onDownload = {},
-            onDownloadBest = {}, onCancelDownload = {}, onPickDownloadFolder = {}, onUseDefaultDownloadFolder = {},
-            onPickUploadFolder = {}, onRefreshUploadFolder = {}, onClearUploadFolder = {},
+    @Test fun spotiflacDark() = shot("dl-spotiflac-dark", dark = true) {
+        SpotiFlac(DownloadsViewModel.State(query = "night ferry", spotiFlacPreflightReady = true, spotiFlacSearchResults = results))
+    }
+
+    @Test fun spotiflacNeedsCheck() = shot("dl-spotiflac-check") {
+        SpotiFlac(
+            DownloadsViewModel.State(
+                query = "night ferry", spotiFlacSearchResults = results,
+                spotiFlacVerificationProvider = "tidal-hifi", spotiFlacVerificationUrl = "https://example.invalid/verify",
+            ),
         )
+    }
+
+    @Test fun spotiflacFailed() = shot("dl-spotiflac-failed") {
+        SpotiFlac(
+            DownloadsViewModel.State(
+                query = "night ferry", spotiFlacPreflightReady = true, spotiFlacSearchResults = results,
+                identifiedTrack = IdentifiedTrack(artist = "Mira Sol", title = "Night Ferry", sourceTitle = "Night Ferry"),
+                failedDownloadSource = DownloadSource.SPOTIFLAC,
+                error = "No lossless copy on Tidal, Qobuz, Deezer or Amazon.",
+                errorDetails = "provider chain: tidal=404 qobuz=404 deezer=404 amazon=timeout",
+            ),
+        )
+    }
+
+    @Test fun youtubeLink() = shot("dl-youtube") {
+        SpotiFlac(
+            DownloadsViewModel.State(
+                query = "https://youtu.be/abc", preferredDownloadSource = DownloadSource.YTCONVERTER,
+                identifiedTrack = IdentifiedTrack(artist = "Mira Sol", title = "Night Ferry (Official Audio)", sourceTitle = "Night Ferry"),
+            ),
+            mode = GetMusicMode.YouTube,
+        )
+    }
+
+    @Test fun soulseekSignedIn() = shot("dl-soulseek") {
+        SpotiFlac(
+            DownloadsViewModel.State(
+                preferredDownloadSource = DownloadSource.SOULSEEK, query = "night ferry",
+                soulseekConnection = SoulseekConnectionState(SoulseekConnectionStatus.CONNECTED, "radu", "Connected"),
+                soulseekResults = listOf(
+                    SoulseekSearchCandidate("a", "vinylcat", "Music\\Mira Sol\\Night Ferry.flac", 41_000_000, "flac",
+                        durationSeconds = 168, sampleRate = 96_000, bitDepth = 24, freeUploadSlot = true,
+                        averageSpeedBytesPerSecond = 2_000_000, queueLength = 0, score = 98, recommendation = ""),
+                    SoulseekSearchCandidate("b", "harbour", "Mira Sol - Night Ferry.mp3", 7_000_000, "mp3",
+                        durationSeconds = 168, bitrateKbps = 320, freeUploadSlot = false,
+                        averageSpeedBytesPerSecond = 400_000, queueLength = 4, score = 60, recommendation = ""),
+                ),
+            ),
+        )
+    }
+
+    @Test fun soulseekSignIn() = shot("dl-soulseek-signin") {
+        SpotiFlac(DownloadsViewModel.State(preferredDownloadSource = DownloadSource.SOULSEEK, soulseekUsername = "radu"))
     }
 }
