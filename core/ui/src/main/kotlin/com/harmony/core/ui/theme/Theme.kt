@@ -11,41 +11,46 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 
 /**
- * Harmony's theme: the record-shop catalogue ([HarmonyColors]) in light, dark
- * and AMOLED, with Archivo on one type scale ([HarmonyTypography]).
+ * Harmony's theme: the Listening Room ([RoomColors], [RoomType], [RoomMotion])
+ * in light, dark and AMOLED.
  *
- * The catalogue is the base of every Material role, so stock components (sheets,
- * dialogs, snackbars, switches) wear it too. With dynamic colours on (Android
- * 12+), the wallpaper repaints only the structure colour, the catalogue blue;
- * the ground, the ink and the red that marks what is playing stay Harmony's.
+ * The room is the base of every Material role, so stock components (sheets,
+ * dialogs, snackbars, switches) wear it too. With wallpaper colours on
+ * (Android 12+), only the accent is repainted; the ground, the ink and the
+ * status colours stay Harmony's.
  *
- * It also provides the Cyber-Glass scheme ([LocalCyberGlass]) that older
- * components read, now resolved from the same catalogue.
+ * It also provides the older names screens still read ([Catalog],
+ * [LocalCyberGlass]), resolved from the same room, and whether the system
+ * asked for animations to be removed ([reducedMotion]).
  */
 @Composable
 fun HarmonyTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     amoled: Boolean = false,
     dynamicColors: Boolean = true,
+    reducedMotion: Boolean = rememberSystemReducedMotion(),
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    var colors = if (darkTheme) DarkHarmonyColors else LightHarmonyColors
-    if (darkTheme && amoled) colors = colors.amoled()
+    var room = if (darkTheme) DarkRoom else LightRoom
+    if (darkTheme && amoled) room = room.amoled()
     if (dynamicColors && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val wallpaper = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        colors = colors.withStructure(
+        room = room.withWallpaper(
             primary = wallpaper.primary,
             onPrimary = wallpaper.onPrimary,
             container = wallpaper.primaryContainer,
             onContainer = wallpaper.onPrimaryContainer,
         )
     }
-    val glass = remember(colors) { cyberGlassFrom(colors) }
+    val catalog = remember(room) { room.toCatalog() }
+    val glass = remember(catalog) { cyberGlassFrom(catalog) }
     CompositionLocalProvider(
-        LocalHarmonyColors provides colors,
+        LocalRoom provides room,
+        LocalHarmonyColors provides catalog,
         LocalCyberGlass provides glass,
+        LocalReducedMotion provides reducedMotion,
     ) {
-        MaterialTheme(colorScheme = colors.toColorScheme(), typography = HarmonyTypography, content = content)
+        MaterialTheme(colorScheme = room.toColorScheme(), typography = HarmonyTypography, content = content)
     }
 }

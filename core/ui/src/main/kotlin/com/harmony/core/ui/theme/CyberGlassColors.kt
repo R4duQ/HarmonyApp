@@ -140,9 +140,9 @@ fun cyberGlassFrom(c: HarmonyColors) = CyberGlassScheme(
     SelectedChip = SolidColor(c.blue),
 )
 
-val DarkCyberGlass = cyberGlassFrom(DarkHarmonyColors)
+val DarkCyberGlass = cyberGlassFrom(DarkRoom.toCatalog())
 
-val LightCyberGlass = cyberGlassFrom(LightHarmonyColors)
+val LightCyberGlass = cyberGlassFrom(LightRoom.toCatalog())
 
 /** The Cyber-Glass of the current theme; [HarmonyTheme] provides it. */
 val LocalCyberGlass = staticCompositionLocalOf { DarkCyberGlass }
