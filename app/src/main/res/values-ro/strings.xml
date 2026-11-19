@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_listen">Ascultă</string>
+    <string name="nav_library">Bibliotecă</string>
+    <string name="nav_add">Adaugă</string>
+    <string name="nav_sound">Sunet</string>
+    <string name="nav_settings">Setări</string>
+</resources>

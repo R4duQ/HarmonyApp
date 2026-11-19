@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="add_title">Adaugă</string>
+    <string name="add_search_label">Caută muzică de adăugat</string>
+    <string name="add_search_placeholder">Melodie, album sau lipește un link</string>
+    <string name="add_clear">Șterge căutarea</string>
+    <string name="add_door_identify">Identifică o melodie</string>
+    <string name="add_door_identify_body">Ascult-o, afl-o, păstreaz-o.</string>
+    <string name="add_door_spotify">Din Spotify</string>
+    <string name="add_door_spotify_body">Adu un playlist.</string>
+    <string name="add_door_discover">Descoperă muzică</string>
+    <string name="add_door_discover_body">Runde de gust și playlisturi noi.</string>
+    <string name="add_door_computer">De pe calculator</string>
+    <string name="add_door_computer_body">Conectează, coadă comună, primește fișiere.</string>
+    <string name="add_in_progress">În lucru</string>
+    <string name="activity_title">Activitate</string>
+    <string name="activity_open_all">Vezi toate descărcările</string>
+    <string name="activity_idle_title">Nimic în lucru</string>
+    <string name="activity_idle_body">Melodiile pe care le descarci și fișierele de pe calculator își arată progresul aici.</string>
+    <string name="activity_getting">Se descarcă…</string>
+    <string name="activity_albums">Albume</string>
+    <string name="activity_pause">Pauză</string>
+    <string name="activity_resume">Continuă</string>
+    <string name="activity_stop">Oprește</string>
+    <string name="activity_added">Adăugat în bibliotecă: %1$s</string>
+    <string name="activity_failed">Nu s-a putut descărca %1$s</string>
+    <string name="activity_dismiss">Închide</string>
+</resources>

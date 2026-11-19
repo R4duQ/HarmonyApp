@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_play">Redă</string>
+    <string name="player_pause">Pauză</string>
+    <string name="player_next">Melodia următoare</string>
+    <string name="player_previous">Melodia anterioară</string>
+    <string name="player_open">Deschide playerul</string>
+    <string name="player_close">Închide playerul</string>
+    <string name="player_state_playing">Se redă</string>
+    <string name="player_state_paused">Pe pauză</string>
+    <string name="player_mini_spoken">Se aude acum: %1$s, de %2$s</string>
+    <string name="steer_title">Ghidează mixul</string>
+    <string name="steer_no_mix">Acum nu rulează niciun mix. Pornește un mix de la melodia asta și Harmony alege în continuare ce urmează.</string>
+    <string name="steer_start_mix">Pornește un mix de la melodia asta</string>
+    <string name="steer_calmer">Mai calm</string>
+    <string name="steer_livelier">Mai vioi</string>
+    <string name="steer_mood">Stare</string>
+    <string name="steer_tune">Reglează…</string>
+    <string name="steer_tune_full">Reglează mixul: stil, cunoscut sau nou, varietate</string>
+    <string name="steer_mood_heading">Stare</string>
+    <string name="steer_mood_any">Orice stare</string>
+    <string name="steer_ease">Treptat</string>
+    <string name="steer_ease_body">Mergi spre starea aleasă în următoarele 5 melodii, în loc să schimbi acum.</string>
+    <string name="steer_mood_calm">Calm</string>
+    <string name="steer_mood_focus">Concentrare</string>
+    <string name="steer_mood_energy">Energie</string>
+    <string name="steer_mood_happy">Vesel</string>
+    <string name="steer_mood_late_night">Noaptea târziu</string>
+    <string name="steer_mood_party">Petrecere</string>
+    <string name="steer_mood_relaxed">Relaxat</string>
+    <string name="steer_mood_melancholy">Melancolic</string>
+    <string name="steer_mood_epic">Epic</string>
+    <string name="steer_mood_emotional">Emoționant</string>
+    <string name="steer_mood_intense">Intens</string>
+    <string name="np_show_details">Arată detaliile fișierului</string>
+    <string name="np_hide_details">Ascunde detaliile fișierului</string>
+    <string name="np_open_queue">Deschide coada</string>
+</resources>

@@ -33,8 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.github.takahirom.roborazzi.captureRoboImage
-import com.harmony.app.navigation.LiquidGlassNavBar
-import com.harmony.app.navigation.LiquidGlassNavRail
+import com.harmony.app.navigation.RoomNavBar
+import com.harmony.app.navigation.RoomNavRail
 import com.harmony.app.navigation.NavItem
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.Song
@@ -101,11 +101,9 @@ class ThemeShowcaseScreenshotTest {
     )
 
     private val navItems = listOf(
-        NavItem("Home", Icons.Rounded.Home),
+        NavItem("Listen", Icons.Rounded.Home),
         NavItem("Library", Icons.Rounded.LibraryMusic),
-        NavItem("Playlists", Icons.Rounded.PlaylistPlay),
-        NavItem("Discover", Icons.Rounded.Explore),
-        NavItem("Downloads", Icons.Rounded.Download),
+        NavItem("Add", Icons.Rounded.Download),
     )
 
     private fun shoot(name: String, dark: Boolean, content: @Composable () -> Unit) {
@@ -144,7 +142,7 @@ class ThemeShowcaseScreenshotTest {
                     actions = MiniPlayerActions(),
                 )
                 Spacer(Modifier.height(10.dp))
-                LiquidGlassNavBar(items = navItems, selectedIndex = selected, onSelect = {}, palette = palette)
+                RoomNavBar(items = navItems, selectedIndex = selected.coerceAtMost(navItems.lastIndex), onSelect = {})
             }
         }
     }
@@ -259,7 +257,7 @@ class ThemeShowcaseScreenshotTest {
         shoot("06_library_landscape", dark) {
             val p = libraryPalette()
             Row(Modifier.fillMaxSize().background(pageBrush(p))) {
-                LiquidGlassNavRail(items = navItems, selectedIndex = 1, onSelect = {}, palette = p, modifier = Modifier.padding(8.dp))
+                RoomNavRail(items = navItems, selectedIndex = 1, onSelect = {})
                 Box(Modifier.width(12.dp))
                 Box(Modifier.weight(1f)) { LibraryPage(p, wheel = false) }
             }

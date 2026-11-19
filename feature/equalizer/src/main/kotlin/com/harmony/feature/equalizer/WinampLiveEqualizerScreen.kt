@@ -48,6 +48,12 @@ import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -273,12 +279,14 @@ private fun LiveCanvas(
     val change by rememberUpdatedState(onBand)
     val user = remember(userGains) { FloatArray(EqSettings.BAND_COUNT) { userGains.getOrElse(it) { 0f } } }
     val shape = RoundedCornerShape(10.dp)
+    androidx.compose.foundation.layout.Box(modifier) {
     Canvas(
-        modifier
+        Modifier
+            .matchParentSize()
             .clip(shape)
             .background(Skin.Display)
             .border(BorderStroke(1.dp, Skin.BevelDark), shape)
-            .semantics { contentDescription = "Live equalizer: ten sliders over the spectrum" }
+            .clearAndSetSemantics {}
             .pointerInput(Unit) { sliderGestures { band, db -> change(band, db) } },
     ) {
         telemetry.frameTick.longValue // the only state read: a new frame redraws, nothing recomposes
@@ -304,7 +312,34 @@ private fun LiveCanvas(
             )
         }
     }
+    // The sliders are drawn, so TalkBack gets ten real ones laid over the
+    // same columns (accessibility A21): each is named by its frequency, says
+    // its gain, and moves one decibel per step. Invisible, and they take no
+    // touches, so the screen looks and works exactly as before.
+    androidx.compose.foundation.layout.Row(
+        Modifier.matchParentSize().padding(start = 26.dp, end = 6.dp).semantics { isTraversalGroup = true },
+    ) {
+        for (i in 0 until EqSettings.BAND_COUNT) {
+            val db = user[i]
+            androidx.compose.foundation.layout.Box(
+                Modifier.weight(1f).fillMaxHeight().semantics {
+                    contentDescription = bandName(EqSettings.BAND_LABELS[i])
+                    stateDescription = "${if (db > 0f) "plus " else if (db < 0f) "minus " else ""}${"%.0f".format(kotlin.math.abs(db))} decibels"
+                    progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(db, -MAX_DB..MAX_DB, steps = (2 * MAX_DB).toInt() - 1)
+                    setProgress { target ->
+                        change(i, kotlin.math.round(target).coerceIn(-MAX_DB, MAX_DB))
+                        true
+                    }
+                },
+            )
+        }
+    }
+    }
 }
+
+/** "1K" read as "1 kilohertz", "62" as "62 hertz". */
+private fun bandName(label: String): String =
+    if (label.endsWith("K")) "${label.dropLast(1)} kilohertz" else "$label hertz"
 
 private object Neon {
     val Cyan = Color(0xFF00E5FF)

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="add_title">Add</string>
+    <string name="add_search_label">Search to add music</string>
+    <string name="add_search_placeholder">Song, album, or paste a link</string>
+    <string name="add_clear">Clear search</string>
+    <string name="add_door_identify">Identify a song</string>
+    <string name="add_door_identify_body">Hear it, name it, keep it.</string>
+    <string name="add_door_spotify">From Spotify</string>
+    <string name="add_door_spotify_body">Bring a playlist over.</string>
+    <string name="add_door_discover">Discover new music</string>
+    <string name="add_door_discover_body">Taste rounds and new playlists.</string>
+    <string name="add_door_computer">From your computer</string>
+    <string name="add_door_computer_body">Pair, share a queue, receive files.</string>
+    <string name="add_in_progress">In progress</string>
+    <string name="activity_title">Activity</string>
+    <string name="activity_open_all">See all downloads</string>
+    <string name="activity_idle_title">Nothing running</string>
+    <string name="activity_idle_body">Songs you get and files from your computer show their progress here.</string>
+    <string name="activity_getting">Getting…</string>
+    <string name="activity_albums">Albums</string>
+    <string name="activity_pause">Pause</string>
+    <string name="activity_resume">Resume</string>
+    <string name="activity_stop">Stop</string>
+    <string name="activity_added">Added to your library: %1$s</string>
+    <string name="activity_failed">Couldn\'t get %1$s</string>
+    <string name="activity_dismiss">Dismiss</string>
+</resources>

@@ -17,10 +17,14 @@ Upstream license files and copyright notices remain authoritative for the respec
 
 ## Fonts on Android
 
-- Archivo (SIL Open Font License 1.1), copyright 2020 The Archivo Project Authors.
-  Source: https://github.com/Omnibus-Type/Archivo
-  Regular, Medium, SemiBold and Bold are bundled in core/ui/src/main/res/font/;
-  the license text is in core/ui/src/main/res/raw/archivo_ofl.txt.
+- Figtree (SIL Open Font License 1.1), copyright 2022 The Figtree Project Authors.
+  Source: https://github.com/erikdkennedy/figtree
+  The variable font is bundled as core/ui/src/main/res/font/figtree.ttf;
+  the license text is in core/ui/src/main/res/raw/figtree_ofl.txt.
+- Bricolage Grotesque (SIL Open Font License 1.1), copyright 2022 The Bricolage
+  Grotesque Project Authors. Source: https://github.com/ateliertriay/bricolage
+  The variable font is bundled as core/ui/src/main/res/font/bricolage_grotesque.ttf;
+  the license text is in core/ui/src/main/res/raw/bricolage_grotesque_ofl.txt.
 
 ## Mornye downloads on Android
 

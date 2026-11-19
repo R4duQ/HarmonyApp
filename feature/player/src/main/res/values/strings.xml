@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_next">Next song</string>
+    <string name="player_previous">Previous song</string>
+    <string name="player_open">Open player</string>
+    <string name="player_close">Close player</string>
+    <string name="player_state_playing">Playing</string>
+    <string name="player_state_paused">Paused</string>
+    <string name="player_mini_spoken">Now playing: %1$s, by %2$s</string>
+    <string name="steer_title">Steer the mix</string>
+    <string name="steer_no_mix">Nothing is mixing right now. Start a mix from this song and Harmony keeps choosing what comes next.</string>
+    <string name="steer_start_mix">Start a mix from this song</string>
+    <string name="steer_calmer">Calmer</string>
+    <string name="steer_livelier">Livelier</string>
+    <string name="steer_mood">Mood</string>
+    <string name="steer_tune">Tune…</string>
+    <string name="steer_tune_full">Tune the mix: style, familiar or new, variety</string>
+    <string name="steer_mood_heading">Mood</string>
+    <string name="steer_mood_any">Any mood</string>
+    <string name="steer_ease">Ease into it</string>
+    <string name="steer_ease_body">Move toward the mood over the next 5 songs instead of switching now.</string>
+    <string name="steer_mood_calm">Calm</string>
+    <string name="steer_mood_focus">Focus</string>
+    <string name="steer_mood_energy">Energy</string>
+    <string name="steer_mood_happy">Happy</string>
+    <string name="steer_mood_late_night">Late night</string>
+    <string name="steer_mood_party">Party</string>
+    <string name="steer_mood_relaxed">Relaxed</string>
+    <string name="steer_mood_melancholy">Melancholy</string>
+    <string name="steer_mood_epic">Epic</string>
+    <string name="steer_mood_emotional">Emotional</string>
+    <string name="steer_mood_intense">Intense</string>
+    <string name="np_show_details">Show file details</string>
+    <string name="np_hide_details">Hide file details</string>
+    <string name="np_open_queue">Open queue</string>
+</resources>

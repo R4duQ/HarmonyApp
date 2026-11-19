@@ -10,7 +10,9 @@ android
 
 The owner and a small circle of friends, who install signed APKs by hand
 (see `Instaleaza-Harmony-pe-telefon.cmd`). Romanian speakers who also read
-English; the interface ships in both. They own their music as files,
+English. The interface is in English; the screens rebuilt in the Listening
+Room redesign (docs/redesign/) also ship in Romanian, and the rest follow as
+their strings move to resources. They own their music as files,
 largely lossless (FLAC, hi-res up to 24/96), and build that collection
 themselves.
 
@@ -56,6 +58,8 @@ listener's own library and history, with the reason for every pick shown.
 - Playlists with generated covers; Discover in three steps (Preferences,
   Songs, Playlist) with previews; Downloads (albums and tracks); Equalizer
   (graphic, Winamp-style, Clarity Live); Settings.
+- Navigation: Listen · Library · Add, with Activity, Sound and Settings in
+  every top bar (docs/redesign/05-screens-and-flows.md).
 - Light and dark themes are both required.
 
 ## Brand Commitments

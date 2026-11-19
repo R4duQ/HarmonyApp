@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="room_back">Back</string>
+    <string name="room_activity_summary">Activity: %1$d running, %2$d need you, %3$d failed</string>
+    <string name="room_close_sheet">Close sheet</string>
+</resources>

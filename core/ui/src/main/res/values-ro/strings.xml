@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="room_back">Înapoi</string>
+    <string name="room_activity_summary">Activitate: %1$d în lucru, %2$d au nevoie de tine, %3$d eșuate</string>
+    <string name="room_close_sheet">Închide panoul</string>
+</resources>

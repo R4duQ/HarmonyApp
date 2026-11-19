@@ -2,6 +2,8 @@ package com.harmony.feature.player
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -38,7 +40,7 @@ import kotlin.math.sin
 class NowPlayingScreenShots {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private fun render(name: String, dark: Boolean, landscape: Boolean, hard: Boolean = false) {
+    private fun render(name: String, dark: Boolean, landscape: Boolean, hard: Boolean = false, fontScale: Float? = null) {
         val base = designSong(1)
         val song = if (hard) base.copy(title = "Night Ferry (Extended Harbour Mix, Remastered 2024)", artworkUri = null) else base
         val queue = listOf(song) + (2L..12L).map(::designSong)
@@ -56,11 +58,15 @@ class NowPlayingScreenShots {
         rule.mainClock.autoAdvance = false
         rule.setContent {
             val d = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(d.density, if (hard) 1.3f else 1f)) {
-                HarmonyTheme(darkTheme = dark, dynamicColors = false) {
+            val scale = fontScale ?: if (hard) 1.3f else 1f
+            CompositionLocalProvider(LocalDensity provides Density(d.density, scale)) {
+                HarmonyTheme(darkTheme = dark, dynamicColors = false, reducedMotion = true) {
                     val palette = playerPalette()
+                    val big = scale > 1.3f && !landscape
                     Column(
-                        Modifier.fillMaxSize().background(palette.background).padding(horizontal = if (landscape) 24.dp else 20.dp),
+                        Modifier.fillMaxSize().background(palette.background)
+                            .then(if (big) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+                            .padding(horizontal = if (landscape) 24.dp else 20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         NowPlayingBody(
@@ -72,6 +78,9 @@ class NowPlayingScreenShots {
                             cb = NowPlayingCallbacks(onEqualizer = {}),
                             mixOn = true,
                             mixStatus = mixStatus,
+                            reason = "Often follows your last song",
+                            steer = SteerCallbacks(steerable = true, energy = 0.5f, mood = com.harmony.core.model.MoodFilter.CALM),
+                            scrollable = big,
                         )
                     }
                 }
@@ -91,6 +100,9 @@ class NowPlayingScreenShots {
 
     @Test @Config(sdk = [34], qualifiers = "w360dp-h640dp-xhdpi")
     fun smallPhoneHard() { render("np-small-hard-dark", dark = true, landscape = false, hard = true) }
+
+    @Test @Config(sdk = [34], qualifiers = "w392dp-h850dp-xhdpi")
+    fun portraitLargeText() { render("np-portrait-font200-dark", dark = true, landscape = false, fontScale = 2f) }
 
     @Test @Config(sdk = [34], qualifiers = "w850dp-h392dp-land-xhdpi")
     fun landscape() { render("np-land-light", dark = false, landscape = true) }
