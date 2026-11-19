@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="listen_title">Listen</string>
+    <string name="listen_empty_title">Your library is empty</string>
+    <string name="listen_empty_body">Add songs from your computer, or get them in Add.</string>
+    <string name="listen_add_music">Add music</string>
+    <string name="listen_start_something">Start something</string>
+    <string name="listen_mix_my_library">Mix my library</string>
+    <string name="listen_moods_not_ready">Moods are almost ready. Harmony is still listening to your songs to learn their mood.</string>
+    <string name="listen_mood_calm">Calm</string>
+    <string name="listen_mood_focus">Focus</string>
+    <string name="listen_mood_energy">Energy</string>
+    <string name="listen_mood_happy">Happy</string>
+    <string name="listen_mood_late_night">Late night</string>
+    <string name="listen_mood_party">Party</string>
+    <string name="listen_mood_relaxed">Relaxed</string>
+    <string name="listen_mood_melancholy">Melancholy</string>
+    <string name="listen_mood_epic">Epic</string>
+    <string name="listen_mood_emotional">Emotional</string>
+    <string name="listen_mood_intense">Intense</string>
+    <string name="listen_recently_played">Recently played</string>
+    <string name="listen_made_for_you">Made for you</string>
+    <string name="listen_smart_favourites">Favourites</string>
+    <string name="listen_smart_most_played">Most played</string>
+    <string name="listen_smart_recently_added">Recently added</string>
+    <string name="listen_smart_recently_played">Recently played</string>
+    <string name="listen_smart_high_energy">High energy</string>
+    <string name="listen_smart_low_energy">Low energy</string>
+    <string name="listen_your_playlists">Your playlists</string>
+    <string name="listen_see_all">See all</string>
+    <string name="listen_new_for_you">New for you</string>
+    <string name="listen_new_for_you_body">Taste rounds and playlists built from what you love.</string>
+    <string name="listen_now_playing">Now playing</string>
+    <string name="listen_paused">Paused</string>
+    <string name="listen_pick_up">Pick up where you left off</string>
+    <string name="listen_pause">Pause</string>
+    <string name="listen_play">Play</string>
+    <string name="listen_resume">Resume</string>
+    <string name="listen_mix_started">Mix started</string>
+    <plurals name="listen_song_count">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+</resources>
