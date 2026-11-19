@@ -132,6 +132,10 @@ fun LibraryScreen(
      * [handledResetSignal].
      */
     resetSearchSignal: Int = 0,
+    /** The Playlists segment, provided by the shell (playlists live in their own module). */
+    playlists: (@Composable () -> Unit)? = null,
+    /** The shell's utilities for the top bar: Activity, Sound, Settings. */
+    topActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -266,7 +270,11 @@ fun LibraryScreen(
                 else Modifier.background(palette.field),
             ),
     ) {
-        // ---- Header: glass search pill, with the wheel toggle trailing it
+        com.harmony.core.ui.room.RoomTopBar(
+            androidx.compose.ui.res.stringResource(R.string.library_title),
+            actions = topActions,
+        )
+        // ---- Header: the search field, with the wheel toggle trailing it
         // on the Songs tab ----
         LibraryHeaderSection(
             palette = palette,
@@ -297,51 +305,16 @@ fun LibraryScreen(
                 SearchResultsContent(viewModel, palette, onAlbumClick, onArtistClick)
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    GlassSegmentedTabs(
-                        tabs = listOf(
-                            EditorialTab(
-                                "Songs",
-                                pagedSongs.itemCount.takeIf { it > 0 },
-                                Icons.Rounded.MusicNote,
-                            ),
-                            EditorialTab(
-                                "Albums",
-                                albums.size.takeIf { it > 0 },
-                                Icons.Rounded.Album,
-                            ),
-                            EditorialTab(
-                                "Artists",
-                                artists.size.takeIf { it > 0 },
-                                Icons.Rounded.Person,
-                            ),
+                    com.harmony.core.ui.room.RoomSegmented(
+                        options = listOfNotNull(
+                            androidx.compose.ui.res.stringResource(R.string.library_songs),
+                            androidx.compose.ui.res.stringResource(R.string.library_albums),
+                            androidx.compose.ui.res.stringResource(R.string.library_artists),
+                            if (playlists != null) androidx.compose.ui.res.stringResource(R.string.library_playlists) else null,
                         ),
                         selected = selectedTab,
                         onSelect = { selectedTab = it },
-                        palette = palette,
-                        modifier = Modifier.padding(
-                            start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp,
-                        ),
-                    )
-                    // A hairline that fades out toward the edges instead of
-                    // ruling straight across. A full-width line reads as a
-                    // hard division — the header and the list are the same
-                    // surface, and this only needs to suggest where one ends.
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
-                            .height(1.dp)
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color.Transparent,
-                                        // Cyber-Glass: a faint cyan seam instead of the ink hairline.
-                                        if (palette.isCyberGlass) CyberGlassColors.Cyan.copy(alpha = 0.22f)
-                                        else palette.line.copy(alpha = 0.35f),
-                                        Color.Transparent,
-                                    ),
-                                ),
-                            ),
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
                     )
                     // Tab content slides in the direction of travel, so
                     // switching tabs reads as horizontal movement between
@@ -366,6 +339,7 @@ fun LibraryScreen(
                             0 -> SongsTab(viewModel, pagedSongs, palette, arcMode)
                             1 -> AlbumsTab(albums, palette, onAlbumClick)
                             2 -> ArtistsTab(artists, palette, onArtistClick)
+                            3 -> playlists?.invoke()
                         }
                     }
                 }

@@ -197,6 +197,8 @@ fun PlaylistsScreen(
     onPlaylistClick: (Long) -> Unit,
     onSmartPlaylistClick: (SmartPlaylistType) -> Unit,
     onSpotifyTransfer: () -> Unit,
+    /** Shown as Library's Playlists segment: no page title, the actions as a row of buttons. */
+    embedded: Boolean = false,
     viewModel: PlaylistsViewModel = hiltViewModel(),
 ) {
     val cards by viewModel.playlistCards.collectAsStateWithLifecycle()
@@ -240,8 +242,29 @@ fun PlaylistsScreen(
             .fillMaxSize()
             .background(palette.field),
     ) {
+        if (embedded) {
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                com.harmony.core.ui.room.RoomButton(
+                    "New playlist", onClick = { showCreateDialog = true },
+                    icon = Icons.Rounded.Add, kind = com.harmony.core.ui.room.RoomButtonKind.Tonal,
+                )
+                com.harmony.core.ui.room.RoomButton(
+                    "From Spotify", onClick = onSpotifyTransfer,
+                    kind = com.harmony.core.ui.room.RoomButtonKind.Text,
+                )
+                com.harmony.core.ui.room.RoomButton(
+                    "Import file",
+                    onClick = { importPicker.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "*/*")) },
+                    kind = com.harmony.core.ui.room.RoomButtonKind.Text,
+                )
+            }
+        }
         // ---- Header: big title + circled New / Import ----
-        Row(
+        if (!embedded) Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 22.dp, end = 20.dp, top = 14.dp),

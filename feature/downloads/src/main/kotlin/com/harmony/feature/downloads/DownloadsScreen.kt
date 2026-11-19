@@ -80,9 +80,19 @@ import com.harmony.domain.analysis.model.SpectralReport
 fun DownloadsScreen(
     onOpenAlbum: (String) -> Unit = {},
     onOpenRecognize: () -> Unit = {},
+    /** A search typed on Add: run once, with the preferred source, when the page opens. */
+    initialQuery: String? = null,
     viewModel: DownloadsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var handedQuery by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(initialQuery) {
+        val q = initialQuery?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (handedQuery == q) return@LaunchedEffect
+        handedQuery = q
+        viewModel.setQuery(q)
+        viewModel.searchSelectedSource()
+    }
     val identity = state.preferredDownloadSource.identity()
     // Downloads wears Cyber-Glass, like Library (obsidian and cyan in dark, pearl in light):
     // tracks, albums and the album queue look like one screen.

@@ -95,6 +95,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -177,6 +178,8 @@ fun NowPlayingScreen(
      * the menu item rather than showing a dead one.
      */
     onOpenEqualizer: (() -> Unit)? = null,
+    /** Open with the Play on sheet up: Add › From your computer pairs from there. */
+    openPlayOn: Boolean = false,
     viewModel: PlayerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
@@ -194,7 +197,7 @@ fun NowPlayingScreen(
     var showQueue by remember { mutableStateOf(false) }
     var showShuffleSheet by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
-    var showPlayOn by remember { mutableStateOf(false) }
+    var showPlayOn by rememberSaveable { mutableStateOf(openPlayOn) }
     val connectState by viewModel.connectState.collectAsStateWithLifecycle()
     val mix by viewModel.mix.collectAsStateWithLifecycle()
     val onlineMix by viewModel.onlineMix.collectAsStateWithLifecycle()

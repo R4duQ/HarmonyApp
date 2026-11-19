@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_play">Redă</string>
+    <string name="player_pause">Pauză</string>
+    <string name="player_next">Melodia următoare</string>
+    <string name="player_previous">Melodia anterioară</string>
+    <string name="player_open">Deschide playerul</string>
+    <string name="player_close">Închide playerul</string>
+    <string name="player_state_playing">Se redă</string>
+    <string name="player_state_paused">Pe pauză</string>
+    <string name="player_mini_spoken">Se aude acum: %1$s, de %2$s</string>
+</resources>
