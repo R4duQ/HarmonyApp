@@ -1,6 +1,8 @@
 package com.harmony.feature.downloads
 
 import android.content.Context
+import android.net.Uri
+import android.provider.MediaStore
 import com.harmony.core.common.crash.DiagnosticsLog
 import com.harmony.core.database.dao.DownloadRecordDao
 import com.harmony.core.database.entity.DownloadRecordEntity
@@ -21,6 +23,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
@@ -67,6 +70,8 @@ class OnlineSongKeeperImpl @Inject constructor(
             // Kept before (by hand or by itself), or the library has this recording already.
             (_status.value[videoId] as? KeepStatus.Kept)?.let { kept ->
                 librarySong(kept.uri, song)?.let { return@withLock it }
+                // Saved, and the library hasn't listed it yet: not a second copy.
+                if (stillThere(kept.uri)) return@withLock null
             }
             libraryCopyOf(song)?.let { existing ->
                 remember(videoId, existing.uri)
@@ -74,16 +79,21 @@ class OnlineSongKeeperImpl @Inject constructor(
             }
             set(videoId, KeepStatus.Keeping)
             try {
-                val kept = copyIntoLibrary(videoId, song)
-                remember(videoId, kept.uri)
-                DiagnosticsLog.line("KEEP", "kept video=$videoId")
-                kept
+                val saved = copyIntoLibrary(videoId, song)
+                // Saved either way: a song the library hasn't listed yet is still kept, never copied twice.
+                remember(videoId, saved.library?.uri ?: saved.fileUri)
+                DiagnosticsLog.line("KEEP", "kept video=$videoId inLibrary=${saved.library != null}")
+                saved.library
             } catch (e: CancellationException) {
                 set(videoId, null)
                 throw e
             } catch (e: KeepException) {
                 set(videoId, KeepStatus.Failed(e.message ?: "Not saved"))
                 DiagnosticsLog.line("KEEP", "failed video=$videoId ${e.message}")
+                null
+            } catch (e: HarmonyDownloadException) {
+                set(videoId, KeepStatus.Failed(e.userMessage))
+                DiagnosticsLog.error("KEEP", "keeping an online song failed: ${e.userMessage}", e)
                 null
             } catch (e: Exception) {
                 set(videoId, KeepStatus.Failed("Not saved (${e.javaClass.simpleName})"))
@@ -102,7 +112,10 @@ class OnlineSongKeeperImpl @Inject constructor(
         }
     }
 
-    private suspend fun copyIntoLibrary(videoId: String, song: Song): Song {
+    /** A kept file: where it was saved, and the library's song for it once the library lists it. */
+    private class Saved(val fileUri: String, val library: Song?)
+
+    private suspend fun copyIntoLibrary(videoId: String, song: Song): Saved {
         val downloads = downloadsLazy.get()
         val source = OnlineSongs.fileFor(context.cacheDir, videoId)
         if (!source.isFile) throw KeepException("No longer on the phone: play it in a mix again to save it")
@@ -128,21 +141,36 @@ class OnlineSongKeeperImpl @Inject constructor(
                         originalTrackId = OnlineSongs.keyFor(videoId), isrc = null,
                     ),
                 )
-                scan(force = false).collect { }
                 published
             }
-            return librarySong(saved.uri.toString(), song)
-                ?: throw KeepException("Saved to your downloads; it appears in the library after the next scan")
+            val fileUri = saved.uri.toString()
+            // Android may list a new file a moment after it is saved: look again briefly.
+            repeat(LIBRARY_LOOKS) { attempt ->
+                if (attempt > 0) delay(LIBRARY_LOOK_GAP_MS)
+                scan(force = false).collect { }
+                librarySong(fileUri, song)?.let { return Saved(fileUri, it) }
+            }
+            return Saved(fileUri, null)
         } finally {
             if (copy.exists()) copy.delete()
         }
     }
 
-    /** The library's song at [uri], or the library's copy of the same recording. */
+    /** The library's song for the saved file at [uri] (by MediaStore row), or the library's copy of the same recording. */
     private suspend fun librarySong(uri: String, song: Song): Song? {
         val songs = library.observeSongs().first()
-        return songs.firstOrNull { it.id >= 0 && it.uri == uri } ?: libraryCopyOf(song, songs)
+        return KeptFileMatch.librarySong(songs, uri, mediaRowIdOf(uri)) ?: libraryCopyOf(song, songs)
     }
+
+    /** Whether the file saved at [uri] is still there (the person may have deleted it since). */
+    private fun stillThere(uri: String): Boolean = runCatching {
+        context.contentResolver.openAssetFileDescriptor(Uri.parse(uri), "r")?.use { true } ?: false
+    }.getOrDefault(false)
+
+    /** The MediaStore row of a saved file: in its address, or (a chosen folder's document) asked of Android. */
+    private fun mediaRowIdOf(uri: String): Long? = KeptFileMatch.mediaRowId(uri) ?: runCatching {
+        MediaStore.getMediaUri(context, Uri.parse(uri))?.let { KeptFileMatch.mediaRowId(it.toString()) }
+    }.getOrNull()
 
     /** The library's song of the same recording as [song] (artist, title, version, length), or null. */
     private suspend fun libraryCopyOf(song: Song, songs: List<Song>? = null): Song? {
@@ -178,5 +206,7 @@ class OnlineSongKeeperImpl @Inject constructor(
         const val KEPT = "kept:"
         const val PLAYS = "plays:"
         const val STAGING = "keep-staging"
+        const val LIBRARY_LOOKS = 3
+        const val LIBRARY_LOOK_GAP_MS = 1_500L
     }
 }
