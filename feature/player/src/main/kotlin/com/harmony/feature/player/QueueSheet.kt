@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -1049,18 +1050,29 @@ private fun KeepButton(song: Song, status: KeepStatus?, palette: PlayerPalette, 
                 is KeepStatus.Failed -> Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = palette.muted, modifier = Modifier.size(16.dp))
                 null -> Icon(Icons.Rounded.LibraryAdd, contentDescription = null, tint = palette.accent, modifier = Modifier.size(16.dp))
             }
-            Text(
-                when (status) {
-                    null -> "Keep"
-                    KeepStatus.Keeping -> "Keeping…"
-                    is KeepStatus.Kept -> "In your library"
-                    is KeepStatus.Failed -> "Try again"
-                },
-                style = com.harmony.core.ui.theme.RoomType.labelSmall,
-                color = if (status is KeepStatus.Failed) palette.muted else palette.accent,
-                maxLines = 1,
-                modifier = Modifier.padding(start = 5.dp),
-            )
+            Column(Modifier.padding(start = 5.dp).widthIn(max = 180.dp)) {
+                Text(
+                    when (status) {
+                        null -> "Keep"
+                        KeepStatus.Keeping -> "Keeping…"
+                        is KeepStatus.Kept -> "In your library"
+                        is KeepStatus.Failed -> "Not saved · Try again"
+                    },
+                    style = com.harmony.core.ui.theme.RoomType.labelSmall,
+                    color = if (status is KeepStatus.Failed) palette.muted else palette.accent,
+                    maxLines = 1,
+                )
+                // Why, on screen too, not only to a screen reader.
+                if (status is KeepStatus.Failed) {
+                    Text(
+                        status.reason,
+                        style = com.harmony.core.ui.theme.RoomType.caption,
+                        color = palette.muted,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
         return
     }

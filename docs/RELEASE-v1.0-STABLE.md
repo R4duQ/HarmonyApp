@@ -1,8 +1,16 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **176**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 175), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **177**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 176), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 177 — Keep from the queue works
+
+- **Keep saves the song and says so.** Keeping an online mix song saved the file but
+  then could not find it in the library, so it showed "Not saved", and every "Try
+  again" saved another copy. Now the saved song is found, counts as kept even while
+  Android is still listing it, and is never saved twice.
+- When a keep really fails, the queue shows why on screen.
 
 ## Build 176 — Crossfade without the hitch
 
