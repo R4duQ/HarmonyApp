@@ -100,16 +100,50 @@ function SB(){return `<div class="sb"><span>9:41</span><span class="r">${I('sig'
 function NAV(on){const it=[['home','Listen'],['lib','Library'],['plus','Add'],['eq','Sound']];
  return `<div class="nav">${it.map((x,k)=>`<div class="n ${k==on?'on':''}">${I(x[0])}<small>${k==on?'':x[1]}</small></div>`).join('')}</div>`}
 function WAVE(n,p,h=56,seed=3){let s='';for(let k=0;k<n;k++){const v=Math.abs(Math.sin(k*.37+seed)*.55+Math.sin(k*.11+seed*2)*.45);s+=`<b class="${k/n<p?'p':''}" style="height:${10+v*(h-12)}px"></b>`}return `<div class="wave" style="height:${h}px">${s}</div>`}
-function HEAD(){return `<svg viewBox="0 0 300 330" width="300" height="330">
-<defs><linearGradient id="hb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d6ff3d"/><stop offset=".5" stop-color="#8dbb1d"/><stop offset="1" stop-color="#3f5a0b"/></linearGradient>
-<radialGradient id="cup" cx=".35" cy=".3"><stop offset="0" stop-color="#d8ff55"/><stop offset=".45" stop-color="#7fae14"/><stop offset="1" stop-color="#2f4707"/></radialGradient>
-<radialGradient id="pad" cx=".5" cy=".5"><stop offset="0" stop-color="#1c2a05"/><stop offset=".7" stop-color="#4f7410"/><stop offset="1" stop-color="#a8d62a"/></radialGradient>
-<filter id="gl"><feGaussianBlur stdDeviation="9"/></filter></defs>
-<ellipse cx="150" cy="310" rx="95" ry="12" fill="#c8f52f" opacity=".25" filter="url(#gl)"/>
-<path d="M40 190C20 70 90 18 150 18s130 52 110 172" fill="none" stroke="url(#hb)" stroke-width="30" stroke-linecap="round"/>
-<path d="M52 180C38 85 96 36 150 36" fill="none" stroke="#f0ffa0" stroke-width="4" opacity=".6" stroke-linecap="round"/>
-<g transform="rotate(-8 62 245)"><ellipse cx="62" cy="245" rx="52" ry="68" fill="url(#cup)"/><ellipse cx="76" cy="245" rx="36" ry="52" fill="url(#pad)"/></g>
-<g transform="rotate(8 238 245)"><ellipse cx="238" cy="245" rx="52" ry="68" fill="url(#cup)"/><ellipse cx="224" cy="245" rx="36" ry="52" fill="url(#pad)"/></g>
+function HEAD(){return `<svg viewBox="0 0 340 380" width="340" height="380">
+<defs>
+<linearGradient id="band" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3f5c08"/><stop offset=".18" stop-color="#9fd11f"/><stop offset=".4" stop-color="#e4ff62"/><stop offset=".62" stop-color="#8fc215"/><stop offset="1" stop-color="#2f4707"/></linearGradient>
+<linearGradient id="bandIn" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1a2803"/><stop offset=".5" stop-color="#4b6c0b"/><stop offset="1" stop-color="#17220a"/></linearGradient>
+<radialGradient id="shell" cx=".3" cy=".25" r=".95"><stop offset="0" stop-color="#f2ffa3"/><stop offset=".18" stop-color="#bff035"/><stop offset=".5" stop-color="#6f9d10"/><stop offset=".85" stop-color="#2b4306"/><stop offset="1" stop-color="#1b2a04"/></radialGradient>
+<radialGradient id="shellR" cx=".7" cy=".2" r="1"><stop offset="0" stop-color="#e9ff7f"/><stop offset=".25" stop-color="#a6d822"/><stop offset=".65" stop-color="#4d7309"/><stop offset="1" stop-color="#1a2a04"/></radialGradient>
+<radialGradient id="cush" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#0d1503"/><stop offset=".55" stop-color="#16220a"/><stop offset=".8" stop-color="#3f5d0b"/><stop offset="1" stop-color="#91bf24"/></radialGradient>
+<linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6ffb0"/><stop offset=".4" stop-color="#9ccc1c"/><stop offset="1" stop-color="#2a4206"/></linearGradient>
+<linearGradient id="yoke" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2c4606"/><stop offset=".45" stop-color="#d4f84a"/><stop offset="1" stop-color="#34510a"/></linearGradient>
+<filter id="bl"><feGaussianBlur stdDeviation="7"/></filter><filter id="bl2"><feGaussianBlur stdDeviation="2.500"/></filter>
+<clipPath id="bandclip"><path d="M52 232C28 100 92 28 170 28s142 72 118 204" fill="none"/></clipPath>
+</defs>
+<ellipse cx="170" cy="362" rx="125" ry="13" fill="#c8f52f" opacity=".3" filter="url(#bl)"/>
+<ellipse cx="170" cy="355" rx="90" ry="7" fill="#000" opacity=".35" filter="url(#bl)"/>
+<!-- headband -->
+<path d="M52 232C28 100 92 28 170 28s142 72 118 204" fill="none" stroke="#1d2d04" stroke-width="40" stroke-linecap="round"/>
+<path d="M52 232C28 100 92 28 170 28s142 72 118 204" fill="none" stroke="url(#band)" stroke-width="34" stroke-linecap="round"/>
+<path d="M66 205C52 112 104 50 170 50s112 56 98 150" fill="none" stroke="url(#bandIn)" stroke-width="16" stroke-linecap="round" opacity=".85"/>
+<path d="M44 200C26 108 84 36 160 33" fill="none" stroke="#f6ffc0" stroke-width="5" stroke-linecap="round" opacity=".75" filter="url(#bl2)"/>
+<path d="M300 190C312 120 270 58 214 40" fill="none" stroke="#e6ff7a" stroke-width="3" stroke-linecap="round" opacity=".45" filter="url(#bl2)"/>
+<!-- yokes -->
+<path d="M44 224l30 8-6 34-30-8z" fill="url(#yoke)"/>
+<path d="M296 224l-30 8 6 34 30-8z" fill="url(#yoke)"/>
+<!-- left cup (front view) -->
+<g transform="rotate(-7 82 292)">
+ <ellipse cx="82" cy="296" rx="64" ry="84" fill="#10190a" opacity=".6" filter="url(#bl2)"/>
+ <ellipse cx="82" cy="292" rx="62" ry="82" fill="url(#shell)"/>
+ <ellipse cx="82" cy="292" rx="62" ry="82" fill="none" stroke="url(#ring)" stroke-width="3.500" opacity=".85"/>
+ <ellipse cx="86" cy="294" rx="47" ry="66" fill="url(#cush)"/>
+ <ellipse cx="86" cy="294" rx="47" ry="66" fill="none" stroke="#b7e237" stroke-width="1.600" opacity=".55"/>
+ <ellipse cx="88" cy="298" rx="29" ry="42" fill="#080d02" opacity=".9"/>
+ <ellipse cx="88" cy="298" rx="29" ry="42" fill="none" stroke="#5f8a10" stroke-width="2"/>
+ <path d="M46 250C48 224 64 214 80 212" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".55" filter="url(#bl2)"/>
+</g>
+<!-- right cup (3/4 view) -->
+<g transform="rotate(8 262 292)">
+ <ellipse cx="270" cy="298" rx="48" ry="84" fill="#10190a" opacity=".6" filter="url(#bl2)"/>
+ <path d="M236 214C284 196 316 236 316 292s-30 100-80 82c-20-20-24-136 0-160z" fill="url(#shellR)"/>
+ <path d="M236 214C284 196 316 236 316 292s-30 100-80 82" fill="none" stroke="#e4ff7a" stroke-width="2.500" opacity=".7"/>
+ <ellipse cx="241" cy="294" rx="9" ry="76" fill="url(#cush)"/>
+ <ellipse cx="241" cy="294" rx="9" ry="76" fill="none" stroke="#b7e237" stroke-width="1.600" opacity=".6"/>
+ <ellipse cx="282" cy="292" rx="22" ry="44" fill="url(#shell)" opacity=".55"/><ellipse cx="282" cy="292" rx="22" ry="44" fill="none" stroke="#e4ff7a" stroke-width="2" opacity=".6"/><ellipse cx="282" cy="292" rx="10" ry="20" fill="#16220a" opacity=".6"/>
+ <path d="M268 222C296 224 308 250 308 276" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".5" filter="url(#bl2)"/>
+</g>
 </svg>`}
 function VINYL(sz){return `<div style="position:absolute;right:-${sz*.22}px;top:${sz*.04}px;width:${sz*.92}px;height:${sz*.92}px;border-radius:50%;background:repeating-radial-gradient(circle,#0b0d06 0 3px,#151a0b 4px 5px);box-shadow:0 8px 20px rgba(0,0,0,.5)"><div style="position:absolute;inset:34%;border-radius:50%;background:radial-gradient(circle,#161d09 0 12%,#e07b2e 13%)"></div></div>`}
 </script>
