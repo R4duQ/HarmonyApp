@@ -58,32 +58,95 @@ class TwinPlayerTest {
         fun transitions() = log.filter { it.startsWith("transition") }
     }
 
-    private class Rig(val scope: TestScope, val twin: TwinPlayer, val a: FakeExo, val b: FakeExo, val heard: Heard)
+    private class Rig(
+        val scope: TestScope,
+        val twin: TwinPlayer,
+        val a: FakeExo,
+        val b: FakeExo,
+        val heard: Heard,
+        val items: List<MediaItem>,
+        val meter: Meter,
+    )
+
+    /**
+     * What a listener would hear, tick by tick: silence is neither player
+     * playing at an audible volume. Each turn records how long the incoming
+     * player had been playing when the outgoing song ended (the overlap).
+     */
+    private class Meter {
+        var now = 0L
+        var started = false
+        var silentSince = -1L
+        var longestSilenceMs = 0L
+        var silences = 0
+        val overlaps = mutableListOf<Long>()
+        var incomingPlayingSince = -1L
+
+        fun sample(a: FakeExo, b: FakeExo, twin: TwinPlayer) {
+            val audible = (a.isPlaying && a.volume > AUDIBLE) || (b.isPlaying && b.volume > AUDIBLE)
+            if (audible) started = true
+            if (!started) return
+            if (!audible) {
+                if (silentSince < 0) {
+                    silentSince = now
+                    silences++
+                }
+                longestSilenceMs = maxOf(longestSilenceMs, now - silentSince + TICK_MS)
+            } else {
+                silentSince = -1
+            }
+            val incoming = if (twin.active === a.player) b else a
+            if (incoming.isPlaying && incomingPlayingSince < 0) incomingPlayingSince = now
+            if (!incoming.isPlaying && incoming.state == Player.STATE_IDLE) incomingPlayingSince = -1
+        }
+
+        fun turned() {
+            if (incomingPlayingSince >= 0) overlaps += now - incomingPlayingSince
+            incomingPlayingSince = -1
+        }
+
+        companion object {
+            const val AUDIBLE = 0.001f
+        }
+    }
 
     private fun rig(
         crossfade: Int = 4,
         durations: Map<String, Long> = mapOf("a" to 20_000L, "b" to 20_000L, "c" to 20_000L, "d" to 20_000L),
         /** How long the second player takes to load a song. */
         loadMs: Long = 300,
+        /** How far ahead of what it plays a player has already read into the next song. */
+        readAheadMs: Long = 0,
+        items: List<MediaItem> = songs,
         test: suspend Rig.() -> Unit,
     ) = runTest {
         val a = FakeExo("A", durations, 300)
         val b = FakeExo("B", durations, loadMs)
+        a.readAheadMs = readAheadMs
+        b.readAheadMs = readAheadMs
         a.focus = true
-        val twin = TwinPlayer(a.player, b.player, StandardTestDispatcher(testScheduler))
+        val twin = TwinPlayer(a.player, b.player, StandardTestDispatcher(testScheduler), clock = { testScheduler.currentTime })
         val heard = Heard()
         twin.addListener(heard)
         twin.crossfadeSeconds = crossfade
+        val meter = Meter()
+        var active = twin.active
         // The players' clocks run on the test's virtual time.
         val clock = backgroundScope.launch {
             while (true) {
                 delay(TICK_MS)
                 a.advance(TICK_MS)
                 b.advance(TICK_MS)
+                meter.now = testScheduler.currentTime
+                if (twin.active !== active) {
+                    active = twin.active
+                    meter.turned()
+                }
+                meter.sample(a, b, twin)
             }
         }
         try {
-            Rig(this, twin, a, b, heard).test()
+            Rig(this, twin, a, b, heard, items, meter).test()
         } finally {
             // Its clock would otherwise keep the test's scheduler busy forever.
             twin.release()
@@ -92,7 +155,7 @@ class TwinPlayerTest {
     }
 
     private suspend fun Rig.start(index: Int = 0) {
-        twin.setMediaItems(songs, index, 0)
+        twin.setMediaItems(items, index, 0)
         twin.prepare()
         twin.play()
         scope.advanceTimeBy(1_000)
@@ -315,18 +378,126 @@ class TwinPlayerTest {
         assertEquals(0.5f, twin.volume)
     }
 
+    // ---- The hitch: a player already reading the next song must not be told to stop at the end ----
+
     @Test
-    fun `a slow load still hands over, with the outgoing song at full volume until it starts`() =
+    fun `a short fade never flushes the outgoing song, which has already read into the next one`() =
+        rig(crossfade = 2, readAheadMs = 2_500) {
+            start()
+            at(20_100)
+            // The song never stopped sounding, the fade wasn't called off, nothing was loaded twice.
+            assertEquals(0, a.flushes)
+            assertFalse(heard.log.contains("playing false"))
+            assertEquals(1, b.prepares)
+            assertSame(b.player, twin.active)
+            assertEquals("b", twin.currentMediaItem?.mediaId)
+            assertEquals(0L, meter.longestSilenceMs)
+            // The whole fade was heard: two seconds, give or take a step.
+            assertTrue("overlap ${meter.overlaps}", meter.overlaps.single() in 1_900L..2_100L)
+            val report = twin.lastCrossfade!!
+            assertEquals("turn", report.outcome)
+            assertEquals(0, report.outgoingStalls)
+        }
+
+    @Test
+    fun `a next song that arrives in the last seconds fades in without a break`() = rig(
+        crossfade = 5,
+        readAheadMs = 2_500,
+        durations = mapOf("a" to 20_000L, "b" to 20_000L, "c" to 20_000L, "d" to 20_000L, "e" to 20_000L),
+    ) {
+        // The last song of an online mix; the next one is still being prepared.
+        start(index = 3)
+        at(18_000)
+        twin.addMediaItem(MediaItem.Builder().setMediaId("e").build())
+        at(20_100)
+        assertEquals(0, a.flushes)
+        assertFalse(heard.log.contains("playing false"))
+        assertEquals("e", twin.currentMediaItem?.mediaId)
+        assertSame(b.player, twin.active)
+        assertEquals(0L, meter.longestSilenceMs)
+        // What was left of the song once the next one could play: about 1.7 s after a 0.3 s load.
+        assertTrue("overlap ${meter.overlaps}", meter.overlaps.single() in 1_500L..1_800L)
+    }
+
+    @Test
+    fun `the song next now comes in when the loaded one is moved or removed`() = rig {
+        start()
+        at(12_000)
+        assertEquals(1, b.prepares)
+        // Moved away after it started loading: c is next now.
+        twin.moveMediaItem(1, 3)
+        scope.runCurrent()
+        assertEquals(listOf("a", "c", "d", "b"), a.items.map { it.mediaId })
+        assertEquals(a.items, b.items)
+        at(20_100)
+        assertEquals("c", twin.currentMediaItem?.mediaId)
+        assertEquals("transition c ${Player.MEDIA_ITEM_TRANSITION_REASON_AUTO}", heard.transitions().last())
+        // Removed in the middle of the fade: b, next now, comes in instead of d.
+        at(18_000)
+        assertTrue(a.isPlaying && b.isPlaying)
+        twin.removeMediaItem(2)
+        scope.runCurrent()
+        at(20_100)
+        assertEquals("b", twin.currentMediaItem?.mediaId)
+        assertEquals(0L, meter.longestSilenceMs)
+    }
+
+    @Test
+    fun `ten natural transitions in a row, measured`() {
+        val names = (1..12).map { "s$it" }
+        val items = names.map { MediaItem.Builder().setMediaId(it).build() }
+        for ((crossfade, readAhead) in listOf(5 to 2_500L, 2 to 2_500L, 0 to 2_500L)) {
+            rig(crossfade = crossfade, readAheadMs = readAhead, items = items, durations = names.associateWith { 20_000L }) {
+                start()
+                repeat(10) { at(20_100) }
+                val breaks = a.flushes + b.flushes
+                println(
+                    "crossfade=${crossfade}s readAhead=${readAhead}ms: transitions=10 flushes=$breaks " +
+                        "silences=${meter.silences} longestSilence=${meter.longestSilenceMs}ms " +
+                        "overlaps=${meter.overlaps} last=${twin.lastCrossfade?.line()}",
+                )
+                assertEquals("s11", twin.currentMediaItem?.mediaId)
+                assertEquals(0, breaks)
+                assertEquals(0L, meter.longestSilenceMs)
+                assertFalse(heard.log.contains("playing false"))
+                if (crossfade > 0) {
+                    assertEquals(10, meter.overlaps.size)
+                    assertTrue("overlaps ${meter.overlaps}", meter.overlaps.all { it in crossfade * 1_000L - 100..crossfade * 1_000L + 100 })
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a manual skip during the fade goes straight to the next song`() = rig(readAheadMs = 2_500) {
+        start()
+        at(18_000)
+        assertTrue(b.isPlaying)
+        twin.seekToNextMediaItem()
+        scope.runCurrent()
+        assertEquals("b", twin.currentMediaItem?.mediaId)
+        assertEquals(1f, twin.active.volume)
+        assertEquals(Player.STATE_IDLE, (if (twin.active === a.player) b else a).state)
+        assertEquals(0, a.flushes)
+    }
+
+    @Test
+    fun `a next song that isn't playing by the end is played on gaplessly by the outgoing player`() =
         rig(loadMs = 12_000) {
             start()
             at(17_000)
             assertFalse(b.isPlaying)
             assertEquals(1f, a.volume)
             at(20_100)
-            assertSame(b.player, twin.active)
-            assertEquals(1f, b.volume)
-            assertTrue(b.playWhenReady)
-            assertFalse(heard.log.contains("pwr false ${Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM}"))
+            // No turn to a player that has nothing to play yet: A, which has the next song
+            // already read, goes on into it at full volume, and the waiting player stops.
+            assertSame(a.player, twin.active)
+            assertEquals("b", twin.currentMediaItem?.mediaId)
+            assertEquals(1f, a.volume)
+            assertEquals(Player.STATE_IDLE, b.state)
+            assertEquals(0L, meter.longestSilenceMs)
+            assertFalse(heard.log.contains("playing false"))
+            assertEquals("gapless", twin.lastCrossfade?.outcome)
         }
 
     /** A stand-in ExoPlayer: one queue, a position that moves with the test's clock, and loading that takes a while. */
@@ -345,6 +516,8 @@ class TwinPlayerTest {
         var focus = false
         var params = PlaybackParameters.DEFAULT
         var loadLeft = 0L
+        var readAheadMs = 0L
+        var flushes = 0
         var prepares = 0
         var seeks = 0
         val listeners = mutableListOf<Player.Listener>()
@@ -392,6 +565,7 @@ class TwinPlayerTest {
         }
 
         private fun moveTo(newIndex: Int, newPosition: Long, reason: Int) {
+            val old = info()
             val changed = newIndex != index
             index = newIndex
             position = newPosition
@@ -399,6 +573,12 @@ class TwinPlayerTest {
                 seeks++
                 emit(Player.EVENT_POSITION_DISCONTINUITY) {
                     it.onPositionDiscontinuity(info(), info(), Player.DISCONTINUITY_REASON_SEEK)
+                }
+            }
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                // As ExoPlayer: the discontinuity first, from the end of the song to the next one.
+                emit(Player.EVENT_POSITION_DISCONTINUITY) {
+                    it.onPositionDiscontinuity(old, info(), Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
                 }
             }
             if (changed || reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
@@ -488,7 +668,23 @@ class TwinPlayerTest {
             "getPlaybackParameters" -> params
             "setPlaybackParameters" -> { params = args[0] as PlaybackParameters; null }
             "setPlaybackSpeed" -> { params = PlaybackParameters(args[0] as Float); null }
-            "setPauseAtEndOfMediaItems" -> { pauseAtEnd = args[0] as Boolean; null }
+            "setPauseAtEndOfMediaItems" -> {
+                val on = args[0] as Boolean
+                val late = on && !pauseAtEnd && state == Player.STATE_READY && nextIndex() != C.INDEX_UNSET &&
+                    duration() - position <= readAheadMs
+                pauseAtEnd = on
+                if (late) {
+                    // Media3 1.5 (ExoPlayerImplInternal.setPauseAtEndOfWindowInternal): already reading
+                    // the next song, it seeks to where it is with the renderers disabled. The decoder and
+                    // the AudioTrack start over: the song stops sounding and the player buffers.
+                    flushes++
+                    emit(Player.EVENT_POSITION_DISCONTINUITY) {
+                        it.onPositionDiscontinuity(info(), info(), Player.DISCONTINUITY_REASON_INTERNAL)
+                    }
+                    stall(FLUSH_MS)
+                }
+                null
+            }
             "getPauseAtEndOfMediaItems" -> pauseAtEnd
             "setPlayWhenReady" -> { setPlaying(args[0] as Boolean, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST); null }
             "play" -> { setPlaying(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST); null }
@@ -534,6 +730,19 @@ class TwinPlayerTest {
                 emit(Player.EVENT_TIMELINE_CHANGED) { it.onTimelineChanged(Timeline.EMPTY, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) }
                 null
             }
+            "moveMediaItem", "moveMediaItems" -> {
+                val from = args[0] as Int
+                val to = if (args.size == 3) args[1] as Int else from + 1
+                val newIndex = args.last() as Int
+                val current = items.getOrNull(index)
+                val moved = items.subList(from, to).toList()
+                repeat(to - from) { items.removeAt(from) }
+                items.addAll(newIndex.coerceAtMost(items.size), moved)
+                index = items.indexOfFirst { it === current }.coerceAtLeast(0)
+                order = null
+                emit(Player.EVENT_TIMELINE_CHANGED) { it.onTimelineChanged(Timeline.EMPTY, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) }
+                null
+            }
             "removeMediaItem", "removeMediaItems" -> {
                 val from = args[0] as Int
                 val to = if (args.size == 2) args[1] as Int else from + 1
@@ -547,6 +756,17 @@ class TwinPlayerTest {
                     position = 0
                     emit(Player.EVENT_MEDIA_ITEM_TRANSITION) {
                         it.onMediaItemTransition(items.getOrNull(index), Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+                    }
+                }
+                null
+            }
+            "seekToNextMediaItem", "seekToNext" -> {
+                val next = nextIndex()
+                if (next != C.INDEX_UNSET) {
+                    moveTo(next, 0, Player.MEDIA_ITEM_TRANSITION_REASON_SEEK)
+                    if (state == Player.STATE_READY) {
+                        loadLeft = 50
+                        changeState(Player.STATE_BUFFERING)
                     }
                 }
                 null
@@ -573,5 +793,7 @@ class TwinPlayerTest {
 
     private companion object {
         const val TICK_MS = 10L
+        /** A Media3 renderer flush: decoder and AudioTrack start over, then refill. */
+        const val FLUSH_MS = 400L
     }
 }

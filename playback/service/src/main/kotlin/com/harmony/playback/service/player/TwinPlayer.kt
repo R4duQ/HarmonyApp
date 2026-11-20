@@ -1,5 +1,7 @@
 package com.harmony.playback.service.player
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.DeviceInfo
@@ -18,6 +20,7 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.ShuffleOrder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +50,16 @@ import kotlin.random.Random
  * volume. Nothing is reloaded, sought or realigned at that moment, so there is
  * nothing to hear: the old player stops, and becomes the one that waits.
  *
+ * The outgoing player is never told to stop at the end of its song
+ * (setPauseAtEndOfMediaItems). By the last two or three seconds it has
+ * already read into the next song (its AudioTrack and decoder hold that much),
+ * and asking then makes Media3 flush it where it is: decoder and AudioTrack
+ * start over, the song breaks off, the player buffers, and the fade was
+ * called off with it. Instead the fade takes it to silence, it goes on into
+ * the next song by itself as any player does, and that is the turn. If the
+ * incoming player isn't playing by then, the outgoing one simply keeps going,
+ * gaplessly, and there is no fade this time.
+ *
  * The earlier design kept one session player and a temporary second one, and
  * at the end of the fade had to move the session player onto the song the
  * second one was already playing: a cold seek, a wait for it to sound, and a
@@ -63,13 +76,16 @@ import kotlin.random.Random
 class TwinPlayer private constructor(
     private val twin: Twin,
     dispatcher: CoroutineDispatcher,
+    private val clock: () -> Long,
 ) : Player by twin.forward {
 
     constructor(
         first: ExoPlayer,
         second: ExoPlayer,
         dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
-    ) : this(Twin(first, second), dispatcher)
+        /** A monotonic clock, ms, for [CrossfadeTrace]. */
+        clock: () -> Long = SystemClock::elapsedRealtime,
+    ) : this(Twin(first, second), dispatcher, clock)
 
     /** The two players and which one plays; [forward] answers for whichever that is. */
     private class Twin(val first: ExoPlayer, val second: ExoPlayer) {
@@ -107,6 +123,12 @@ class TwinPlayer private constructor(
     /** Called when the turn changes, with the player that now plays. */
     var onActiveChanged: ((ExoPlayer) -> Unit)? = null
 
+    /** Each crossfade, timed: one Logcat line under [CrossfadeTrace.TAG]. */
+    private val trace = CrossfadeTrace(clock) { Log.i(CrossfadeTrace.TAG, it) }
+
+    /** The last crossfade's measurements. */
+    internal val lastCrossfade: CrossfadeTrace.Report? get() = trace.last
+
     /**
      * A crossfade is loaded, under way, or due within [aheadMs]: moving the
      * music to another device (Harmony Connect) waits for it to be over.
@@ -122,7 +144,7 @@ class TwinPlayer private constructor(
     var crossfadeSeconds: Int = 0
         set(value) {
             field = value.coerceIn(0, MAX_CROSSFADE_SECONDS)
-            if (field == 0) cancel()
+            if (field == 0) cancel("crossfade off")
         }
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -159,6 +181,8 @@ class TwinPlayer private constructor(
     init {
         twin.first.addListener(Relay(twin.first))
         twin.second.addListener(Relay(twin.second))
+        twin.first.addAnalyticsListener(Probe(twin.first))
+        twin.second.addAnalyticsListener(Probe(twin.second))
         scope.launch { monitor() }
     }
 
@@ -196,6 +220,7 @@ class TwinPlayer private constructor(
         if (waiting.mediaItemCount != player.mediaItemCount || waiting.getMediaItemAt(next) != item) return
         phase = Phase.LOADED
         loadedItem = item
+        trace.loading(remainingOf(player), crossfadeSeconds * 1000L)
         waiting.volume = 0f
         waiting.playWhenReady = false
         if (waiting.repeatMode != player.repeatMode) waiting.repeatMode = player.repeatMode
@@ -206,15 +231,15 @@ class TwinPlayer private constructor(
 
     private fun startFade() {
         if (!targetStillNext()) {
-            cancel()
+            cancel("next song changed")
             return
         }
         phase = Phase.FADING
         val outgoing = active
         val incoming = standby
-        // At the end of its song the outgoing player stops there rather than
-        // going on into the next one itself: that is when the turn changes.
-        outgoing.setPauseAtEndOfMediaItems(true)
+        trace.due(remainingOf(outgoing))
+        // The outgoing player is left to go on into the next song by itself
+        // (see the class comment): no setPauseAtEndOfMediaItems here.
         incoming.playbackParameters = outgoing.playbackParameters
         incoming.playWhenReady = true
         fadeJob = scope.launch {
@@ -222,17 +247,25 @@ class TwinPlayer private constructor(
             // song playing goes on at full volume until it does.
             while (phase == Phase.FADING && !incoming.isPlaying) delay(WAIT_STEP_MS)
             if (phase != Phase.FADING) return@launch
+            trace.playing()
             val span = remainingOf(outgoing).coerceAtLeast(1)
+            var progress = 0f
+            var due = clock() + FADE_STEP_MS
             while (phase == Phase.FADING) {
                 // Follows actual playback, so speeds above or below 1x fade in step.
-                val progress = (1f - remainingOf(outgoing).toFloat() / span).coerceIn(0f, 1f)
-                val gain = (1f - cos(progress * PI.toFloat())) / 2f
+                // It only ever moves on: the outgoing song never comes back up.
+                progress = maxOf(progress, (1f - remainingOf(outgoing).toFloat() / span).coerceIn(0f, 1f))
+                val gain = if (progress >= 1f) 1f else (1f - cos(progress * PI.toFloat())) / 2f
                 outgoing.volume = (1f - gain) * userVolume
                 incoming.volume = gain * userVolume
                 if (incoming.playbackParameters != outgoing.playbackParameters) {
                     incoming.playbackParameters = outgoing.playbackParameters
                 }
                 delay(FADE_STEP_MS)
+                // How late the main thread let this step run: a busy screen shows here.
+                val now = clock()
+                trace.mainLag(now - due)
+                due = now + FADE_STEP_MS
             }
         }
     }
@@ -248,8 +281,23 @@ class TwinPlayer private constructor(
             next == standby.currentMediaItemIndex && player.getMediaItemAt(next) == loadedItem
     }
 
-    /** The outgoing song has ended: the incoming player, already playing, takes over. */
-    private fun takeTurn() {
+    /**
+     * The outgoing song has ended. If the incoming player is playing it takes
+     * over; if not, the outgoing one, already in the next song, keeps it.
+     */
+    private fun songEnded(oldPosition: Player.PositionInfo?) {
+        if (phase != Phase.FADING) return
+        trace.ended()
+        if (standby.isPlaying) {
+            takeTurn(oldPosition)
+        } else {
+            cancel(silently = true)
+            trace.gapless()
+        }
+    }
+
+    /** The incoming player, already playing, takes over. */
+    private fun takeTurn(endOfOutgoing: Player.PositionInfo?) {
         if (phase != Phase.FADING) return
         val outgoing = active
         val incoming = standby
@@ -258,12 +306,11 @@ class TwinPlayer private constructor(
         phase = Phase.IDLE
         loadedItem = null
         failedItem = null
-        val oldPosition = positionInfo(outgoing)
+        val oldPosition = endOfOutgoing ?: positionInfo(outgoing)
         incoming.volume = userVolume
         twin.active = incoming
         // From here on the outgoing player's own events go nowhere.
         outgoing.volume = 0f
-        outgoing.setPauseAtEndOfMediaItems(false)
         // Audio focus belongs to whichever plays: let go of it first, so asking
         // for it again from the other player can't make the first one lose it.
         if (handlesAudioFocus) {
@@ -274,10 +321,11 @@ class TwinPlayer private constructor(
         outgoing.stop()
         onActiveChanged?.invoke(incoming)
         announceTurn(oldPosition)
+        trace.announced()
     }
 
     /** Back to one player: the other stops and the active one plays at full volume. */
-    private fun cancel() {
+    private fun cancel(reason: String = "called off", silently: Boolean = false) {
         if (phase == Phase.IDLE) return
         fadeJob?.cancel()
         fadeJob = null
@@ -287,8 +335,8 @@ class TwinPlayer private constructor(
         waiting.volume = 0f
         waiting.playWhenReady = false
         waiting.stop()
-        active.setPauseAtEndOfMediaItems(false)
         active.volume = userVolume
+        if (!silently) trace.off(reason)
     }
 
     /** Tells listeners the song moved on, as one player going into the next song would. */
@@ -369,7 +417,7 @@ class TwinPlayer private constructor(
         change: (ExoPlayer) -> Unit,
     ) {
         // A new queue: whatever was loaded is moot, and the waiting player shouldn't start on it.
-        if (replacesQueue) cancel()
+        if (replacesQueue) cancel("new queue")
         mutating++
         try {
             change(standby)
@@ -396,7 +444,7 @@ class TwinPlayer private constructor(
     }
 
     private fun recheckTarget() {
-        if (mutating == 0 && phase != Phase.IDLE && !targetStillNext()) cancel()
+        if (mutating == 0 && phase != Phase.IDLE && !targetStillNext()) cancel("next song changed")
     }
 
     private fun fresh(count: Int): (ShuffleOrder) -> ShuffleOrder =
@@ -533,17 +581,17 @@ class TwinPlayer private constructor(
     // ---- Playing, stopping -----------------------------------------------------------
 
     override fun pause() {
-        cancel()
+        cancel("paused")
         active.pause()
     }
 
     override fun setPlayWhenReady(playWhenReady: Boolean) {
-        if (!playWhenReady) cancel()
+        if (!playWhenReady) cancel("paused")
         active.playWhenReady = playWhenReady
     }
 
     override fun stop() {
-        cancel()
+        cancel("stopped")
         active.stop()
     }
 
@@ -582,27 +630,25 @@ class TwinPlayer private constructor(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (isActive && playbackState == Player.STATE_ENDED) {
-                if (phase == Phase.FADING) takeTurn() else cancel()
+                if (phase == Phase.FADING) songEnded(null) else cancel("queue ended")
             }
+            if (!isActive && playbackState == Player.STATE_READY && phase == Phase.LOADED) trace.ready()
             if (isActive) heardState = playbackState
             forward { it.onPlaybackStateChanged(playbackState) }
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (isActive && !playWhenReady) {
-                if (phase == Phase.FADING && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
-                    takeTurn()
-                } else {
-                    cancel()
-                }
-            }
+            if (isActive && !playWhenReady) cancel("paused")
             if (isActive) heardPlayWhenReady = playWhenReady
             forward { it.onPlayWhenReadyChanged(playWhenReady, reason) }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             // Includes buffering, a call taking audio focus and headphones coming out.
-            if (isActive && !isPlaying) cancel()
+            if (isActive && !isPlaying && phase != Phase.IDLE) {
+                if (phase == Phase.FADING) trace.outgoingStalled()
+                cancel("outgoing song stopped playing")
+            }
             if (isActive) heardPlaying = isPlaying
             forward { it.onIsPlayingChanged(isPlaying) }
         }
@@ -610,21 +656,29 @@ class TwinPlayer private constructor(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (isActive) {
                 failedItem = null
-                // Went on into the next song by itself (too late to stop it there): that's the turn too.
+                // Went on into the next song by itself: the turn (normally seen already, at the discontinuity).
                 if (phase == Phase.FADING && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
                     mediaItem == loadedItem
                 ) {
-                    takeTurn()
+                    songEnded(null)
                 } else {
-                    cancel()
+                    cancel("another song")
                 }
             }
             forward { it.onMediaItemTransition(mediaItem, reason) }
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            if (isActive && phase == Phase.FADING && reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION &&
+                newPosition.mediaItem == loadedItem
+            ) {
+                // The outgoing song ended, faded out, and its player went on into the next one:
+                // the turn. Listeners hear of it from the turn itself, with this end position.
+                songEnded(oldPosition)
+                if (!isActive) return
+            }
             if (isActive && (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT)) {
-                cancel()
+                cancel("seek")
             }
             forward { it.onPositionDiscontinuity(oldPosition, newPosition, reason) }
         }
@@ -636,11 +690,11 @@ class TwinPlayer private constructor(
 
         override fun onPlayerError(error: PlaybackException) {
             if (isActive) {
-                cancel()
+                cancel("error")
             } else if (phase != Phase.IDLE) {
                 // The next song wouldn't load: it ends without a fade, and isn't tried again.
                 failedItem = loadedItem
-                cancel()
+                cancel("next song won't load")
             }
             forward { it.onPlayerError(error) }
         }
@@ -689,6 +743,24 @@ class TwinPlayer private constructor(
         override fun onCues(cues: List<Cue>) = forward { it.onCues(cues) }
         override fun onCues(cueGroup: CueGroup) = forward { it.onCues(cueGroup) }
         override fun onMetadata(metadata: Metadata) = forward { it.onMetadata(metadata) }
+    }
+
+    /** Media3's own word on the audio: when sound really starts, and when it runs dry. */
+    private inner class Probe(private val source: ExoPlayer) : AnalyticsListener {
+        override fun onAudioPositionAdvancing(eventTime: AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
+            if (phase == Phase.FADING && source === standby) {
+                trace.sound(System.currentTimeMillis() - playoutStartSystemTimeMs)
+            }
+        }
+
+        override fun onAudioUnderrun(
+            eventTime: AnalyticsListener.EventTime,
+            bufferSize: Int,
+            bufferSizeMs: Long,
+            elapsedSinceLastFeedMs: Long,
+        ) {
+            if (phase != Phase.IDLE) trace.underrun(incoming = source === standby)
+        }
     }
 
     private companion object {
