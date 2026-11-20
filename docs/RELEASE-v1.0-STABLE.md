@@ -1,8 +1,20 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **177**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 176), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **178**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 177), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 178 — A new mini player you can swipe
+
+- **The song sits in a capsule between two buttons:** replay on the left, skip on
+  the right. Swipe the song right (or tap skip) and it is drawn into the skip button,
+  the next song growing back out of it; swipe left (or tap replay) and the song starts
+  again from the beginning, in the same place in your queue.
+- It follows your finger, and if you let go early it slides back without changing
+  anything. One swipe is always one skip, however fast you swipe.
+- Tap the song to open Now Playing; play and pause stay where they were.
+- With reduced motion on, the song simply changes. Every swipe is also a button and a
+  TalkBack action.
 
 ## Build 177 — Keep from the queue works
 

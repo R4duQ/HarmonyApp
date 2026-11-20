@@ -25,16 +25,28 @@ import com.harmony.core.model.PlayerState
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ShuffleMode
 import com.harmony.core.model.Song
+import com.harmony.core.ui.component.Artwork
 import com.harmony.core.ui.component.EditorialPalette
+import com.harmony.core.ui.theme.LocalReducedMotion
+import com.harmony.feature.player.gesture.GestureMiniActions
+import com.harmony.feature.player.gesture.GestureMiniLabels
+import com.harmony.feature.player.gesture.GestureMiniPlayer
+import com.harmony.feature.player.gesture.MiniTrack
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /** How many of the next songs the mini player lists. */
 private const val UP_NEXT_COUNT = 8
 
 /**
- * Persistent player above the navigation: [MiniPlayerCard] fed from the
- * player. It rises into place the first time a song loads and sinks away if
- * the queue is ever cleared.
+ * Persistent player above the navigation: the gesture mini player
+ * ([GestureMiniPlayer], Figma file rrilnVhuT79ENxaSaCUBnU) fed from the player.
+ * Swipe right or tap skip for the next song, swipe left or tap replay to
+ * start this one again, tap the song to open Now Playing. It rises into place
+ * the first time a song loads and sinks away if the queue is ever cleared.
  *
  * [shown] is false while Now Playing is open. The card then lifts and fades
  * into the player as it opens, and when the player closes the card drops
@@ -56,11 +68,6 @@ fun MiniPlayer(
     viewModel: PlayerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
-    val forms by viewModel.outputForms.collectAsStateWithLifecycle()
-    val brain by viewModel.brainTelemetry.collectAsStateWithLifecycle()
-    val liveEq by viewModel.liveSpectralEq.collectAsStateWithLifecycle()
-    val mix by viewModel.mix.collectAsStateWithLifecycle()
-    val onlineMix by viewModel.onlineMix.collectAsStateWithLifecycle()
 
     var lastSong by remember { mutableStateOf<Song?>(null) }
     state.currentSong?.let { lastSong = it }
@@ -98,38 +105,49 @@ fun MiniPlayer(
         },
     ) {
         if (song == null) return@AnimatedVisibility
-        val output = state.audioOutput
-        val ui = MiniPlayerUi(
-            song = song,
-            isPlaying = state.isPlaying,
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            shuffleOn = state.shuffleMode != ShuffleMode.OFF,
-            repeatMode = state.repeatMode,
-            deviceLabel = output.label,
-            deviceIcon = OutputIcons.forOutput(output.type, OutputForms.effective(output, forms)),
-            upNext = upNext(state),
-            telemetry = miniTelemetryLine(
-                brain.nowPlaying?.takeIf { it.trace.trackId == song.id },
-                liveSpectralEq = liveEq,
-                mixStatus = mixStatusFor(mix, onlineMix, upcomingEmpty = state.queueIndex >= state.queue.lastIndex),
-            ),
+        val next = nextSong(state)
+        val labels = GestureMiniLabels(
+            nowPlaying = stringResource(R.string.player_mini_spoken, song.title, song.artist),
+            state = stringResource(if (state.isPlaying) R.string.player_state_playing else R.string.player_state_paused),
+            next = stringResource(R.string.player_next),
+            replay = stringResource(R.string.player_restart),
+            play = stringResource(R.string.player_play),
+            pause = stringResource(R.string.player_pause),
+            open = stringResource(R.string.player_open),
         )
         val actions = remember(viewModel, onExpand) {
-            MiniPlayerActions(
-                onExpand = onExpand,
+            GestureMiniActions(
+                onSkip = viewModel::onNext,
+                // The same song from the start, in the same place in the queue; playing or paused as it was.
+                onReplay = { viewModel.onSeek(0L) },
                 onPlayPause = viewModel::onPlayPause,
-                onNext = viewModel::onNext,
-                onPrevious = viewModel::onPrevious,
-                onShuffle = viewModel::cycleShuffleMode,
-                onRepeat = viewModel::cycleRepeatMode,
-                onSeek = viewModel::onSeek,
-                onUpNext = viewModel::onQueueItemClick,
+                onExpand = onExpand,
             )
         }
-        MiniPlayerCard(ui, actions)
+        GestureMiniPlayer(
+            current = song.toMiniTrack(),
+            next = next?.toMiniTrack(),
+            isPlaying = state.isPlaying,
+            progress = { if (state.durationMs > 0) state.positionMs.toFloat() / state.durationMs else 0f },
+            positionMs = { state.positionMs },
+            actions = actions,
+            labels = labels,
+            reducedMotion = LocalReducedMotion.current,
+            // Figma's 388 dp player sits 12 dp in from each side of a 412 dp phone.
+            modifier = Modifier.padding(horizontal = 12.dp),
+        ) { track, modifier ->
+            val s = track.artwork as? Song
+            Artwork(s?.artworkUri, contentDescription = null, modifier = modifier, cornerRadius = 10.dp)
+        }
     }
 }
+
+/** The song a skip goes to: the next in the queue, or the first again when the queue repeats. */
+internal fun nextSong(state: PlayerState): Song? =
+    state.queue.getOrNull(state.queueIndex + 1)
+        ?: if (state.repeatMode == RepeatMode.ALL && state.queue.size > 1) state.queue.first() else null
+
+private fun Song.toMiniTrack() = MiniTrack(key = id, title = title, artist = artist, artwork = this)
 
 /**
  * The line under the mini player's title, in plain words and from live data

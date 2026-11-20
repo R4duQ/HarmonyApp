@@ -21,6 +21,8 @@ Upstream license files and copyright notices remain authoritative for the respec
   Source: https://github.com/erikdkennedy/figtree
   The variable font is bundled as core/ui/src/main/res/font/figtree.ttf;
   the license text is in core/ui/src/main/res/raw/figtree_ofl.txt.
+- Inter 3.019 (SIL Open Font License 1.1), copyright 2016 The Inter Project Authors, in
+  feature/player/src/main/res/font (the mini player, as designed in Figma).
 - Bricolage Grotesque (SIL Open Font License 1.1), copyright 2022 The Bricolage
   Grotesque Project Authors. Source: https://github.com/ateliertriay/bricolage
   The variable font is bundled as core/ui/src/main/res/font/bricolage_grotesque.ttf;
