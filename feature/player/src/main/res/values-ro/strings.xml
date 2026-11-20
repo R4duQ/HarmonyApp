@@ -35,4 +35,5 @@
     <string name="np_show_details">Arată detaliile fișierului</string>
     <string name="np_hide_details">Ascunde detaliile fișierului</string>
     <string name="np_open_queue">Deschide coada</string>
+    <string name="player_restart">Reia piesa de la început</string>
 </resources>

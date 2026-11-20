@@ -39,4 +39,6 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation(composeBom)
     debugImplementation(libs.compose.ui.test.manifest)
+    // The mini player motion lab (src/debug), launched on a phone with adb.
+    debugImplementation(libs.androidx.activity.compose)
 }

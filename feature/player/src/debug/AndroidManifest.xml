@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug builds only: the mini player motion lab.
+             adb shell am start -n com.harmony.app/com.harmony.feature.player.gesture.MiniMotionLabActivity -->
+        <activity
+            android:name="com.harmony.feature.player.gesture.MiniMotionLabActivity"
+            android:exported="true"
+            android:label="Mini player motion lab"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+    </application>
+</manifest>
