@@ -1,8 +1,19 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **175**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 174), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **176**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 175), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 176 — Crossfade without the hitch
+
+- **Songs fade into each other without a break.** When the next song came in, the
+  song ending could stop for a moment, the record stood still and the next song came in
+  late. It happened with short fades and when the next song arrived in the last seconds
+  (an online mix). The song ending is now simply faded out and goes on into the next
+  one; if the next one isn't ready in time, it plays on without a gap.
+- Your crossfade length, the queue order and the record are unchanged.
+- Every crossfade is now timed and written to the log (`HarmonyXfade`), so it can be
+  checked on a phone.
 
 ## Build 175 — Getting music, albums, Spotify, the queue, Settings and Discover in the new look
 
