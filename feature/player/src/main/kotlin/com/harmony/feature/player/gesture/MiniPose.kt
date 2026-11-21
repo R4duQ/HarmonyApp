@@ -23,6 +23,12 @@ internal enum class MiniMode {
     Replay,
     /** The restart pulse, for a restart made elsewhere (frame 05). */
     ReplayCompleted,
+    /**
+     * The song ends by itself: absorbed into the skip button, which prepares
+     * the next song (it holds there, pulsing, until the player has it), then
+     * releases it (frame 06).
+     */
+    AutoNext,
 }
 
 /** The fixed parts of the layout for a player [width] dp wide (Figma: 388). */
@@ -48,8 +54,8 @@ internal class MiniGeometry(val width: Float) {
     /** Skip: a width keyframe, the 260 resting width taking the space there is (12 stays 12, the size it is absorbed at). */
     fun skipWidth(figma: Float): Float = 12f + (figma - 12f) * (capsuleWidth - 12f) / 248f
 
-    /** Replay: a width keyframe (3 stays 3, the size it is absorbed at). */
-    fun replayWidth(figma: Float): Float = 3f + (figma - 3f) * (capsuleWidth - 3f) / 257f
+    /** Replay: a width keyframe (12 stays 12, the size it is absorbed at and born from). */
+    fun replayWidth(figma: Float): Float = 12f + (figma - 12f) * (capsuleWidth - 12f) / 248f
 }
 
 /** The capsule: the outgoing song, or the incoming one. */
@@ -80,13 +86,28 @@ internal data class CapsulePose(
     val artistAlpha: Float = 1f,
     val artistBlur: Float = 0f,
     val railX: Float = 0f,
+    val railY: Float = 0f,
+    val railScaleY: Float = 1f,
     val railScaleX: Float = 1f,
     val railAlpha: Float = 1f,
     /** Figma's own progress width (2..90 dp) when the timeline animates it; null shows the real position. */
     val progressFigma: Float? = null,
 )
 
+/** The skip button preparing the next song (frame 06): pressure ring, orbit and core. */
+internal data class PreparePose(
+    val ringScale: Float,
+    val ringAlpha: Float,
+    val spinDegrees: Float,
+    val spinScale: Float,
+    val spinAlpha: Float,
+    val coreScale: Float,
+    val coreAlpha: Float,
+)
+
 internal data class ButtonPose(
+    /** The whole button's sideways nudge. */
+    val offsetX: Float = 0f,
     val scaleX: Float = 1f,
     val scaleY: Float = 1f,
     val background: Color = MiniColors.Button,
@@ -110,6 +131,7 @@ internal data class MiniPose(
     val incoming: CapsulePose?,
     val pauseAlpha: Float = 1f,
     val pauseScale: Float = 1f,
+    val prepare: PreparePose? = null,
 )
 
 internal object MiniColors {
@@ -129,7 +151,7 @@ internal object MiniColors {
 }
 
 /** Every layer at [t] ms into [mode]'s Figma timeline. */
-internal fun miniPose(mode: MiniMode, t: Float, geometry: MiniGeometry): MiniPose {
+internal fun miniPose(mode: MiniMode, t: Float, geometry: MiniGeometry, extraSpinDegrees: Float = 0f): MiniPose {
     val g = geometry
     val restCapsule = CapsulePose(x = g.capsuleX, y = g.capsuleY, width = g.capsuleWidth, height = g.capsuleHeight)
     val restReplay = ButtonPose(fill = Color.Transparent)
@@ -139,6 +161,7 @@ internal fun miniPose(mode: MiniMode, t: Float, geometry: MiniGeometry): MiniPos
         MiniMode.Skip -> skipPose(MiniMotionData.SKIP, t, g, restCapsule, restReplay)
         MiniMode.SkipCompleted -> skipCompletedPose(MiniMotionData.SKIP_COMPLETED, t, g, restCapsule, restReplay)
         MiniMode.Replay -> replayPose(MiniMotionData.REPLAY, t, g, restCapsule, restSkip)
+        MiniMode.AutoNext -> autoNextPose(MiniMotionData.AUTO_NEXT, t, g, restCapsule, restReplay, extraSpinDegrees)
         MiniMode.ReplayCompleted -> {
             val tl = MiniMotionData.REPLAY_COMPLETED
             MiniPose(
@@ -239,19 +262,86 @@ private fun replayPose(tl: Timeline, t: Float, g: MiniGeometry, rest: CapsulePos
     bridgeAlpha = tl.number("bridge", Prop.Opacity, t, 0f),
     bridgeX = g.replayBridgeX,
     replay = ButtonPose(
+        offsetX = tl.number("replayButton", Prop.TranslateX, t, 0f),
         scaleX = tl.number("replayButton", Prop.ScaleX, t, 1f),
         scaleY = tl.number("replayButton", Prop.ScaleY, t, 1f),
         background = tl.color("replayButton", Prop.Background, t, MiniColors.Button),
+        iconAlpha = tl.number("replayIcon", Prop.Opacity, t, 1f),
         iconRotationDegrees = Math.toDegrees(tl.number("replayIcon", Prop.Rotate, t, 0f).toDouble()).toFloat(),
         fill = Color.Transparent,
         stroke = tl.color("replayVector", Prop.Stroke, t, MiniColors.Icon),
     ),
     skip = restSkip,
+    // The song is drawn into the replay button, its content sliding out to the left.
     outgoing = rest.copy(
         x = g.capsuleX + tl.number("capsule", Prop.TranslateX, t, 0f),
         y = g.capsuleY + tl.number("capsule", Prop.TranslateY, t, 0f),
         width = g.replayWidth(tl.number("capsule", Prop.Width, t, 260f)),
         height = tl.number("capsule", Prop.Height, t, 64f),
+        radius = tl.number("capsule", Prop.Radius, t, 32f),
+        background = tl.color("capsule", Prop.Background, t, MiniColors.Capsule),
+        alpha = tl.number("capsule", Prop.Opacity, t, 1f),
+        artScale = tl.number("art", Prop.ScaleX, t, 1f),
+        artX = tl.number("art", Prop.TranslateX, t, 0f),
+        artAlpha = tl.number("art", Prop.Opacity, t, 1f),
+        titleX = tl.number("title", Prop.TranslateX, t, 0f),
+        titleAlpha = tl.number("title", Prop.Opacity, t, 1f),
+        artistX = tl.number("artist", Prop.TranslateX, t, 0f),
+        artistAlpha = tl.number("artist", Prop.Opacity, t, 1f),
+        railX = tl.number("rail", Prop.TranslateX, t, 0f),
+        railY = tl.number("rail", Prop.TranslateY, t, 0f),
+        railAlpha = tl.number("rail", Prop.Opacity, t, 1f),
+        progressFigma = tl.number("progress", Prop.Width, t, 90f),
+    ),
+    // The same song, restarted: born where the old one went into the button, growing back into place.
+    incoming = CapsulePose(
+        x = g.capsuleX + tl.number("incoming", Prop.TranslateX, t, 0f),
+        y = g.capsuleY + tl.number("incoming", Prop.TranslateY, t, 0f),
+        width = g.replayWidth(tl.number("incoming", Prop.Width, t, 260f)),
+        height = tl.number("incoming", Prop.Height, t, 64f),
+        radius = tl.number("incoming", Prop.Radius, t, 32f),
+        background = tl.color("incoming", Prop.Background, t, MiniColors.Capsule),
+        alpha = tl.number("incoming", Prop.Opacity, t, 1f),
+        glowBlur = tl.number("incoming", Prop.ShadowBlur, t, 0f),
+        glowAlpha = tl.number("incoming", Prop.ShadowAlpha, t, 0f),
+        artScale = tl.number("inArt", Prop.ScaleX, t, 1f),
+        artX = tl.number("inArt", Prop.TranslateX, t, 0f),
+        artAlpha = tl.number("inArt", Prop.Opacity, t, 1f),
+        artBlur = tl.number("inArt", Prop.Blur, t, 0f),
+        titleX = tl.number("inTitle", Prop.TranslateX, t, 0f),
+        titleAlpha = tl.number("inTitle", Prop.Opacity, t, 1f),
+        titleBlur = tl.number("inTitle", Prop.Blur, t, 0f),
+        artistX = tl.number("inArtist", Prop.TranslateX, t, 0f),
+        artistAlpha = tl.number("inArtist", Prop.Opacity, t, 1f),
+        artistBlur = tl.number("inArtist", Prop.Blur, t, 0f),
+        railScaleX = tl.number("inRail", Prop.ScaleX, t, 1f),
+        railAlpha = tl.number("inRail", Prop.Opacity, t, 1f),
+        progressFigma = tl.number("inProgress", Prop.Width, t, 2f),
+    ),
+    pauseAlpha = tl.number("pause", Prop.Opacity, t, 1f),
+)
+
+private fun autoNextPose(
+    tl: Timeline,
+    t: Float,
+    g: MiniGeometry,
+    rest: CapsulePose,
+    restReplay: ButtonPose,
+    extraSpinDegrees: Float,
+) = MiniPose(
+    outlineAlpha = tl.number("outline", Prop.Opacity, t, 0f),
+    trailAlpha = tl.number("trail", Prop.Opacity, t, 0f),
+    trailIsReplay = false,
+    bridgeAlpha = tl.number("bridge", Prop.Opacity, t, 0f),
+    bridgeX = g.skipBridgeX,
+    replay = restReplay,
+    skip = skipButton(tl, t).copy(offsetX = tl.number("skipButton", Prop.TranslateX, t, 0f)),
+    outgoing = rest.copy(
+        x = g.capsuleX + g.skipTravel(tl.number("capsule", Prop.TranslateX, t, 0f)),
+        y = g.capsuleY + tl.number("capsule", Prop.TranslateY, t, 0f),
+        width = g.skipWidth(tl.number("capsule", Prop.Width, t, 260f)),
+        height = tl.number("capsule", Prop.Height, t, 64f),
+        radius = tl.number("capsule", Prop.Radius, t, 32f),
         background = tl.color("capsule", Prop.Background, t, MiniColors.Capsule),
         alpha = tl.number("capsule", Prop.Opacity, t, 1f),
         artScale = tl.number("art", Prop.ScaleX, t, 1f),
@@ -261,25 +351,39 @@ private fun replayPose(tl: Timeline, t: Float, g: MiniGeometry, rest: CapsulePos
         artistX = tl.number("artist", Prop.TranslateX, t, 0f),
         artistAlpha = tl.number("artist", Prop.Opacity, t, 1f),
         railX = tl.number("rail", Prop.TranslateX, t, 0f),
+        railScaleY = tl.number("rail", Prop.ScaleY, t, 1f),
         railAlpha = tl.number("rail", Prop.Opacity, t, 1f),
-        progressFigma = tl.number("progress", Prop.Width, t, 90f),
+        // Figma fills the rail to the end (126 -> 138): the song's own position does that here.
     ),
-    // The same song, restarted: at the resting place, settling in from a little to the left.
-    incoming = rest.copy(
-        x = g.capsuleX + tl.number("incoming", Prop.TranslateX, t, 0f),
-        alpha = tl.number("incoming", Prop.Opacity, t, 1f),
-        scaleX = tl.number("incoming", Prop.ScaleX, t, 1f),
-        scaleY = tl.number("incoming", Prop.ScaleY, t, 1f),
-        artAlpha = tl.number("inArt", Prop.Opacity, t, 1f),
-        titleY = tl.number("inTitle", Prop.TranslateY, t, 0f),
-        titleAlpha = tl.number("inTitle", Prop.Opacity, t, 1f),
-        artistY = tl.number("inArtist", Prop.TranslateY, t, 0f),
-        artistAlpha = tl.number("inArtist", Prop.Opacity, t, 1f),
-        railAlpha = tl.number("inRail", Prop.Opacity, t, 1f),
-        progressFigma = 2f,
-    ),
+    incoming = skipIncoming(tl, t, g),
     pauseAlpha = tl.number("pause", Prop.Opacity, t, 1f),
+    prepare = PreparePose(
+        ringScale = tl.number("ring", Prop.ScaleX, t, 1f),
+        ringAlpha = tl.number("ring", Prop.Opacity, t, 0f),
+        spinDegrees = Math.toDegrees(tl.number("preparing", Prop.Rotate, t, 0f).toDouble()).toFloat() + extraSpinDegrees,
+        spinScale = tl.number("preparing", Prop.ScaleX, t, 1f),
+        spinAlpha = tl.number("preparing", Prop.Opacity, t, 0f),
+        coreScale = tl.number("core", Prop.ScaleX, t, 1f),
+        coreAlpha = tl.number("core", Prop.Opacity, t, 1f),
+    ),
 )
+
+/**
+ * Frame 06 holds here while the next song isn't playing yet: from 45.7% to
+ * 61.8% of its 2.8 s the ring, the core and the button pulse through one
+ * full cycle and come back to where they started, so the cycle repeats
+ * without a seam (the orbit keeps turning: see [autoNextLoopSpinDegrees]).
+ */
+internal val AUTO_NEXT_HOLD_FROM_MS = 0.457f * 2800f
+internal val AUTO_NEXT_HOLD_TO_MS = 0.618f * 2800f
+
+/** How far the orbit turns in one hold cycle, carried over so it keeps turning. */
+internal fun autoNextLoopSpinDegrees(): Float {
+    val tl = MiniMotionData.AUTO_NEXT
+    val a = tl.number("preparing", Prop.Rotate, AUTO_NEXT_HOLD_FROM_MS, 0f)
+    val b = tl.number("preparing", Prop.Rotate, AUTO_NEXT_HOLD_TO_MS, 0f)
+    return Math.toDegrees((b - a).toDouble()).toFloat()
+}
 
 /** The Figma timeline behind [mode] (Rest has none). */
 internal fun timelineOf(mode: MiniMode): Timeline? = when (mode) {
@@ -288,6 +392,7 @@ internal fun timelineOf(mode: MiniMode): Timeline? = when (mode) {
     MiniMode.SkipCompleted -> MiniMotionData.SKIP_COMPLETED
     MiniMode.Replay -> MiniMotionData.REPLAY
     MiniMode.ReplayCompleted -> MiniMotionData.REPLAY_COMPLETED
+    MiniMode.AutoNext -> MiniMotionData.AUTO_NEXT
 }
 
 /**
@@ -298,5 +403,6 @@ internal fun timelineOf(mode: MiniMode): Timeline? = when (mode) {
 internal fun handoffMs(mode: MiniMode): Float = when (mode) {
     MiniMode.Skip -> MiniMotionData.SKIP.goneFrom("capsule")
     MiniMode.Replay -> MiniMotionData.REPLAY.goneFrom("capsule")
+    MiniMode.AutoNext -> MiniMotionData.AUTO_NEXT.goneFrom("capsule")
     else -> 0f
 }

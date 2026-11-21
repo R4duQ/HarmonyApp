@@ -33,6 +33,8 @@ class GestureMiniBehaviourTest {
     private var replays = 0
     private var expands = 0
     private var current by mutableStateOf(midnight)
+    private var position by mutableStateOf(120_000L)
+    private var playing = true
     private var next by mutableStateOf<MiniTrack?>(solar)
     private lateinit var state: MiniMotionState
 
@@ -45,8 +47,8 @@ class GestureMiniBehaviourTest {
             state = rememberMiniMotionState()
             Box(Modifier.width(388.dp)) {
                 GestureMiniPlayer(
-                    current = current, next = next, isPlaying = true,
-                    progress = { FIGMA_PROGRESS }, positionMs = { 120_000L },
+                    current = current, next = next, isPlaying = playing,
+                    progress = { FIGMA_PROGRESS }, positionMs = { position }, durationMs = { 200_000L },
                     actions = GestureMiniActions(
                         onSkip = { skips++; commandAt = rule.mainClock.currentTime; next?.let { current = it; next = null } },
                         onReplay = { replays++; commandAt = rule.mainClock.currentTime },
@@ -198,5 +200,38 @@ class GestureMiniBehaviourTest {
         assertEquals(MiniMode.Rest, state.mode)
         assertEquals(solar, state.shown(current))
         assertEquals(0, skips)
+    }
+
+    @Test
+    fun `a song ending by itself goes into the skip button, which holds until the next one plays`() {
+        setUp()
+        rule.runOnIdle { position = 198_600L } // 1.4 s left
+        rule.waitForIdle()
+        rule.mainClock.advanceTimeBy(1_000)
+        assertEquals(MiniMode.AutoNext, state.mode)
+        // The player hasn't moved on: it keeps preparing, well past the timeline's 2.8 s.
+        rule.mainClock.advanceTimeBy(3_500)
+        assertEquals(MiniMode.AutoNext, state.mode)
+        assertEquals(midnight, state.shown(current))
+        // It moves on: released, the next song comes out, and it ends at rest on it.
+        rule.runOnIdle { current = solar; next = null; position = 200L }
+        rule.waitForIdle()
+        settle(2_500)
+        assertEquals(MiniMode.Rest, state.mode)
+        assertEquals(solar, state.shown(current))
+        assertEquals(0, skips)
+    }
+
+    @Test
+    fun `if the player never moves on, the button gives the song back`() {
+        setUp()
+        rule.runOnIdle { position = 198_600L }
+        rule.waitForIdle()
+        rule.mainClock.advanceTimeBy(1_000)
+        assertEquals(MiniMode.AutoNext, state.mode)
+        settle(12_000)
+        assertEquals(MiniMode.Rest, state.mode)
+        assertTrue(!state.busy)
+        assertEquals(midnight, state.shown(current))
     }
 }

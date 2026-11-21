@@ -52,12 +52,14 @@ internal fun FrozenPlayer(
     incoming: MiniTrack? = if (mode == MiniMode.Replay) midnight else solar,
     width: Float = 388f,
     state: MiniMotionState = rememberMiniMotionState(),
+    // Frame 06 starts with the rail at 126 of 138: the song in its last half second.
+    progress: Float = if (mode == MiniMode.AutoNext) 126f / 138f else FIGMA_PROGRESS,
 ) {
     LaunchedEffect(mode, t) { state.showFrame(mode, t, if (mode == MiniMode.Rest) null else incoming) }
     Box(Modifier.size(width.dp, 80.dp)) {
         GestureMiniPlayer(
             current = current, next = solar, isPlaying = true,
-            progress = { FIGMA_PROGRESS }, positionMs = { 120_000L },
+            progress = { progress }, positionMs = { 120_000L },
             actions = GestureMiniActions(), labels = labels, state = state,
             artwork = { track, m -> FigmaArtwork(track, m) },
         )

@@ -7,7 +7,7 @@ easing exactly as Figma exports them, nothing re-timed or approximated.
     python3 tools/figma/mini_motion_codegen.py
 
 Figma file rrilnVhuT79ENxaSaCUBnU, frames 3:6 (skip), 3:10 (skip completed),
-3:14 (replay), 3:18 (replay completed).
+3:14 (replay), 3:18 (replay completed), 10:2 (automatic next: prepare & release).
 """
 import json, re, sys
 from pathlib import Path
@@ -33,10 +33,17 @@ TIMELINES = {
         "3:341": "outline", "3:344": "trail", "3:346": "bridge", "3:347": "replayButton", "3:348": "replayIcon",
         "3:349": "replayVector", "3:354": "capsule", "3:355": "art", "3:356": "title", "3:357": "artist",
         "3:358": "rail", "3:359": "progress", "3:465": "incoming", "3:466": "inArt", "3:467": "inTitle",
-        "3:468": "inArtist", "3:472": "inRail", "3:469": "pause",
+        "3:468": "inArtist", "3:472": "inRail", "3:473": "inProgress", "3:469": "pause",
     }),
     "REPLAY_COMPLETED": ("motion_3_18.json", "3:18 · 05 Mini player — Replay completed", {
         "3:363": "replayButton", "3:370": "capsule",
+    }),
+    "AUTO_NEXT": ("motion_10_2.json", "10:2 · 06 Mini player — Automatic next · Prepare & release", {
+        "10:95": "outline", "10:187": "trail", "10:280": "bridge", "10:482": "skipButton", "10:669": "skipIcon",
+        "10:682": "skipTriangle", "10:689": "skipBar", "10:11110": "ring", "10:11138": "preparing",
+        "10:11142": "core", "10:1269": "capsule", "10:1547": "art", "10:1732": "title", "10:1917": "artist",
+        "10:2102": "rail", "10:2103": "progress", "10:2677": "incoming", "10:3054": "inArt", "10:3334": "inTitle",
+        "10:3616": "inArtist", "10:3802": "inRail", "10:3896": "inProgress", "10:3992": "pause",
     }),
 }
 
@@ -89,6 +96,7 @@ def kt_float(x):
 
 def generate():
     out = []
+    funcs = []
     for name, (file, frame, roles) in TIMELINES.items():
         data = json.loads((SRC / file).read_text())
         cohort = data["timelineCohorts"][0]
@@ -128,9 +136,17 @@ def generate():
                     tracks.append(f'        Key("{role}", Prop.{prop}) to NumberTrack(floatArrayOf({t}), floatArrayOf({", ".join(values)}), arrayOf({e})),')
             if origin and origin.group(1) != "50":
                 tracks.append(f'        // {role}: transform origin x = {origin.group(1)}%')
-        out.append(f"    /** Figma {frame}, {duration} ms. */\n    val {name} = Timeline(\n        durationMs = {duration}f,\n        tracks = mapOf(\n" +
-                   "\n".join("    " + x if not x.strip().startswith("//") else "    " + x for x in tracks) +
-                   "\n        ),\n    )\n")
+        # One function per track: the JVM caps a method (and a class initializer) at 64 KB.
+        calls = []
+        for i, line in enumerate(x for x in tracks if not x.strip().startswith("//")):
+            fn = f"{name.lower()}{i}"
+            body = line.strip().rstrip(",")
+            funcs.append(f"    private fun {fn}(): Pair<Key, Track> = {body}\n")
+            calls.append(f"{fn}()")
+        notes = "".join(f"    {x.strip()}\n" for x in tracks if x.strip().startswith("//"))
+        out.append(f"    /** Figma {frame}, {duration} ms. */\n{notes}    val {name}: Timeline by lazy {{\n        Timeline(\n            durationMs = {duration}f,\n            tracks = mapOf(\n" +
+                   "".join(f"                {c},\n" for c in calls) +
+                   "            ),\n        )\n    }\n")
     header = '''package com.harmony.feature.player.gesture
 
 import androidx.compose.animation.core.CubicBezierEasing
@@ -142,7 +158,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 internal object MiniMotionData {
 '''
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(header + "\n".join(out) + "}\n")
+    OUT.write_text(header + "\n".join(out) + "\n" + "".join(funcs) + "}\n")
     print("wrote", OUT, sum(1 for l in OUT.read_text().splitlines() if " to " in l), "tracks")
 
 

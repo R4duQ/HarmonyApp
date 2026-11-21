@@ -69,6 +69,7 @@ private fun MiniMotionLab() {
     var log by remember { mutableStateOf("Swipe the player, or tap a transition.") }
     var hold by remember { mutableStateOf<MiniMode?>(null) }
     var holdAt by remember { mutableFloatStateOf(0f) }
+    var prepareMs by remember { mutableFloatStateOf(1_500f) }
     val current = labSongs[index]
     val next = if (hasNext) labSongs[(index + 1) % labSongs.size] else null
     LaunchedEffect(slow) { state.timeScale = if (slow) 4f else 1f }
@@ -109,14 +110,28 @@ private fun MiniMotionLab() {
             Button(onClick = { hold = null; state.preview(scope, MiniMode.SkipCompleted, next ?: labSongs[1]) }) { Text("03 Skip completed") }
             Button(onClick = { hold = null; state.replay(scope, current, reduced) { log = "Replay command at the handoff (seek to 0)" } }) { Text("04 Replay") }
             Button(onClick = { hold = null; state.preview(scope, MiniMode.ReplayCompleted, null) }) { Text("05 Replay completed") }
+            Button(onClick = {
+                hold = null
+                next?.let { target ->
+                    state.autoNext(scope, current, target)
+                    // The "player" takes a moment to start the next song: the skip button prepares meanwhile.
+                    scope.launch {
+                        kotlinx.coroutines.delay(prepareMs.toLong() * if (slow) 4 else 1)
+                        log = "Automatic next: the player moved on after ${prepareMs.toInt()} ms"
+                        index = (index + 1) % labSongs.size
+                    }
+                }
+            }) { Text("06 Automatic next") }
         }
+        Text("06: the next song takes ${prepareMs.toInt()} ms to start", color = Color.White)
+        Slider(prepareMs, { prepareMs = it }, valueRange = 0f..5_000f, modifier = Modifier.padding(horizontal = 24.dp))
         Toggle("Slow motion (4x)", slow) { slow = it }
         Toggle("Reduced motion", reduced) { reduced = it }
         Toggle("A next song to skip to", hasNext) { hasNext = it }
 
         Text("Hold a moment", color = Color.White)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
-            for (mode in listOf(MiniMode.Skip, MiniMode.SkipCompleted, MiniMode.Replay, MiniMode.ReplayCompleted)) {
+            for (mode in listOf(MiniMode.Skip, MiniMode.SkipCompleted, MiniMode.Replay, MiniMode.ReplayCompleted, MiniMode.AutoNext)) {
                 OutlinedButton(onClick = { hold = mode; holdAt = 0f }) { Text(mode.name) }
             }
         }

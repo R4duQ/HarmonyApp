@@ -144,12 +144,14 @@ fun GestureMiniPlayer(
     labels: GestureMiniLabels,
     modifier: Modifier = Modifier,
     reducedMotion: Boolean = false,
+    /** The song's length, for automatic next (frame 06) as it ends; 0 when unknown. */
+    durationMs: () -> Long = { 0L },
     state: MiniMotionState = rememberMiniMotionState(),
     artwork: @Composable (MiniTrack, Modifier) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val latest by rememberUpdatedState(actions)
-    state.Follow(current, next, positionMs, reducedMotion)
+    state.Follow(current, next, positionMs, reducedMotion, durationMs, isPlaying)
 
     BoxWithConstraints(
         modifier
@@ -226,6 +228,7 @@ fun GestureMiniPlayer(
                 x = geometry.skipX, y = geometry.buttonY, pose = pose.skip, tag = MiniTags.SKIP,
                 label = labels.next, enabled = canSkip,
                 onClick = { next?.let { state.skip(scope, it, reducedMotion) { latest.onSkip() } } },
+                overlay = pose.prepare?.let { prepare -> { PreparingGlyph(prepare) } },
             ) { SkipGlyph(pose.skip.fill, pose.skip.stroke) }
 
             if (pose.outgoing.visible && pose.outgoing.alpha > 0f) {
@@ -283,6 +286,7 @@ private fun SideButton(
     label: String,
     enabled: Boolean,
     onClick: () -> Unit,
+    overlay: (@Composable () -> Unit)? = null,
     icon: @Composable () -> Unit,
 ) {
     Box(
@@ -290,6 +294,7 @@ private fun SideButton(
             .offset(x.dp, y.dp)
             .size(48.dp)
             .graphicsLayer {
+                translationX = pose.offsetX * density
                 scaleX = pose.scaleX
                 scaleY = pose.scaleY
             }
@@ -307,6 +312,7 @@ private fun SideButton(
             translationX = pose.iconX * density
             alpha = pose.iconAlpha
         }) { icon() }
+        overlay?.invoke()
     }
 }
 
@@ -406,6 +412,8 @@ private fun ProgressRail(pose: CapsulePose, g: MiniGeometry, progress: () -> Flo
             .size(g.railWidth.dp, 2.dp)
             .graphicsLayer {
                 translationX = pose.railX * density
+                translationY = pose.railY * density
+                scaleY = pose.railScaleY
                 alpha = pose.railAlpha
                 scaleX = pose.railScaleX
                 transformOrigin = TransformOrigin(0f, 0.5f)

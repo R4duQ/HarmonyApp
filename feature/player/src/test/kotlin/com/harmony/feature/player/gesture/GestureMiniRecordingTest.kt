@@ -81,4 +81,7 @@ class GestureMiniRecordingTest {
 
     @Test @Config(sdk = [34], qualifiers = "w420dp-h200dp-mdpi")
     fun replayCompleted() = record(MiniMode.ReplayCompleted, "replay_completed")
+
+    @Test @Config(sdk = [34], qualifiers = "w420dp-h200dp-mdpi")
+    fun autoNext() = record(MiniMode.AutoNext, "auto_next")
 }
