@@ -1,8 +1,16 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **178**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 177), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **179**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 178), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 179 — Replay and the end of a song, newly animated
+
+- **Replay** now mirrors skip: swipe left and the song is drawn into the replay button,
+  then starts again, growing back out of the same spot.
+- **When a song ends by itself,** it slips into the skip button, which shows that the
+  next song is being prepared, and lets it out as soon as it plays. If the next song
+  takes a moment (an online mix preparing it, say), the button waits with it.
 
 ## Build 178 — A new mini player you can swipe
 

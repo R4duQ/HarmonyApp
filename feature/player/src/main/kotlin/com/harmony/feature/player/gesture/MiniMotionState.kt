@@ -58,6 +58,12 @@ class MiniMotionState internal constructor() {
     private var dragging by mutableStateOf(false)
     private var dragTime by mutableFloatStateOf(0f)
 
+    /** Automatic next: the player has moved on, so the held preparation can let the next song out. */
+    private var released = false
+
+    /** Automatic next: how far the orbit has turned in the hold cycles so far, carried into the pose. */
+    private var spin by mutableFloatStateOf(0f)
+
     private var lastKey: Any? = null
     private var nextOfLast: Any? = null
     private var unpin: Job? = null
@@ -65,7 +71,7 @@ class MiniMotionState internal constructor() {
     internal fun pose(g: MiniGeometry): MiniPose = when {
         mode == MiniMode.Rest -> miniPose(MiniMode.Rest, 0f, g)
         dragging -> miniPose(mode, dragTime, g)
-        else -> miniPose(mode, time.value, g)
+        else -> miniPose(mode, time.value, g, extraSpinDegrees = spin)
     }
 
     /** The song the outgoing (resting) capsule shows. */
@@ -117,6 +123,65 @@ class MiniMotionState internal constructor() {
         }
     }
 
+    /**
+     * The song is ending on its own (frame 06): [old] goes into the skip
+     * button, which prepares the next song, pulsing through its hold cycle
+     * for as long as the player hasn't started it, then lets [next] out. The
+     * player moves on by itself: there is no command. If it never does (a
+     * pause at the very end, a refused advance) the button gives up after
+     * [AUTO_NEXT_GIVE_UP_MS] and the song comes back out.
+     */
+    internal fun autoNext(scope: CoroutineScope, old: MiniTrack, next: MiniTrack) {
+        if (busy || dragging) return
+        busy = true
+        released = false
+        spin = 0f
+        unpin?.cancel()
+        pinned = old
+        scope.launch {
+            incoming = next
+            mode = MiniMode.AutoNext
+            time.snapTo(0f)
+            play(AUTO_NEXT_HOLD_FROM_MS)
+            var held = 0f
+            while (!released) {
+                play(AUTO_NEXT_HOLD_TO_MS)
+                if (released) break
+                held += AUTO_NEXT_HOLD_TO_MS - AUTO_NEXT_HOLD_FROM_MS
+                if (held >= AUTO_NEXT_GIVE_UP_MS) {
+                    giveUp()
+                    return@launch
+                }
+                // One more cycle: the ring, core and button are back where it began; the orbit turns on.
+                spin += autoNextLoopSpinDegrees()
+                time.snapTo(AUTO_NEXT_HOLD_FROM_MS)
+            }
+            val born = MiniMotionData.AUTO_NEXT.hiddenUntil("incoming")
+            if (time.value < born) play(born)
+            pinned = incoming
+            play(MiniMotionData.AUTO_NEXT.durationMs)
+            spin = 0f
+            settle()
+        }
+    }
+
+    /** The player didn't move on: the same timeline back to rest, the orbit unwinding with it. */
+    private suspend fun giveUp() {
+        val from = time.value
+        val turned = spin
+        kotlinx.coroutines.coroutineScope {
+            launch {
+                androidx.compose.animation.core.animate(turned, 0f, animationSpec = tween((from * timeScale).toInt(), easing = LinearEasing)) { v, _ -> spin = v }
+            }
+            time.animateTo(0f, tween((from * timeScale).toInt().coerceAtLeast(1), easing = LinearEasing))
+        }
+        spin = 0f
+        pinned = null
+        mode = MiniMode.Rest
+        incoming = null
+        busy = false
+    }
+
     private fun toRest() {
         dragging = false
         mode = MiniMode.Rest
@@ -140,7 +205,7 @@ class MiniMotionState internal constructor() {
 
     /** Exactly at rest: the incoming capsule becomes the resting one. */
     private suspend fun settle() {
-        incoming?.let { if (pinned == null && mode == MiniMode.SkipCompleted) pinned = it }
+        incoming?.let { if (pinned == null && (mode == MiniMode.SkipCompleted || mode == MiniMode.AutoNext)) pinned = it }
         mode = MiniMode.Rest
         incoming = null
         time.snapTo(0f)
@@ -170,7 +235,14 @@ class MiniMotionState internal constructor() {
      * elsewhere gets the restart pulse.
      */
     @Composable
-    internal fun Follow(current: MiniTrack, next: MiniTrack?, positionMs: () -> Long, reducedMotion: Boolean) {
+    internal fun Follow(
+        current: MiniTrack,
+        next: MiniTrack?,
+        positionMs: () -> Long,
+        reducedMotion: Boolean,
+        durationMs: () -> Long = { 0L },
+        isPlaying: Boolean = false,
+    ) {
         val scope = androidx.compose.runtime.rememberCoroutineScope()
         SideEffect {
             val previous = lastKey
@@ -190,6 +262,20 @@ class MiniMotionState internal constructor() {
                 pinned = null
             }
         }
+        // The song about to end on its own: start frame 06 so the capsule is in the button as it ends.
+        LaunchedEffect(current.key, next?.key, reducedMotion, isPlaying) {
+            if (reducedMotion || !isPlaying || next == null || next.key == current.key) return@LaunchedEffect
+            var scheduled = false
+            snapshotFlow { durationMs() to positionMs() }.collect { (duration, position) ->
+                val remaining = duration - position
+                if (scheduled || duration <= 0L || remaining !in 1..AUTO_NEXT_WATCH_MS) return@collect
+                scheduled = true
+                scope.launch {
+                    delay((remaining - AUTO_NEXT_LEAD_MS.toLong()).coerceAtLeast(0L))
+                    if (lastKey == current.key) autoNext(scope, shown(current), next)
+                }
+            }
+        }
         LaunchedEffect(current.key, reducedMotion) {
             var last = positionMs()
             snapshotFlow { positionMs() }.collect { now ->
@@ -203,6 +289,12 @@ class MiniMotionState internal constructor() {
     }
 
     private fun songChanged(scope: CoroutineScope, current: MiniTrack, forward: Boolean, reducedMotion: Boolean) {
+        if (busy && mode == MiniMode.AutoNext) {
+            // The player moved on while the button prepares: release. Whatever it went to is what comes out.
+            if (incoming?.key != current.key && time.value < MiniMotionData.AUTO_NEXT.hiddenUntil("incoming")) incoming = current
+            released = true
+            return
+        }
         if (pinned?.key == current.key) {
             // The song we asked for: the pin has done its job.
             if (!busy) pinned = null
@@ -313,6 +405,12 @@ class MiniMotionState internal constructor() {
         const val UNPIN_AFTER_MS = 3_000L
         const val RESTART_FROM_MS = 3_000L
         const val RESTART_TO_MS = 1_000L
+        /** Frame 06 fills the rail for its first 20.7% (580 ms): it starts that long before the song ends. */
+        const val AUTO_NEXT_LEAD_MS = 0.207f * 2800f
+        /** Within this of the end, the start of frame 06 is scheduled. */
+        const val AUTO_NEXT_WATCH_MS = 2_500L
+        /** The longest the skip button prepares before it gives the song back. */
+        const val AUTO_NEXT_GIVE_UP_MS = 6_000f
 
         /** How far the finger moves the capsule's leading edge: one to one at first, never past the scrub's end. */
         fun resisted(mode: MiniMode, g: MiniGeometry, finger: Float, hasNext: Boolean): Float {

@@ -130,6 +130,7 @@ fun MiniPlayer(
             isPlaying = state.isPlaying,
             progress = { if (state.durationMs > 0) state.positionMs.toFloat() / state.durationMs else 0f },
             positionMs = { state.positionMs },
+            durationMs = { state.durationMs },
             actions = actions,
             labels = labels,
             reducedMotion = LocalReducedMotion.current,
