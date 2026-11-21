@@ -117,3 +117,7 @@ fun PlayerCircleButton(
         }
     }
 }
+
+/** Now Playing's ground (the neumorphic frames' #E8ECEE, or #25292B in dark), for the strip under the status bar. */
+@Composable
+fun nowPlayingGround(): Color = com.harmony.feature.player.neu.neuPalette().ground
