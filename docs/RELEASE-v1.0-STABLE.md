@@ -1,8 +1,21 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **179**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 178), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **180**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 179), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 180 — A glass navigation bar and a new Now Playing
+
+- **The bar at the bottom is new:** ruby-to-violet glass running to the edge of the
+  screen, with the selected tab in a glass pill that slides along a notch in its top
+  edge to the tab you pick.
+- **Now Playing is redesigned,** soft and sculpted, in light and in dark: the record
+  behind the album sleeve, the waveform pressed into the page, and buttons that sink
+  when you press them and rise again. Play sits in its own well.
+- **Tap LOSSLESS** (or the format of the song) to see its details: format, quality,
+  bit depth and rate, bitrate. Tap outside or × to close them.
+- **"Start a mix from this song"** is one tap under the controls; while a mix plays it
+  becomes "Tune the mix". Queue, Steer, where the music plays and Sound sit under it.
 
 ## Build 179 — Replay and the end of a song, newly animated
 

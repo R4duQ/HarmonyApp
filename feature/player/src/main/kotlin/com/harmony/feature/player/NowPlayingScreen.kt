@@ -130,6 +130,25 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.model.OutputForm
+import com.harmony.feature.player.neu.NeuAudioDetails
+import com.harmony.feature.player.neu.NeuFavoriteButton
+import com.harmony.feature.player.neu.NeuFormatPill
+import com.harmony.feature.player.neu.NeuGlyph
+import com.harmony.feature.player.neu.NeuHeader
+import com.harmony.feature.player.neu.NeuIcon
+import com.harmony.feature.player.neu.NeuMixButton
+import com.harmony.feature.player.neu.NeuPlayButton
+import com.harmony.feature.player.neu.NeuPressButton
+import com.harmony.feature.player.neu.NeuRecord
+import com.harmony.feature.player.neu.NeuTitle
+import com.harmony.feature.player.neu.NeuToggleButton
+import com.harmony.feature.player.neu.NeuTool
+import com.harmony.feature.player.neu.NeuTools
+import com.harmony.feature.player.neu.NeuWaveform
+import com.harmony.feature.player.neu.asPlayerPalette
+import com.harmony.feature.player.neu.audioFields
+import com.harmony.feature.player.neu.interStyle
+import com.harmony.feature.player.neu.neuPalette
 import com.harmony.core.model.PlayerState
 import com.harmony.core.model.RepeatMode
 import com.harmony.core.model.ShuffleMode
@@ -227,7 +246,7 @@ fun NowPlayingScreen(
         value = song?.let { MiniPlayerAudioInfo.initial(it) }
         value = song?.let { resolveMiniPlayerAudioInfo(context, it) }
     }
-    val palette = playerPalette()
+    val palette = neuPalette().asPlayerPalette()
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     // A tablet held upright gets the portrait layout, which spans the whole
@@ -240,7 +259,7 @@ fun NowPlayingScreen(
         landscape -> 24.dp
         configuration.screenWidthDp > PORTRAIT_MAX_CONTENT_DP + 40 ->
             ((configuration.screenWidthDp - PORTRAIT_MAX_CONTENT_DP) / 2).dp
-        else -> 20.dp
+        else -> 24.dp
     }
 
     // ---- YT-Music-style vertical gestures on the whole player ----
@@ -323,11 +342,8 @@ fun NowPlayingScreen(
     }
     val animatedProgress = progressAnim.value
 
-    val playScale by animateFloatAsState(
-        targetValue = if (state.isPlaying) 1f else 0.97f,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "artwork-breathe",
-    )
+    // The frames draw the record at rest whether or not it plays.
+    val playScale = 1f
     val waveform = rememberMorphingWaveform(song?.id)
 
     val onSeekCommit: (Float) -> Unit = { fraction ->
@@ -541,7 +557,7 @@ internal fun ColumnScope.NowPlayingBody(
     state: PlayerState,
     song: Song?,
     landscape: Boolean,
-    palette: PlayerPalette,
+    @Suppress("UNUSED_PARAMETER") palette: PlayerPalette,
     isFavorite: Boolean,
     audioInfo: MiniPlayerAudioInfo?,
     output: OutputChoice,
@@ -550,83 +566,117 @@ internal fun ColumnScope.NowPlayingBody(
     progress: Float,
     dragFraction: Float?,
     waveform: FloatArray,
-    playScale: Float,
+    @Suppress("UNUSED_PARAMETER") playScale: Float,
     cb: NowPlayingCallbacks,
-    /** A mix is running: the Mix action shows it as on. */
+    /** A mix is running: Steer shows it as on. */
     mixOn: Boolean = false,
     /** What the mix is doing with the next song, from the player's real state; null when nothing to say. */
     mixStatus: MixStatusUi? = null,
     /** Why the mix picked this song, in words; null when it did not. */
     reason: String? = null,
-    /** Steering the mix; null hides the steering row. */
+    /** Steering the mix; null hides the mix button. */
     steer: SteerCallbacks? = null,
     /** Large system text: the page scrolls and the record takes a fixed height. */
     scrollable: Boolean = false,
 ) {
+    val neu = neuPalette()
+    val pp = neu.asPlayerPalette()
     var menuOpen by remember { mutableStateOf(false) }
     var showDetails by rememberSaveable { mutableStateOf(false) }
     val tag = formatTagFor(audioInfo, song?.bitDepth)
+    val fields = audioInfo?.let { audioFields(it.format, it.isLossless, it.sampleRateHz, song?.bitDepth, it.bitrateKbps) }.orEmpty()
     val gestureScope = rememberCoroutineScope()
-    val favoriteScale by animateFloatAsState(
-        targetValue = if (isFavorite) 1.15f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "favorite-pop",
-    )
-    val favoriteTint by animateColorAsState(
-        targetValue = if (isFavorite) palette.accent else palette.muted,
-        label = "favorite-tint",
-    )
-    val shuffleTint by animateColorAsState(
-        targetValue = if (state.shuffleMode == ShuffleMode.OFF) palette.muted else palette.accent,
-        label = "shuffle-tint",
-    )
-    val repeatTint by animateColorAsState(
-        targetValue = if (state.repeatMode == RepeatMode.OFF) palette.muted else palette.accent,
-        label = "repeat-tint",
-    )
-
-    PlayerTopBar(
-        albumName = song?.album,
-        palette = palette,
-        onBack = cb.onBack,
-        menuOpen = menuOpen,
-        onMenuOpenChange = { menuOpen = it },
-        hasLyrics = song?.embeddedLyrics != null,
-        onQueue = cb.onQueue,
-        onShuffleSheet = cb.onMixSheet,
-        onLyrics = cb.onLyrics,
-        onEqualizer = cb.onEqualizer,
-        // In landscape the title block sits under the record with no room
-        // beside it, so favourite moves up here rather than being dropped.
-        favorite = if (!landscape) null else FavoriteSpec(
-            isFavorite = isFavorite,
-            tint = favoriteTint,
-            scale = favoriteScale,
-            onToggle = cb.onToggleFavorite,
-        ),
-    )
+    val still = com.harmony.core.ui.theme.reducedMotion
+    // The prototype opens the details as the pill rises: 90 ms down, 70 ms held.
+    val openDetails: () -> Unit = {
+        gestureScope.launch {
+            if (!still) kotlinx.coroutines.delay(160)
+            showDetails = true
+        }
+    }
 
     // Short phones (a 640dp screen, or a large font) tighten the rhythm so the
-    // transport and the action row stay on screen; the record gives way first.
+    // transport and the tools stay on screen; the record gives way first.
     val config = LocalConfiguration.current
     val short = config.screenHeightDp < 720 || LocalDensity.current.fontScale > 1.2f
     val deviceIcon = OutputIcons.forOutput(state.audioOutput.type, output.form)
     val onComputer = state.audioOutput.type == com.harmony.core.model.AudioOutputType.COMPUTER
     val upcoming = (state.queue.size - state.queueIndex - 1).coerceAtLeast(0)
-    val actions = @Composable { modifier: Modifier ->
-        PlayerActionRow(
-            upcoming = upcoming,
-            mixOn = mixOn,
-            deviceLabel = state.audioOutput.label,
-            deviceIcon = deviceIcon,
-            onComputer = onComputer,
-            palette = palette,
-            cb = cb,
-            modifier = modifier,
+    val tools = buildList {
+        add(NeuTool(if (upcoming > 0) "Queue · $upcoming" else "Queue", NeuGlyph.Queue, null, false, cb.onQueue, "Open the queue"))
+        add(NeuTool("Steer", NeuGlyph.Spark, null, mixOn, cb.onSteer, "Steer the mix"))
+        val phone = state.audioOutput.type == com.harmony.core.model.AudioOutputType.SPEAKER
+        add(NeuTool(state.audioOutput.label, if (phone) NeuGlyph.Phone else null, if (phone) null else deviceIcon, onComputer, cb.onPlayOn, "Choose where to play"))
+        cb.onEqualizer?.let { add(NeuTool("Sound", NeuGlyph.Sound, null, false, it, "Open the equalizer")) }
+    }
+
+    val header = @Composable {
+        NeuHeader(
+            albumName = song?.album,
+            palette = neu,
+            onBack = cb.onBack,
+            onMore = { menuOpen = true },
+            // In landscape the title sits under the record with no room
+            // beside it, so favourite moves up here rather than being dropped.
+            trailing = {
+                if (landscape) {
+                    NeuFavoriteButton(isFavorite, cb.onToggleFavorite, neu)
+                    Spacer(Modifier.width(12.dp))
+                }
+            },
+            menu = {
+                PlayerMenu(
+                    open = menuOpen,
+                    onOpenChange = { menuOpen = it },
+                    hasLyrics = song?.embeddedLyrics != null,
+                    onQueue = cb.onQueue,
+                    onShuffleSheet = cb.onMixSheet,
+                    onLyrics = cb.onLyrics,
+                    onEqualizer = cb.onEqualizer,
+                )
+            },
         )
+    }
+    val formatRow = @Composable { modifier: Modifier, centered: Boolean ->
+        BoxWithConstraints(modifier.fillMaxWidth()) {
+            val cardWidth = maxWidth
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
+            ) {
+                if (tag != null) Box {
+                    NeuFormatPill(tag.first, tag.second, neu, onClick = openDetails)
+                    NeuAudioDetails(showDetails, fields, neu, width = cardWidth, anchorHeight = 30.dp, onDismiss = { showDetails = false })
+                }
+                if (reason != null) {
+                    Text(
+                        reason,
+                        style = interStyle(11f, FontWeight.Medium, neu.muted),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = if (tag != null) 12.dp else 0.dp).weight(1f, fill = !centered),
+                    )
+                }
+            }
+        }
+    }
+    val transport = @Composable {
+        NeuTransport(state, neu, smartStyle, journeyProgress, cb)
+    }
+    val mixButton = @Composable {
+        if (steer != null) {
+            val steering = steer.steerable
+            NeuMixButton(
+                text = if (steering) "Tune the mix" else "Start a mix from this song",
+                palette = neu,
+                onClick = if (steering) steer.onTune else steer.onStartMix,
+            )
+        }
     }
 
     if (landscape) {
+        header()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -644,25 +694,21 @@ internal fun ColumnScope.NowPlayingBody(
                 ArtworkPager(
                     song = song,
                     isPlaying = state.isPlaying,
-                    playScale = playScale,
                     gestureScope = gestureScope,
                     onNext = cb.onNext,
                     onPrevious = cb.onPrevious,
                     onPlayPause = cb.onPlayPause,
                     onQueue = cb.onQueue,
-                    // The largest record of the right shape that fits the half's
-                    // width and what the title leaves of its height.
                     modifier = Modifier
                         .weight(1f, fill = false)
-                        .fillMaxWidth()
-                        .wrapContentSize()
-                        .aspectRatio(1f / 0.72f),
+                        .fillMaxWidth(),
                 )
-                TitleBlock(
-                    song = song,
-                    palette = palette,
+                NeuTitle(
+                    title = song?.title ?: "Nothing playing",
+                    artist = song?.artist.orEmpty(),
+                    palette = neu,
                     centered = true,
-                    titleSize = if (short) 19 else 21,
+                    titleSize = if (short) 19f else 21f,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp, bottom = 4.dp),
@@ -677,124 +723,213 @@ internal fun ColumnScope.NowPlayingBody(
                     .weight(1f)
                     .fillMaxHeight()
                     .wrapContentWidth()
-                    .widthIn(max = 480.dp),
+                    .widthIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                ReasonFormatLine(reason, tag, palette, showDetails, { showDetails = !showDetails }, centered = true)
-                AnimatedVisibility(showDetails) {
-                    NowPlayingAudioQuality(info = audioInfo, bitDepth = song?.bitDepth, palette = palette, centered = true)
-                }
-                Spacer(Modifier.height(8.dp))
-                SeekBlock(
-                    progress = progress,
-                    waveform = waveform,
-                    state = state,
-                    dragFraction = dragFraction,
-                    palette = palette,
-                    onScrub = cb.onScrub,
-                    onScrubFinished = cb.onScrubFinished,
-                    onScrubCancel = cb.onScrubCancel,
-                    waveformHeight = if (short) 32 else 40,
-                )
-                Spacer(Modifier.height(if (short) 6.dp else 10.dp))
-                Transport(
-                    state = state,
-                    palette = palette,
-                    repeatTint = repeatTint,
-                    shuffleTint = shuffleTint,
-                    onRepeat = cb.onRepeat,
-                    onPrevious = cb.onPrevious,
-                    onPlayPause = cb.onPlayPause,
-                    onNext = cb.onNext,
-                    onShuffle = cb.onShuffle,
-                    onShuffleLongPress = cb.onMixSheet,
-                    smartStyle = smartStyle,
-                    journeyProgress = journeyProgress,
-                    playSize = if (short) 56 else 64,
-                    sideSize = 48,
-                )
-                if (mixStatus != null) MixStatusLine(mixStatus, palette, centered = true, modifier = Modifier.padding(top = 6.dp))
-                actions(Modifier.padding(top = if (short) 4.dp else 8.dp))
+                formatRow(Modifier.padding(top = 8.dp), true)
+                NeuSeekBlock(progress, waveform, state, dragFraction, neu, cb, channelHeight = 52)
+                transport()
+                if (mixStatus != null) MixStatusLine(mixStatus, pp, centered = true, modifier = Modifier.padding(vertical = 6.dp))
+                NeuTools(tools, neu, Modifier.padding(top = 6.dp, bottom = 8.dp))
             }
         }
-        Spacer(Modifier.height(8.dp))
     } else {
-        Spacer(Modifier.height(if (short) 0.dp else 8.dp))
+        header()
         // The record is the centre of the screen and takes whatever height the
         // controls leave; on a short phone it shrinks rather than pushing the
         // transport off screen.
         ArtworkPager(
             song = song,
             isPlaying = state.isPlaying,
-            playScale = playScale,
             gestureScope = gestureScope,
             onNext = cb.onNext,
             onPrevious = cb.onPrevious,
             onPlayPause = cb.onPlayPause,
             onQueue = cb.onQueue,
-            modifier = (if (scrollable) Modifier.height(200.dp) else Modifier.weight(1f).heightIn(min = 160.dp))
-                .fillMaxWidth()
-                .wrapContentSize()
-                .aspectRatio(1f / 0.72f),
+            modifier = (if (scrollable) Modifier.height(230.dp) else Modifier.weight(1f).heightIn(min = 110.dp))
+                .fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (short) 8.dp else 16.dp))
+        // Track details: title, artist, favourite, and the format pill (150 dp).
+        Box(Modifier.fillMaxWidth().height(if (short) 124.dp else 150.dp)) {
+            NeuTitle(
+                title = song?.title ?: "Nothing playing",
+                artist = song?.artist.orEmpty(),
+                palette = neu,
+                titleSize = if (short) 22f else 26f,
+                modifier = Modifier.padding(top = 13.dp, end = 54.dp),
+            )
+            NeuFavoriteButton(isFavorite, cb.onToggleFavorite, neu, Modifier.align(Alignment.TopEnd).offset(y = 17.dp))
+            formatRow(Modifier.offset(y = if (short) 74.dp else 80.dp), false)
+        }
+        NeuSeekBlock(progress, waveform, state, dragFraction, neu, cb, channelHeight = if (short) 52 else 60)
+        transport()
+        Spacer(Modifier.height(if (short) 4.dp else 12.dp))
+        if (mixStatus != null) MixStatusLine(mixStatus, pp, centered = true, modifier = Modifier.padding(bottom = 6.dp))
+        // "Start a mix from this song" (82 dp); short screens reach it through Steer.
+        if (!short && steer != null) {
+            Box(Modifier.fillMaxWidth().height(if (mixStatus != null) 68.dp else 82.dp), contentAlignment = Alignment.TopCenter) {
+                Box(Modifier.padding(top = if (mixStatus != null) 0.dp else 14.dp)) { mixButton() }
+            }
+        }
+        NeuTools(tools, neu, Modifier.padding(bottom = 4.dp))
+    }
+}
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TitleBlock(
-                song = song,
-                palette = palette,
-                centered = false,
-                titleSize = if (short) 21 else 25,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(12.dp))
-            FavoriteButton(
-                spec = FavoriteSpec(isFavorite, favoriteTint, favoriteScale, cb.onToggleFavorite),
-                palette = palette,
+/** The overflow menu: queue, Smart Shuffle, lyrics when there are some, the equalizer. */
+@Composable
+private fun PlayerMenu(
+    open: Boolean,
+    onOpenChange: (Boolean) -> Unit,
+    hasLyrics: Boolean,
+    onQueue: () -> Unit,
+    onShuffleSheet: () -> Unit,
+    onLyrics: () -> Unit,
+    onEqualizer: (() -> Unit)?,
+) {
+    DropdownMenu(expanded = open, onDismissRequest = { onOpenChange(false) }) {
+        DropdownMenuItem(
+            text = { Text("Queue") },
+            leadingIcon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
+            onClick = { onOpenChange(false); onQueue() },
+        )
+        DropdownMenuItem(
+            text = { Text("Smart Shuffle") },
+            leadingIcon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
+            onClick = { onOpenChange(false); onShuffleSheet() },
+        )
+        if (hasLyrics) {
+            DropdownMenuItem(
+                text = { Text("Lyrics") },
+                leadingIcon = { Icon(Icons.Rounded.Lyrics, contentDescription = null) },
+                onClick = { onOpenChange(false); onLyrics() },
             )
         }
-        ReasonFormatLine(reason, tag, palette, showDetails, { showDetails = !showDetails })
-        AnimatedVisibility(showDetails) {
-            NowPlayingAudioQuality(info = audioInfo, bitDepth = song?.bitDepth, palette = palette, centered = false)
+        if (onEqualizer != null) {
+            DropdownMenuItem(
+                text = { Text("Equalizer") },
+                leadingIcon = { Icon(Icons.Rounded.Equalizer, contentDescription = null) },
+                onClick = { onOpenChange(false); onEqualizer() },
+            )
         }
-        Spacer(Modifier.height(if (short) 4.dp else 8.dp))
-        SeekBlock(
+    }
+}
+
+/**
+ * The waveform channel and the times under it (94 dp in the frame). The
+ * music's level, while playing, lifts the bars around the playhead.
+ */
+@Composable
+private fun NeuSeekBlock(
+    progress: Float,
+    waveform: FloatArray,
+    state: PlayerState,
+    dragFraction: Float?,
+    neu: com.harmony.feature.player.neu.NeuPalette,
+    cb: NowPlayingCallbacks,
+    channelHeight: Int,
+) {
+    // Only react while actually playing: paused on a loud peak would
+    // otherwise leave the bars frozen mid-swell, which reads as a stuck UI.
+    val live = if (state.isPlaying) liveAudioLevel() else AudioLevel()
+    val level by animateFloatAsState(
+        targetValue = live.level,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f),
+        label = "waveform-level",
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Spacer(Modifier.height(4.dp))
+        NeuWaveform(
             progress = progress,
             waveform = waveform,
-            state = state,
-            dragFraction = dragFraction,
-            palette = palette,
+            palette = neu,
             onScrub = cb.onScrub,
             onScrubFinished = cb.onScrubFinished,
             onScrubCancel = cb.onScrubCancel,
-            waveformHeight = if (short) 36 else 52,
+            height = channelHeight.dp,
+            level = level,
         )
-        Spacer(Modifier.height(if (short) 8.dp else 16.dp))
-        Transport(
-            state = state,
-            palette = palette,
-            repeatTint = repeatTint,
-            shuffleTint = shuffleTint,
-            onRepeat = cb.onRepeat,
-            onPrevious = cb.onPrevious,
-            onPlayPause = cb.onPlayPause,
-            onNext = cb.onNext,
-            onShuffle = cb.onShuffle,
-            onShuffleLongPress = cb.onMixSheet,
-            smartStyle = smartStyle,
-            journeyProgress = journeyProgress,
-            playSize = if (short) 60 else 72,
-            sideSize = if (short) 48 else 54,
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp)) {
+            val shownPosition = dragFraction?.let { (it * state.durationMs).toLong() } ?: state.positionMs
+            val time = interStyle(11f, FontWeight.Medium, neu.muted)
+            Text(formatDuration(shownPosition), style = time, modifier = Modifier.padding(start = 1.dp))
+            Spacer(Modifier.weight(1f))
+            Text(formatDuration(state.durationMs), style = time, modifier = Modifier.padding(end = 11.dp))
+        }
+    }
+}
+
+/**
+ * Repeat · previous · play/pause in its surround · next · shuffle (114 dp in
+ * the frame). Read in the order you use them (accessibility A12): previous,
+ * play, next, then the two modes, though repeat and shuffle bracket the row.
+ */
+@Composable
+private fun NeuTransport(
+    state: PlayerState,
+    neu: com.harmony.feature.player.neu.NeuPalette,
+    smartStyle: SmartShuffleStyle,
+    journeyProgress: Float?,
+    cb: NowPlayingCallbacks,
+) {
+    val haptics = LocalHapticFeedback.current
+    Box(Modifier.fillMaxWidth().height(102.dp).semantics { isTraversalGroup = true }) {
+        NeuToggleButton(
+            on = state.repeatMode != RepeatMode.OFF,
+            glyph = NeuGlyph.Repeat,
+            contentDescription = "Repeat mode: ${state.repeatMode}",
+            palette = neu,
+            onClick = cb.onRepeat,
+            badge = if (state.repeatMode == RepeatMode.ONE) "1" else null,
+            modifier = Modifier.align(Alignment.CenterStart).semantics { traversalIndex = 4f },
         )
-        if (mixStatus != null) MixStatusLine(mixStatus, palette, centered = true, modifier = Modifier.padding(top = 10.dp))
-        // Steering chips on screens tall enough for them (critique U1); shorter
-        // screens reach the same actions through Steer in the action row.
-        if (steer != null && !short) SteeringRow(steer, onOpenMoods = cb.onSteer, modifier = Modifier.padding(top = 10.dp))
-        actions(Modifier.padding(top = if (short) 6.dp else 10.dp, bottom = if (short) 6.dp else 16.dp))
+        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+            NeuPressButton(
+                onClick = cb.onPrevious, contentDescription = "Previous",
+                width = 54.dp, height = 54.dp, radius = 18.dp, raised = neu.raised, palette = neu,
+                pressedShiftX = (-2.5).dp, pressedAlpha = 0.9f,
+                modifier = Modifier.semantics { traversalIndex = 0f },
+            ) { NeuIcon(NeuGlyph.Previous, neu.ink) }
+            Spacer(Modifier.width(9.dp))
+            NeuPlayButton(
+                playing = state.isPlaying,
+                onClick = cb.onPlayPause,
+                contentDescription = if (state.isPlaying) "Pause" else "Play",
+                palette = neu,
+                modifier = Modifier.semantics { traversalIndex = 1f },
+            )
+            Spacer(Modifier.width(9.dp))
+            NeuPressButton(
+                onClick = cb.onNext, contentDescription = "Next",
+                width = 54.dp, height = 54.dp, radius = 18.dp, raised = neu.raised, palette = neu,
+                pressedShiftX = 2.5.dp, pressedAlpha = 0.9f,
+                modifier = Modifier.semantics { traversalIndex = 2f },
+            ) { NeuIcon(NeuGlyph.Next, neu.ink) }
+        }
+        val mode = state.shuffleMode
+        val label = shuffleBadgeLabel(mode, smartStyle, journeyProgress)
+        val description = when (mode) {
+            ShuffleMode.OFF -> "Shuffle off. Tap to turn on Smart Shuffle"
+            ShuffleMode.SMART -> "Smart Shuffle on, ${label.lowercase()} style. Tap to turn off"
+            ShuffleMode.RANDOM -> "Random shuffle on. Tap to turn off"
+            ShuffleMode.JOURNEY -> "$label. Tap to turn shuffle off"
+        } + ", long press for shuffle options."
+        NeuToggleButton(
+            on = mode != ShuffleMode.OFF,
+            glyph = NeuGlyph.Shuffle,
+            contentDescription = description,
+            palette = neu,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                cb.onShuffle()
+            },
+            onLongClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                cb.onMixSheet()
+            },
+            modifier = Modifier.align(Alignment.CenterEnd).semantics { traversalIndex = 3f },
+        )
     }
 }
 
@@ -832,208 +967,6 @@ internal fun MixStatusLine(status: MixStatusUi, palette: PlayerPalette, centered
 }
 
 /**
- * The four things people reach for while listening, always on screen and
- * always named: the queue (with how many songs are coming), the mix, where
- * the music plays (the device's own name, in blue while a computer plays it)
- * and the equalizer. They used to sit in the overflow menu or behind a
- * long-press.
- */
-@Composable
-private fun PlayerActionRow(
-    upcoming: Int,
-    mixOn: Boolean,
-    deviceLabel: String,
-    deviceIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    onComputer: Boolean,
-    palette: PlayerPalette,
-    cb: NowPlayingCallbacks,
-    modifier: Modifier = Modifier,
-) {
-    val items: List<@Composable (Modifier) -> Unit> = listOf<@Composable (Modifier) -> Unit>(
-        { m -> PlayerAction(Icons.AutoMirrored.Rounded.QueueMusic, if (upcoming > 0) "Queue · $upcoming" else "Queue", false, palette, cb.onQueue, m) },
-        { m -> PlayerAction(Icons.Rounded.AutoAwesome, "Steer", mixOn, palette, cb.onSteer, m, clickLabel = "Steer the mix") },
-        { m -> PlayerAction(deviceIcon, deviceLabel, onComputer, palette, cb.onPlayOn, m, clickLabel = "Choose where to play") },
-    ) + listOfNotNull(cb.onEqualizer).map { eq ->
-        @Composable { m: Modifier -> PlayerAction(Icons.Rounded.Equalizer, "Sound", false, palette, eq, m) }
-    }
-    // Large system text: two rows of two, so every label stays readable.
-    val perRow = if (LocalDensity.current.fontScale > 1.3f) 2 else items.size
-    Column(modifier.fillMaxWidth()) {
-        items.chunked(perRow).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                row.forEach { it(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlayerAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    active: Boolean,
-    palette: PlayerPalette,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    clickLabel: String? = null,
-) {
-    val tint = if (active) palette.accent else palette.ink
-    Column(
-        modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button, onClickLabel = clickLabel, onClick = onClick)
-            .heightIn(min = 48.dp)
-            .padding(horizontal = 4.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (active) palette.accent else palette.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Pieces, shared by both orientations
-// ---------------------------------------------------------------------------
-
-/** Bundles the favourite button's state so it can move between slots. */
-private data class FavoriteSpec(
-    val isFavorite: Boolean,
-    val tint: androidx.compose.ui.graphics.Color,
-    val scale: Float,
-    val onToggle: () -> Unit,
-)
-
-@Composable
-private fun FavoriteButton(
-    spec: FavoriteSpec,
-    palette: PlayerPalette,
-    size: Int = 44,
-) {
-    PlayerCircleButton(
-        onClick = spec.onToggle,
-        contentDescription = if (spec.isFavorite) "Remove from favorites" else "Add to favorites",
-        size = size.dp,
-        contentColor = spec.tint,
-    ) {
-        Icon(
-            if (spec.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-            contentDescription = null,
-            tint = spec.tint,
-            modifier = Modifier
-                .size(20.dp)
-                .scale(spec.scale),
-        )
-    }
-}
-
-@Composable
-private fun PlayerTopBar(
-    albumName: String?,
-    palette: PlayerPalette,
-    onBack: () -> Unit,
-    menuOpen: Boolean,
-    onMenuOpenChange: (Boolean) -> Unit,
-    hasLyrics: Boolean,
-    onQueue: () -> Unit,
-    onShuffleSheet: () -> Unit,
-    onLyrics: () -> Unit,
-    onEqualizer: (() -> Unit)?,
-    favorite: FavoriteSpec?,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PlayerCircleButton(onClick = onBack, contentDescription = "Back — collapse player") {
-            Icon(
-                Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "NOW PLAYING FROM",
-                fontSize = 9.sp,
-                lineHeight = 12.sp,
-                letterSpacing = 1.6.sp,
-                fontWeight = FontWeight.Medium,
-                color = palette.muted,
-            )
-            Text(
-                albumName ?: "Nothing playing",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = palette.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        if (favorite != null) {
-            FavoriteButton(spec = favorite, palette = palette, size = 42)
-            Spacer(Modifier.width(8.dp))
-        }
-
-        Box {
-            PlayerCircleButton(
-                onClick = { onMenuOpenChange(true) },
-                contentDescription = "More options",
-            ) {
-                Icon(
-                    Icons.Rounded.MoreVert,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }) {
-                DropdownMenuItem(
-                    text = { Text("Queue") },
-                    leadingIcon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
-                    onClick = { onMenuOpenChange(false); onQueue() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Smart Shuffle") },
-                    leadingIcon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
-                    onClick = { onMenuOpenChange(false); onShuffleSheet() },
-                )
-                if (hasLyrics) {
-                    DropdownMenuItem(
-                        text = { Text("Lyrics") },
-                        leadingIcon = { Icon(Icons.Rounded.Lyrics, contentDescription = null) },
-                        onClick = { onMenuOpenChange(false); onLyrics() },
-                    )
-                }
-                if (onEqualizer != null) {
-                    DropdownMenuItem(
-                        text = { Text("Equalizer") },
-                        leadingIcon = { Icon(Icons.Rounded.Equalizer, contentDescription = null) },
-                        onClick = { onMenuOpenChange(false); onEqualizer() },
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
  * The record, with swipe-to-skip scoped to it.
  *
  * Deliberately not page-wide: the seek bar is a horizontal drag too, and a
@@ -1045,7 +978,6 @@ private fun PlayerTopBar(
 private fun ArtworkPager(
     song: Song?,
     isPlaying: Boolean,
-    playScale: Float,
     gestureScope: CoroutineScope,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -1122,8 +1054,7 @@ private fun ArtworkPager(
                 // carried away rather than sliding under a mask.
                 alpha = 1f - (kotlin.math.abs(offsetX.value) /
                     (width * 1.6f)).coerceIn(0f, 0.65f)
-            }
-            .scale(playScale),
+            },
     ) {
         AnimatedContent(
             targetState = song?.id,
@@ -1134,53 +1065,11 @@ private fun ArtworkPager(
             label = "artwork-change",
             modifier = Modifier.fillMaxSize(),
         ) { _ ->
-            VinylArtwork(
+            NeuRecord(
                 artworkUri = song?.artworkUri,
                 albumName = song?.album,
-                isPlaying = isPlaying,
+                palette = neuPalette(),
                 modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun TitleBlock(
-    song: Song?,
-    palette: PlayerPalette,
-    centered: Boolean,
-    titleSize: Int,
-    modifier: Modifier = Modifier,
-) {
-    AnimatedContent(
-        targetState = song?.id,
-        transitionSpec = {
-            (slideInHorizontally(tween(300)) { it / 6 } + fadeIn(tween(300)))
-                .togetherWith(slideOutHorizontally(tween(200)) { -it / 6 } + fadeOut(tween(200)))
-        },
-        label = "title-change",
-        modifier = modifier,
-    ) { _ ->
-        Column(
-            horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                song?.title ?: "Nothing playing",
-                style = MaterialTheme.typography.headlineMedium.copy(fontSize = titleSize.sp, lineHeight = (titleSize + 6).sp),
-                color = palette.ink,
-                maxLines = if (centered) 2 else 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = if (centered) TextAlign.Center else TextAlign.Start,
-            )
-            Text(
-                song?.artist ?: "",
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = if (centered) TextAlign.Center else TextAlign.Start,
-                modifier = Modifier.padding(top = 2.dp),
             )
         }
     }
@@ -1267,89 +1156,8 @@ internal fun NowPlayingAudioQuality(
     }
 }
 
-/**
- * Quiet status line: where the audio is going, whether a journey is running,
- * and what's next once the crossfade has started — one caption row, so none
- * of it competes with the title.
- */
-@Composable
-private fun MetaRow(
-    state: PlayerState,
-    output: OutputChoice,
-    journeyProgress: Float?,
-    palette: PlayerPalette,
-    centered: Boolean,
-    modifier: Modifier = Modifier,
-    onOutput: () -> Unit = {},
-    /** The output now sits in the action row; the line keeps the journey and the crossfade's next song. */
-    showOutput: Boolean = true,
-) {
-    val lead = if (showOutput) " · " else ""
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
-    ) {
-        if (showOutput) OutputLabel(state, output, palette, onOutput)
-        AnimatedVisibility(visible = journeyProgress != null) {
-            Text(
-                "${lead}Journey ${((journeyProgress ?: 0f) * 100).toInt()}%",
-                fontSize = 11.sp,
-                color = palette.accent,
-                maxLines = 1,
-            )
-        }
-        AnimatedVisibility(
-            visible = state.upcomingSong != null,
-            enter = expandVertically() + fadeIn() + slideInVertically { it / 2 },
-            exit = shrinkVertically() + fadeOut(),
-            modifier = Modifier.weight(1f, fill = false),
-        ) {
-            state.upcomingSong?.let { next ->
-                Text(
-                    "${if (showOutput || journeyProgress != null) " · " else ""}Next: ${next.title}",
-                    fontSize = 11.sp,
-                    color = palette.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
 /** The device kind to draw, whether the listener picked it, and how to pick one (null when it can't apply). */
 internal class OutputChoice(val form: OutputForm?, val chosen: Boolean, val pick: ((OutputForm?) -> Unit)?)
-
-/**
- * Icon and name of where the music plays. A tap opens "Play on": this phone
- * (and what kind of device its output is) or a computer over Harmony Connect.
- */
-@Composable
-private fun OutputLabel(state: PlayerState, output: OutputChoice, palette: PlayerPalette, onClick: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClickLabel = "Choose where to play") { onClick() }
-            .padding(horizontal = 2.dp, vertical = 3.dp),
-    ) {
-        Icon(
-            imageVector = OutputIcons.forOutput(state.audioOutput.type, output.form),
-            contentDescription = output.form?.label ?: "Audio output",
-            tint = if (state.audioOutput.type == com.harmony.core.model.AudioOutputType.COMPUTER) palette.accent else palette.muted,
-            modifier = Modifier.size(15.dp),
-        )
-        Text(
-            state.audioOutput.label,
-            fontSize = 11.sp,
-            color = if (state.audioOutput.type == com.harmony.core.model.AudioOutputType.COMPUTER) palette.accent else palette.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 5.dp),
-        )
-    }
-}
 
 /**
  * The music's level and brightness, read from the EQ engine's analyser once
@@ -1379,320 +1187,6 @@ private fun liveAudioLevel(): AudioLevel {
         }
     }
     return shown
-}
-
-@Composable
-private fun SeekBlock(
-    progress: Float,
-    waveform: FloatArray,
-    state: PlayerState,
-    dragFraction: Float?,
-    palette: PlayerPalette,
-    onScrub: (Float) -> Unit,
-    onScrubFinished: (Float) -> Unit,
-    onScrubCancel: () -> Unit,
-    waveformHeight: Int,
-) {
-    // Collected here rather than inside WaveformSeekBar so the bar stays a
-    // pure drawing component that can be previewed and reused without a
-    // running audio chain behind it.
-    // Only react while actually playing: paused on a loud peak would
-    // otherwise leave the bars frozen mid-swell, which reads as a stuck UI.
-    val live = if (state.isPlaying) liveAudioLevel() else AudioLevel()
-    // A second, slower pass against the display, so motion stays soft.
-    val animatedLevel by animateFloatAsState(
-        targetValue = live.level,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f),
-        label = "waveform-level",
-    )
-    val animatedBrightness by animateFloatAsState(
-        targetValue = live.brightness,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 140f),
-        label = "waveform-brightness",
-    )
-
-    WaveformSeekBar(
-        progress = progress,
-        waveform = waveform,
-        onScrub = onScrub,
-        onScrubFinished = onScrubFinished,
-        onScrubCancel = onScrubCancel,
-        playedColor = palette.live,
-        trackColor = palette.track,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(waveformHeight.dp),
-        level = animatedLevel,
-        brightness = animatedBrightness,
-    )
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        val shownPosition = dragFraction?.let { (it * state.durationMs).toLong() }
-            ?: state.positionMs
-        Text(formatDuration(shownPosition), style = MaterialTheme.typography.labelMedium, color = palette.muted)
-        Text(formatDuration(state.durationMs), style = MaterialTheme.typography.labelMedium, color = palette.muted)
-    }
-}
-
-/**
- * Repeat and shuffle bracket the row: they're persistent modes, so they sit
- * outside the three controls that act on the moment.
- */
-@Composable
-private fun Transport(
-    state: PlayerState,
-    palette: PlayerPalette,
-    repeatTint: androidx.compose.ui.graphics.Color,
-    shuffleTint: androidx.compose.ui.graphics.Color,
-    onRepeat: () -> Unit,
-    onPrevious: () -> Unit,
-    onPlayPause: () -> Unit,
-    onNext: () -> Unit,
-    onShuffle: () -> Unit,
-    onShuffleLongPress: () -> Unit,
-    smartStyle: SmartShuffleStyle,
-    journeyProgress: Float?,
-    playSize: Int,
-    sideSize: Int,
-) {
-    // Read in the order you use them (accessibility A12): previous, play,
-    // next, then the two modes, though repeat and shuffle bracket the row.
-    Row(
-        modifier = Modifier.fillMaxWidth().semantics { isTraversalGroup = true },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        PlayerCircleButton(
-            modifier = Modifier.semantics { traversalIndex = 4f },
-            onClick = onRepeat,
-            contentDescription = "Repeat mode: ${state.repeatMode}",
-            contentColor = repeatTint,
-        ) {
-            AnimatedContent(
-                targetState = state.repeatMode == RepeatMode.ONE,
-                transitionSpec = {
-                    (scaleIn(initialScale = 0.7f) + fadeIn())
-                        .togetherWith(scaleOut(targetScale = 0.7f) + fadeOut())
-                },
-                label = "repeat-morph",
-            ) { isOne ->
-                Icon(
-                    if (isOne) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                    contentDescription = null,
-                    tint = repeatTint,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        }
-
-        PlayerCircleButton(
-            modifier = Modifier.semantics { traversalIndex = 0f },
-            onClick = onPrevious,
-            contentDescription = "Previous",
-            size = sideSize.dp,
-        ) {
-            Icon(
-                Icons.Rounded.SkipPrevious,
-                contentDescription = null,
-                modifier = Modifier.size((sideSize / 2 + 2).dp),
-            )
-        }
-
-        PlayerCircleButton(
-            onClick = onPlayPause,
-            contentDescription = if (state.isPlaying) "Pause" else "Play",
-            modifier = Modifier.semantics { traversalIndex = 1f },
-            size = playSize.dp,
-            containerColor = palette.primaryControl,
-            contentColor = palette.onPrimaryControl,
-            borderColor = palette.controlEdge,
-        ) {
-            AnimatedContent(
-                targetState = state.isPlaying,
-                transitionSpec = {
-                    (scaleIn(initialScale = 0.6f, animationSpec = tween(160)) + fadeIn(tween(160)))
-                        .togetherWith(scaleOut(targetScale = 0.6f, animationSpec = tween(120)) + fadeOut(tween(120)))
-                },
-                label = "play-pause-morph",
-            ) { playing ->
-                Icon(
-                    if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = null,
-                    tint = palette.onPrimaryControl,
-                    modifier = Modifier.size((playSize * 0.42f).dp),
-                )
-            }
-        }
-
-        PlayerCircleButton(
-            onClick = onNext,
-            contentDescription = "Next",
-            modifier = Modifier.semantics { traversalIndex = 2f },
-            size = sideSize.dp,
-        ) {
-            Icon(
-                Icons.Rounded.SkipNext,
-                contentDescription = null,
-                modifier = Modifier.size((sideSize / 2 + 2).dp),
-            )
-        }
-
-        Box(Modifier.semantics { traversalIndex = 3f }) { ShuffleButton(
-            mode = state.shuffleMode,
-            smartStyle = smartStyle,
-            journeyProgress = journeyProgress,
-            tint = shuffleTint,
-            palette = palette,
-            onClick = onShuffle,
-            onLongClick = onShuffleLongPress,
-        ) }
-    }
-}
-
-/**
- * The shuffle toggle, which has to say more than "on" once it is on: there
- * are three different things it can be doing (Smart, Random, a Journey), and
- * a tinted icon alone reads the same for all of them — or, against the
- * low-contrast player field, barely reads as on at all.
- *
- * Active, it becomes a filled accent disc with a stronger rim, the icon picks
- * up a small mode glyph, and a label pill under the circle names the mode
- * ("Smart", "Flow", "Random", "Journey 40%"). The pill overlaps the circle's
- * lower edge rather than sitting below it, so switching modes never changes
- * the transport row's height and nothing around it jumps.
- *
- * Long press opens the Smart Shuffle sheet, where the mode and style shown
- * here can be changed.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ShuffleButton(
-    mode: ShuffleMode,
-    smartStyle: SmartShuffleStyle,
-    journeyProgress: Float?,
-    tint: Color,
-    palette: PlayerPalette,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    size: Dp = 46.dp,
-) {
-    val active = mode != ShuffleMode.OFF
-    val haptics = LocalHapticFeedback.current
-    val container by animateColorAsState(
-        targetValue = if (active) palette.accent.copy(alpha = 0.18f) else palette.control,
-        label = "shuffle-container",
-    )
-    val rim by animateColorAsState(
-        targetValue = if (active) palette.accent.copy(alpha = 0.65f) else palette.controlEdge,
-        label = "shuffle-rim",
-    )
-    val iconScale by animateFloatAsState(
-        targetValue = if (active) 1.08f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "shuffle-pop",
-    )
-    val label = shuffleBadgeLabel(mode, smartStyle, journeyProgress)
-    val description = when (mode) {
-        ShuffleMode.OFF -> "Shuffle off. Tap to turn on Smart Shuffle"
-        ShuffleMode.SMART -> "Smart Shuffle on, ${label.lowercase()} style. Tap to turn off"
-        ShuffleMode.RANDOM -> "Random shuffle on. Tap to turn off"
-        ShuffleMode.JOURNEY -> "$label. Tap to turn shuffle off"
-    } + ", long press for shuffle options."
-
-    Box(contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(CircleShape)
-                .background(container)
-                .border(if (active) 1.5.dp else 1.dp, rim, CircleShape)
-                .combinedClickable(
-                    role = Role.Button,
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onClick()
-                    },
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onLongClick()
-                    },
-                )
-                // One announced button, not a button wrapping labelled parts.
-                .clearAndSetSemantics { contentDescription = description },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.Shuffle,
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier
-                    .size(20.dp)
-                    .scale(iconScale),
-            )
-            // Small mode glyph in the icon's corner: sparkle for Smart, dice
-            // for Random, compass for a Journey.
-            AnimatedContent(
-                targetState = mode,
-                transitionSpec = {
-                    (scaleIn(initialScale = 0.4f) + fadeIn())
-                        .togetherWith(scaleOut(targetScale = 0.4f) + fadeOut())
-                },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 7.dp, end = 7.dp),
-                label = "shuffle-glyph",
-            ) { shown ->
-                val glyph = when (shown) {
-                    ShuffleMode.SMART -> Icons.Rounded.AutoAwesome
-                    ShuffleMode.RANDOM -> Icons.Rounded.Casino
-                    ShuffleMode.JOURNEY -> Icons.Rounded.Explore
-                    ShuffleMode.OFF -> null
-                }
-                if (glyph != null) {
-                    Icon(
-                        glyph,
-                        contentDescription = null,
-                        tint = palette.accent,
-                        modifier = Modifier.size(10.dp),
-                    )
-                } else {
-                    Spacer(Modifier.size(10.dp))
-                }
-            }
-        }
-
-        // Mode label pill. Not a Surface: a non-clickable Surface still
-        // swallows touches, which would make the lower part of the button
-        // dead to taps.
-        AnimatedVisibility(
-            visible = active,
-            enter = scaleIn(initialScale = 0.6f) + fadeIn(),
-            exit = scaleOut(targetScale = 0.6f) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = 9.dp),
-        ) {
-            val onAccent = if (palette.accent.luminance() > 0.5f) palette.onPrimaryControl else Color.White
-            Text(
-                text = label.uppercase(),
-                fontSize = 8.sp,
-                lineHeight = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp,
-                color = onAccent,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(palette.accent)
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
-            )
-        }
-    }
 }
 
 /** Short, human name for what shuffle is doing — shown under the button. */

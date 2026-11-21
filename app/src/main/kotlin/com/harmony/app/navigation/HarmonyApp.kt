@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.animateDpAsState
@@ -184,6 +185,11 @@ fun HarmonyApp(
         TopLevel(Routes.LIBRARY, NavItem(stringResource(R.string.nav_library), Icons.Outlined.LibraryMusic, Icons.Rounded.LibraryMusic)),
         TopLevel(Routes.ADD, NavItem(stringResource(R.string.nav_add), Icons.Outlined.AddCircleOutline, Icons.Rounded.AddCircle)),
     )
+    val glassTabs = listOf(
+        GlassTab(stringResource(R.string.nav_listen), GlassGlyph.Home),
+        GlassTab(stringResource(R.string.nav_library), GlassGlyph.Grid),
+        GlassTab(stringResource(R.string.nav_add), GlassGlyph.Plus),
+    )
     // Screens not yet rebuilt still take an EditorialPalette; it resolves from the room.
     val palette = catalogPalette()
 
@@ -243,8 +249,14 @@ fun HarmonyApp(
         if (discoveryVerificationReturnSignal > 0 && currentRoute != Routes.DISCOVER) open(Routes.DISCOVER)
     }
 
+    // Under the status bar: the page's ground, or Now Playing's own as it rises.
+    val topStrip by androidx.compose.animation.animateColorAsState(
+        targetValue = if (onNowPlaying) com.harmony.feature.player.nowPlayingGround() else Room.ground,
+        animationSpec = androidx.compose.animation.core.tween(300, easing = RoomMotion.EmphasizedDecelerate),
+        label = "status-strip",
+    )
     Scaffold(
-        containerColor = Room.ground,
+        containerColor = topStrip,
         // Only the top inset: the dock below reads the bottom inset itself.
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top),
     ) { innerPadding ->
@@ -451,9 +463,10 @@ fun HarmonyApp(
                 }
             }
 
-            // The dock, over the page: the mini player above the navigation
-            // bar, on the ground with a hairline at its top. Pages reserve its
+            // The dock, over the page: the mini player above the liquid glass
+            // bar, which runs to the bottom of the screen. Pages reserve its
             // measured height, so nothing ever reads through it.
+            val showBar = !wide && topLevelIndex >= 0
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -466,14 +479,8 @@ fun HarmonyApp(
                         .then(if (wide) Modifier.widthIn(max = WideChromeMaxWidth) else Modifier)
                         .onSizeChanged { with(density) { chromeHeight = it.height.toDp() + 8.dp } }
                         .fillMaxWidth()
-                        .then(
-                            if (!wide && topLevelIndex >= 0) {
-                                Modifier
-                                    .background(Room.surface)
-                                    .drawBehind { drawLine(palette.line, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1.dp.toPx()) }
-                            } else Modifier,
-                        )
-                        .windowInsetsPadding(WindowInsets.navigationBars),
+                        // The bar's notch shows the page's ground, as the reference shows its black.
+                        .then(if (showBar) Modifier.background(Room.ground) else Modifier),
                 ) {
                     Spacer(Modifier.height(8.dp))
                     // Always composed, so it can lift into Now Playing and drop back.
@@ -484,13 +491,15 @@ fun HarmonyApp(
                         palette = palette,
                         shown = !onNowPlaying,
                     )
-                    if (!wide && topLevelIndex >= 0) {
-                        Spacer(Modifier.height(4.dp))
-                        RoomNavBar(
-                            items = topLevel.map { it.item },
+                    if (showBar) {
+                        Spacer(Modifier.height(6.dp))
+                        LiquidGlassNavBar(
+                            tabs = glassTabs,
                             selectedIndex = topLevelIndex,
                             onSelect = onSelectTopLevel,
                         )
+                    } else {
+                        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
                     }
                 }
             }
