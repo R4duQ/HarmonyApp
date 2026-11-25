@@ -23,6 +23,8 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.exp
@@ -64,14 +66,31 @@ class MiniMotionState internal constructor() {
     /** Automatic next: how far the orbit has turned in the hold cycles so far, carried into the pose. */
     private var spin by mutableFloatStateOf(0f)
 
+    /**
+     * Where the left button is in frame 07: 0 is previous track (the first 5 s
+     * of a song), [LEFT_MORPH_REPLAY_MS] the replay arrow. It plays Figma's
+     * turn forward when a song passes 5 s and backward when one starts again.
+     */
+    internal val leftMorph = Animatable(LEFT_MORPH_REPLAY_MS)
+
+    /** The left button takes the song back to the one before (else it restarts this one). */
+    var leftIsPrevious by mutableStateOf(false)
+        private set
+
+    /** The replay timeline is taking the song back to the one before (frame 04 with the previous-track glyph). */
+    private var previousRun by mutableStateOf(false)
+
     private var lastKey: Any? = null
     private var nextOfLast: Any? = null
     private var unpin: Job? = null
 
-    internal fun pose(g: MiniGeometry): MiniPose = when {
-        mode == MiniMode.Rest -> miniPose(MiniMode.Rest, 0f, g)
-        dragging -> miniPose(mode, dragTime, g)
-        else -> miniPose(mode, time.value, g, extraSpinDegrees = spin)
+    internal fun pose(g: MiniGeometry): MiniPose {
+        val left = leftMorph.value
+        return when {
+            mode == MiniMode.Rest -> miniPose(MiniMode.Rest, 0f, g, leftMorphMs = left)
+            dragging -> miniPose(mode, dragTime, g, leftMorphMs = left, previousRun = previousRun)
+            else -> miniPose(mode, time.value, g, extraSpinDegrees = spin, leftMorphMs = left, previousRun = previousRun)
+        }
     }
 
     /** The song the outgoing (resting) capsule shows. */
@@ -94,12 +113,30 @@ class MiniMotionState internal constructor() {
     /** Restarts [song]: absorbed into the replay button, the same song settling back in. */
     fun replay(scope: CoroutineScope, song: MiniTrack, reducedMotion: Boolean, fromDrag: Boolean = false, command: () -> Unit) {
         if (busy || (dragging && !fromDrag)) return
+        previousRun = false
         if (reducedMotion) {
             toRest()
             command()
             return
         }
         run(scope, MiniMode.Replay, song, from = if (fromDrag) dragTime else 0f, command)
+    }
+
+    /**
+     * Back to [target], the song before: the replay timeline (frame 04), the
+     * left button keeping its previous-track glyph, and [target] growing back
+     * out of it where the song went in.
+     */
+    fun previous(scope: CoroutineScope, target: MiniTrack, reducedMotion: Boolean, fromDrag: Boolean = false, command: () -> Unit) {
+        if (busy || (dragging && !fromDrag)) return
+        previousRun = true
+        if (reducedMotion) {
+            toRest()
+            pinned = target
+            command()
+            return
+        }
+        run(scope, MiniMode.Replay, target, from = if (fromDrag) dragTime else 0f, command)
     }
 
     private fun run(scope: CoroutineScope, mode: MiniMode, track: MiniTrack?, from: Float, command: (() -> Unit)?) {
@@ -208,6 +245,7 @@ class MiniMotionState internal constructor() {
         incoming?.let { if (pinned == null && (mode == MiniMode.SkipCompleted || mode == MiniMode.AutoNext)) pinned = it }
         mode = MiniMode.Rest
         incoming = null
+        previousRun = false
         time.snapTo(0f)
         busy = false
     }
@@ -242,8 +280,25 @@ class MiniMotionState internal constructor() {
         reducedMotion: Boolean,
         durationMs: () -> Long = { 0L },
         isPlaying: Boolean = false,
+        hasPrevious: Boolean = false,
     ) {
         val scope = androidx.compose.runtime.rememberCoroutineScope()
+        // Frame 07: previous track for a song's first 5 s, then the replay arrow.
+        LaunchedEffect(hasPrevious, reducedMotion) {
+            var first = true
+            snapshotFlow { hasPrevious && positionMs() < LEFT_MORPH_FROM_MS }
+                .collectLatest { early ->
+                    leftIsPrevious = early
+                    if (first || reducedMotion) {
+                        leftMorph.snapTo(if (early) 0f else LEFT_MORPH_REPLAY_MS)
+                        first = false
+                        return@collectLatest
+                    }
+                    // A restart turns the arrow back once its own timeline has finished.
+                    snapshotFlow { busy }.first { !it }
+                    if (early) turnLeft(back = true) else turnLeft(back = false)
+                }
+        }
         SideEffect {
             val previous = lastKey
             if (previous != null && previous != current.key) {
@@ -288,6 +343,22 @@ class MiniMotionState internal constructor() {
         }
     }
 
+    /** Frame 07's turn, forward (previous track to replay) or played back, at Figma's speed. */
+    private suspend fun turnLeft(back: Boolean) {
+        if (back) {
+            if (leftMorph.value <= 0f) return
+            if (leftMorph.value > LEFT_MORPH_TO_MS) leftMorph.snapTo(LEFT_MORPH_TO_MS)
+            val span = leftMorph.value - LEFT_MORPH_FROM_MS
+            if (span > 0f) leftMorph.animateTo(LEFT_MORPH_FROM_MS, tween((span * timeScale).toInt().coerceAtLeast(1), easing = LinearEasing))
+            leftMorph.snapTo(0f)
+        } else {
+            if (leftMorph.value >= LEFT_MORPH_TO_MS) return
+            if (leftMorph.value < LEFT_MORPH_FROM_MS) leftMorph.snapTo(LEFT_MORPH_FROM_MS)
+            val span = LEFT_MORPH_TO_MS - leftMorph.value
+            leftMorph.animateTo(LEFT_MORPH_TO_MS, tween((span * timeScale).toInt().coerceAtLeast(1), easing = LinearEasing))
+        }
+    }
+
     private fun songChanged(scope: CoroutineScope, current: MiniTrack, forward: Boolean, reducedMotion: Boolean) {
         if (busy && mode == MiniMode.AutoNext) {
             // The player moved on while the button prepares: release. Whatever it went to is what comes out.
@@ -305,7 +376,8 @@ class MiniMotionState internal constructor() {
         if (forward) {
             announce(scope, MiniMode.SkipCompleted, current)
         } else {
-            // Back (or anywhere else): the restarted-song entrance of the replay timeline, from its handoff.
+            // Back (or anywhere else): the entrance of the replay timeline, from its handoff, as the song before.
+            previousRun = true
             announce(scope, MiniMode.Replay, current, from = handoffMs(MiniMode.Replay))
         }
     }
@@ -323,7 +395,8 @@ class MiniMotionState internal constructor() {
         scope: CoroutineScope,
         g: MiniGeometry,
         nextTrack: () -> MiniTrack?,
-        shownTrack: () -> MiniTrack,
+        /** What comes back out of the left button: the song before, or this one restarted. */
+        leftTrack: () -> MiniTrack,
         reducedMotion: Boolean,
         onSkip: () -> Unit,
         onReplay: () -> Unit,
@@ -356,7 +429,8 @@ class MiniMotionState internal constructor() {
                 val wanted = if (skipping) MiniMode.Skip else MiniMode.Replay
                 if (mode != wanted) {
                     mode = wanted
-                    incoming = if (skipping) nextTrack() else shownTrack()
+                    previousRun = !skipping && leftIsPrevious
+                    incoming = if (skipping) nextTrack() else leftTrack()
                 }
                 dragTime = if (reducedMotion) 0f else scrubTime(wanted, g, resisted(wanted, g, abs(dx), hasNext))
             }
@@ -391,6 +465,7 @@ class MiniMotionState internal constructor() {
         if (!busy) {
             mode = MiniMode.Rest
             incoming = null
+            previousRun = false
         }
     }
 

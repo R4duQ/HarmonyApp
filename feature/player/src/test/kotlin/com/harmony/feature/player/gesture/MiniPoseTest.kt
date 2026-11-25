@@ -48,17 +48,26 @@ class MiniPoseTest {
     }
 
     @Test
-    fun `automatic next goes into the skip button and the next song is born exactly there`() {
+    fun `automatic next flips the capsule where it is, the next song on its back`() {
         for (w in widths) {
             val g = MiniGeometry(w)
             val tl = MiniMotionData.AUTO_NEXT
-            val out = miniPose(MiniMode.AutoNext, tl.goneFrom("capsule"), g).outgoing
-            val inc = miniPose(MiniMode.AutoNext, tl.hiddenUntil("incoming"), g).incoming!!
-            assertEquals(g.skipX + 24f, out.x + out.width / 2, 0.01f)
-            assertEquals(out.x, inc.x, 0.001f)
-            assertEquals(out.y, inc.y, 0.001f)
-            assertEquals(out.width, inc.width, 0.001f)
-            assertEquals(out.height, inc.height, 0.001f)
+            val edge = tl.goneFrom("capsule")
+            // Figma: the faces swap at 77.679% of 2.8 s, the flip squeezed to its thinnest there.
+            assertEquals(0.77679f * 2800f, edge, 0.5f)
+            assertEquals(edge, tl.hiddenUntil("incoming"), 0.001f)
+            val before = miniPose(MiniMode.AutoNext, edge - 1f, g)
+            val after = miniPose(MiniMode.AutoNext, edge, g)
+            assertEquals(1f, before.outgoing.alpha, 0f)
+            assertEquals(0f, before.incoming!!.alpha, 0f)
+            assertEquals(0f, after.outgoing.alpha, 0f)
+            assertEquals(1f, after.incoming!!.alpha, 0f)
+            assertTrue("edge-on: ${after.incoming!!.scaleY}", after.incoming!!.scaleY < 0.03f)
+            // Both faces are the resting capsule: nothing moves sideways.
+            for (c in listOf(before.outgoing, after.incoming!!)) {
+                assertEquals(g.capsuleX, c.x, 0f)
+                assertEquals(g.capsuleWidth, c.width, 0f)
+            }
         }
     }
 
@@ -78,36 +87,37 @@ class MiniPoseTest {
         // And the orbit, carried over a cycle, turns on from where it was.
         val carried = miniPose(MiniMode.AutoNext, AUTO_NEXT_HOLD_FROM_MS, g, extraSpinDegrees = autoNextLoopSpinDegrees())
         assertEquals(b.prepare!!.spinDegrees, carried.prepare!!.spinDegrees, 0.01f)
-        // Nothing of either song shows while it holds.
+        // While it holds, the song stays in its capsule, at rest; the next one is not shown yet.
         for (t in listOf(AUTO_NEXT_HOLD_FROM_MS, AUTO_NEXT_HOLD_TO_MS)) {
             val p = miniPose(MiniMode.AutoNext, t, g)
-            assertEquals(0f, p.outgoing.alpha, 0f)
+            assertEquals(1f, p.outgoing.alpha, 0f)
+            assertEquals(1f, p.outgoing.scaleY, 0f)
             assertEquals(0f, p.incoming!!.alpha, 0f)
         }
     }
 
     @Test
-    fun `at the handoff neither song is visible`() {
+    fun `the song changes once the outgoing capsule is gone`() {
         for (mode in listOf(MiniMode.Skip, MiniMode.Replay)) {
             val t = handoffMs(mode)
-            val pose = miniPose(mode, t, MiniGeometry(388f))
-            assertEquals("$mode outgoing", 0f, pose.outgoing.alpha, 0f)
-            assertEquals("$mode incoming", 0f, pose.incoming!!.alpha, 0f)
-            assertTrue("$mode: the incoming song must not show before the handoff",
-                timelineOf(mode)!!.hiddenUntil("incoming") >= t)
+            val g = MiniGeometry(388f)
+            assertEquals("$mode outgoing", 0f, miniPose(mode, t, g).outgoing.alpha, 0f)
+            assertTrue("$mode outgoing just before", miniPose(mode, t - 20f, g).outgoing.alpha > 0f)
+            // Figma now lets the next song begin to grow out of the button as the last of this one goes in.
+            assertTrue("$mode incoming", timelineOf(mode)!!.hiddenUntil("incoming") <= t)
         }
-        // Figma: gone at 38.514% of 1480 ms, and 42.3% of 1560 ms.
-        assertEquals(570f, handoffMs(MiniMode.Skip), 0.1f)
-        assertEquals(660f, handoffMs(MiniMode.Replay), 1f)
+        // Figma: gone at 47.432% of 1480 ms, and 45.321% of 1560 ms.
+        assertEquals(0.47432f * 1480f, handoffMs(MiniMode.Skip), 0.5f)
+        assertEquals(0.45321f * 1560f, handoffMs(MiniMode.Replay), 0.5f)
     }
 
     @Test
     fun `outgoing content fades before compression clips it`() {
         val tl = MiniMotionData.SKIP
         val textGone = maxOf(tl.goneFrom("title"), tl.goneFrom("artist"), tl.goneFrom("rail"))
-        // By then the capsule is still wider than the text box starts (49 dp + some of the 163 dp box).
+        // By then the capsule is still most of its width (Figma: about 177 of 260 dp): the text fades, it isn't squeezed.
         val pose = miniPose(MiniMode.Skip, textGone, MiniGeometry(388f))
-        assertTrue("capsule ${pose.outgoing.width} wide when the text is gone", pose.outgoing.width > 200f)
+        assertTrue("capsule ${pose.outgoing.width} wide when the text is gone", pose.outgoing.width > 160f)
     }
 
     @Test
@@ -167,13 +177,13 @@ class MiniPoseTest {
         assertEquals(64f, rest.height, 0f)
         assertEquals(332f, g.skipX, 0f)
         assertEquals(8f, g.replayX, 0f)
-        // Frame 02 at its 29.73% keyframe: translate 172, 12; 112 x 40; radius 20.
-        val k = miniPose(MiniMode.Skip, 0.2973f * 1480f, g).outgoing
-        assertEquals(64f + 172f, k.x, 0.05f)
-        assertEquals(8f + 12f, k.y, 0.05f)
-        assertEquals(112f, k.width, 0.1f)
-        assertEquals(40f, k.height, 0.05f)
-        assertEquals(20f, k.radius, 0.05f)
+        // Frame 02 at its 31.081% keyframe: translate 90, 5; 196 x 54; radius 27.
+        val k = miniPose(MiniMode.Skip, 0.31081f * 1480f, g).outgoing
+        assertEquals(64f + 90f, k.x, 0.05f)
+        assertEquals(8f + 5f, k.y, 0.05f)
+        assertEquals(196f, k.width, 0.1f)
+        assertEquals(54f, k.height, 0.05f)
+        assertEquals(27f, k.radius, 0.05f)
     }
 
     @Test

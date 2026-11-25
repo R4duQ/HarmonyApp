@@ -106,6 +106,7 @@ fun MiniPlayer(
     ) {
         if (song == null) return@AnimatedVisibility
         val next = nextSong(state)
+        val previous = previousSong(state)
         val labels = GestureMiniLabels(
             nowPlaying = stringResource(R.string.player_mini_spoken, song.title, song.artist),
             state = stringResource(if (state.isPlaying) R.string.player_state_playing else R.string.player_state_paused),
@@ -114,12 +115,15 @@ fun MiniPlayer(
             play = stringResource(R.string.player_play),
             pause = stringResource(R.string.player_pause),
             open = stringResource(R.string.player_open),
+            previous = stringResource(R.string.player_previous),
         )
         val actions = remember(viewModel, onExpand) {
             GestureMiniActions(
                 onSkip = viewModel::onNext,
                 // The same song from the start, in the same place in the queue; playing or paused as it was.
                 onReplay = { viewModel.onSeek(0L) },
+                // Within a song's first 5 s the player goes back a song (its maxSeekToPreviousPosition is 5 s too).
+                onPrevious = viewModel::onPrevious,
                 onPlayPause = viewModel::onPlayPause,
                 onExpand = onExpand,
             )
@@ -127,6 +131,7 @@ fun MiniPlayer(
         GestureMiniPlayer(
             current = song.toMiniTrack(),
             next = next?.toMiniTrack(),
+            previous = previous?.toMiniTrack(),
             isPlaying = state.isPlaying,
             progress = { if (state.durationMs > 0) state.positionMs.toFloat() / state.durationMs else 0f },
             positionMs = { state.positionMs },
@@ -142,6 +147,9 @@ fun MiniPlayer(
         }
     }
 }
+
+/** The song the left button goes back to in a song's first 5 s: the one before it in the queue. */
+internal fun previousSong(state: PlayerState): Song? = state.queue.getOrNull(state.queueIndex - 1)
 
 /** The song a skip goes to: the next in the queue, or the first again when the queue repeats. */
 internal fun nextSong(state: PlayerState): Song? =

@@ -177,6 +177,9 @@ class HarmonyPlayer(
                 handleAudioFocus,
             )
             .setHandleAudioBecomingNoisy(true) // pause when headphones unplugged
+            // "Previous" goes back a song for the first 5 s of one, then restarts it: the
+            // mini player's left button shows the same (previous track, then replay).
+            .setMaxSeekToPreviousPositionMs(MAX_SEEK_TO_PREVIOUS_MS)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
         return Engine(exo, equalizer)
@@ -566,6 +569,8 @@ class HarmonyPlayer(
     }
 
     private companion object {
+        /** Matches the mini player's left button (Figma frame 07): previous track for 5 s, then replay. */
+        const val MAX_SEEK_TO_PREVIOUS_MS = 5_000L
         const val TAG = "HarmonyPlayback"
         const val STATUS_EVERY_MS = 500L
         const val MAX_RETRIES_PER_ITEM = 1
