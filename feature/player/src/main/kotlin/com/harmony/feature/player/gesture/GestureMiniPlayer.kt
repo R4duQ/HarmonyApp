@@ -76,6 +76,8 @@ data class MiniTrack(
 class GestureMiniActions(
     val onSkip: () -> Unit = {},
     val onReplay: () -> Unit = {},
+    /** Back to the song before (the left button for a song's first 5 s, frame 07). */
+    val onPrevious: () -> Unit = {},
     val onPlayPause: () -> Unit = {},
     val onExpand: () -> Unit = {},
 )
@@ -90,6 +92,7 @@ data class GestureMiniLabels(
     val play: String,
     val pause: String,
     val open: String,
+    val previous: String = "Previous song",
 )
 
 internal object MiniTags {
@@ -119,7 +122,10 @@ private val ArtistStyle = TextStyle(
 
 /**
  * Harmony's mini player, as designed in Figma (file rrilnVhuT79ENxaSaCUBnU,
- * frames 01–05): a capsule with the song between a replay and a skip button.
+ * frames 01–07): a capsule with the song between a previous/replay and a
+ * skip button. The left button goes back to [previous] for a song's first
+ * 5 s and restarts the song after that, turning from one to the other as
+ * frame 07 does; a swipe left does what it shows.
  *
  * Swipe the capsule right to skip, left to replay: it follows the finger,
  * resisting more the further it goes and compressing toward the button that
@@ -147,11 +153,13 @@ fun GestureMiniPlayer(
     /** The song's length, for automatic next (frame 06) as it ends; 0 when unknown. */
     durationMs: () -> Long = { 0L },
     state: MiniMotionState = rememberMiniMotionState(),
+    /** The song before [current] in the queue, for the left button's first 5 s; null when there is none. */
+    previous: MiniTrack? = null,
     artwork: @Composable (MiniTrack, Modifier) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val latest by rememberUpdatedState(actions)
-    state.Follow(current, next, positionMs, reducedMotion, durationMs, isPlaying)
+    state.Follow(current, next, positionMs, reducedMotion, durationMs, isPlaying, hasPrevious = previous != null)
 
     BoxWithConstraints(
         modifier
@@ -168,6 +176,14 @@ fun GestureMiniPlayer(
         val density = LocalDensity.current
         val latestNext by rememberUpdatedState(next)
         val latestShown by rememberUpdatedState(shown)
+        val latestPrevious by rememberUpdatedState(previous)
+        val goesBack = state.leftIsPrevious && previous != null
+        // The left button: back to the song before, or this one again.
+        fun left(fromDrag: Boolean = false) {
+            val before = latestPrevious
+            if (state.leftIsPrevious && before != null) state.previous(scope, before, reducedMotion, fromDrag) { latest.onPrevious() }
+            else state.replay(scope, latestShown, reducedMotion, fromDrag) { latest.onReplay() }
+        }
 
         Box(
             Modifier
@@ -179,6 +195,9 @@ fun GestureMiniPlayer(
                 .semantics {
                     // The swipes have buttons too; these are the same, for a screen reader's actions menu.
                     customActions = listOfNotNull(
+                        if (previous != null) CustomAccessibilityAction(labels.previous) {
+                            if (canReplay) state.previous(scope, previous, reducedMotion) { latest.onPrevious() }; canReplay
+                        } else null,
                         CustomAccessibilityAction(labels.replay) { if (canReplay) state.replay(scope, shown, reducedMotion) { latest.onReplay() }; canReplay },
                         if (canSkip) CustomAccessibilityAction(labels.next) { state.skip(scope, next!!, reducedMotion) { latest.onSkip() }; true } else null,
                         CustomAccessibilityAction(if (isPlaying) labels.pause else labels.play) { latest.onPlayPause(); true },
@@ -190,10 +209,10 @@ fun GestureMiniPlayer(
                         scope = scope,
                         g = geometry,
                         nextTrack = { latestNext },
-                        shownTrack = { latestShown },
+                        leftTrack = { latestPrevious?.takeIf { state.leftIsPrevious } ?: latestShown },
                         reducedMotion = reducedMotion,
                         onSkip = { latestNext?.let { state.skip(scope, it, reducedMotion, fromDrag = true) { latest.onSkip() } } },
-                        onReplay = { state.replay(scope, latestShown, reducedMotion, fromDrag = true) { latest.onReplay() } },
+                        onReplay = { left(fromDrag = true) },
                         onExpand = { latest.onExpand() },
                     )
                 },
@@ -210,26 +229,20 @@ fun GestureMiniPlayer(
             }
             if (pose.trailAlpha > 0f) ElasticTrail(geometry, pose.trailIsReplay, pose.trailAlpha)
             if (pose.bridgeAlpha > 0f) {
+                // "Absorption bridge": 26 x 36, radius 12, stretched about its centre toward the button.
                 Box(
                     Modifier
                         .offset(pose.bridgeX.dp, 22.dp)
                         .size(26.dp, 36.dp)
-                        .graphicsLayer { alpha = pose.bridgeAlpha }
+                        .graphicsLayer {
+                            alpha = pose.bridgeAlpha
+                            translationX = pose.bridgeShiftX * this.density
+                            scaleX = pose.bridgeScaleX
+                            scaleY = pose.bridgeScaleY
+                        }
                         .background(MiniColors.Bridge, RoundedCornerShape(12.dp)),
                 )
             }
-
-            SideButton(
-                x = geometry.replayX, y = geometry.buttonY, pose = pose.replay, tag = MiniTags.REPLAY,
-                label = labels.replay, enabled = canReplay,
-                onClick = { state.replay(scope, shown, reducedMotion) { latest.onReplay() } },
-            ) { ReplayGlyph(pose.replay.stroke, Modifier.graphicsLayer { rotationZ = pose.replay.iconRotationDegrees }) }
-            SideButton(
-                x = geometry.skipX, y = geometry.buttonY, pose = pose.skip, tag = MiniTags.SKIP,
-                label = labels.next, enabled = canSkip,
-                onClick = { next?.let { state.skip(scope, it, reducedMotion) { latest.onSkip() } } },
-                overlay = pose.prepare?.let { prepare -> { PreparingGlyph(prepare) } },
-            ) { SkipGlyph(pose.skip.fill, pose.skip.stroke) }
 
             if (pose.outgoing.visible && pose.outgoing.alpha > 0f) {
                 Capsule(
@@ -253,6 +266,40 @@ fun GestureMiniPlayer(
                 Capsule(inPose, geometry, incoming, { if (state.mode == MiniMode.Replay) 0f else progress() }, density, artwork, Modifier)
             }
 
+            // The side buttons over the capsules, as in Figma: the song goes in under the button that takes it.
+            SideButton(
+                x = geometry.replayX, y = geometry.buttonY, pose = pose.replay, tag = MiniTags.REPLAY,
+                label = if (goesBack) labels.previous else labels.replay, enabled = canReplay,
+                onClick = { left() },
+                transformIcon = false,
+            ) {
+                Box {
+                    // Frame 07's previous-track glyph: the skip glyph turned half round.
+                    SkipGlyph(
+                        MiniColors.SkipFillAtRest, pose.replay.stroke,
+                        Modifier.graphicsLayer {
+                            alpha = pose.replay.previousAlpha
+                            translationX = pose.replay.previousX * this.density
+                            rotationZ = 180f
+                        },
+                    )
+                    ReplayGlyph(
+                        pose.replay.stroke,
+                        Modifier.graphicsLayer {
+                            alpha = pose.replay.iconAlpha
+                            translationX = pose.replay.iconX * this.density
+                            rotationZ = pose.replay.iconRotationDegrees
+                        },
+                    )
+                }
+            }
+            SideButton(
+                x = geometry.skipX, y = geometry.buttonY, pose = pose.skip, tag = MiniTags.SKIP,
+                label = labels.next, enabled = canSkip,
+                onClick = { next?.let { state.skip(scope, it, reducedMotion) { latest.onSkip() } } },
+                overlay = pose.prepare?.let { prepare -> { PreparingGlyph(prepare) } },
+            ) { SkipGlyph(pose.skip.fill, pose.skip.stroke) }
+
             // Play/pause sits over both capsules, at its resting place.
             Box(
                 Modifier
@@ -260,6 +307,7 @@ fun GestureMiniPlayer(
                     .size(48.dp)
                     .graphicsLayer {
                         alpha = pose.pauseAlpha
+                        translationX = pose.pauseX * this.density
                         scaleX = pose.pauseScale
                         scaleY = pose.pauseScale
                     }
@@ -287,6 +335,8 @@ private fun SideButton(
     enabled: Boolean,
     onClick: () -> Unit,
     overlay: (@Composable () -> Unit)? = null,
+    /** False when [icon] places and fades its own glyphs (the left button's two). */
+    transformIcon: Boolean = true,
     icon: @Composable () -> Unit,
 ) {
     Box(
@@ -309,8 +359,10 @@ private fun SideButton(
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.graphicsLayer {
-            translationX = pose.iconX * density
-            alpha = pose.iconAlpha
+            if (transformIcon) {
+                translationX = pose.iconX * density
+                alpha = pose.iconAlpha
+            }
         }) { icon() }
         overlay?.invoke()
     }
@@ -360,6 +412,7 @@ private fun Capsule(
                         .size(36.dp)
                         .graphicsLayer {
                             translationX = pose.artX * density.density
+                            translationY = pose.artY * density.density
                             scaleX = pose.artScale
                             scaleY = pose.artScale
                             alpha = pose.artAlpha
@@ -435,12 +488,14 @@ private fun ProgressRail(pose: CapsulePose, g: MiniGeometry, progress: () -> Flo
                     size = androidx.compose.ui.geometry.Size(width * unit, size.height),
                     cornerRadius = CornerRadius(1f * unit),
                 )
-                // The restart position: a 4 dp dot at the start, while the song is at its very beginning.
-                if (width <= 4f) {
+                // The restart position: a 4 dp dot at the start of a song born in a transition (frames 03, 04, 06;
+                // 04 stretches it sideways about its centre as the song settles back in). At rest there is none (07).
+                if (figma != null && width <= 4f) {
+                    val w = 4f * pose.restartScaleX
                     drawRoundRect(
                         MiniColors.Progress,
-                        topLeft = androidx.compose.ui.geometry.Offset(0f, -1f * unit),
-                        size = androidx.compose.ui.geometry.Size(4f * unit, 4f * unit),
+                        topLeft = androidx.compose.ui.geometry.Offset((2f - w / 2f) * unit, -1f * unit),
+                        size = androidx.compose.ui.geometry.Size(w * unit, 4f * unit),
                         cornerRadius = CornerRadius(2f * unit),
                     )
                 }

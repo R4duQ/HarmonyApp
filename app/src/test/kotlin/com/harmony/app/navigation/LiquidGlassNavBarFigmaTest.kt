@@ -30,12 +30,12 @@ import kotlin.math.abs
 
 /**
  * The liquid glass bar against Figma: the reference render (8:2), and every
- * frame of the animated twin's 5.4 s timeline (8:4: Home → Search → Browse
- * → Live → Home), with the reference's own four tabs.
+ * frame of the animated twin's 5.4 s timeline (8:4: Listen → Library → Add
+ * → Listen), with the reference's own tabs.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [34], application = android.app.Application::class, qualifiers = "w393dp-h500dp-mdpi")
+@Config(sdk = [34], application = android.app.Application::class, qualifiers = "w393dp-h600dp-mdpi")
 class LiquidGlassNavBarFigmaTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
@@ -43,8 +43,7 @@ class LiquidGlassNavBarFigmaTest {
     private val dir = File(root, "design/figma/navbar")
     private val out = File(root, "build/shots/navbar").apply { mkdirs() }
     private val tabs = listOf(
-        GlassTab("Home", GlassGlyph.Home), GlassTab("Search", GlassGlyph.Search),
-        GlassTab("Browse", GlassGlyph.Grid), GlassTab("Live", GlassGlyph.Bolt),
+        GlassTab("Listen", GlassGlyph.Listen), GlassTab("Library", GlassGlyph.Library), GlassTab("Add", GlassGlyph.Add),
     )
     private var selected by mutableIntStateOf(0)
 
@@ -52,8 +51,8 @@ class LiquidGlassNavBarFigmaTest {
         rule.mainClock.autoAdvance = false
         rule.setContent {
             HarmonyTheme(darkTheme = true, dynamicColors = false) {
-                Column(Modifier.size(393.dp, 144.dp).background(Color.Black)) {
-                    Spacer(Modifier.height(32.dp))
+                Column(Modifier.size(393.dp, 144.dp).background(Color(0xFF111411))) {
+                    Spacer(Modifier.height(22.dp))
                     LiquidGlassNavBar(tabs, selected, onSelect = { selected = it }, gestureInset = 24.dp)
                 }
             }
@@ -80,7 +79,8 @@ class LiquidGlassNavBarFigmaTest {
             diff?.setPixel(x, y, a); diff?.setPixel(x + 393, y, b)
             val v = (d * 4).coerceAtMost(255)
             diff?.setPixel(x + 786, y, (0xFF shl 24) or (v shl 16) or (v shl 8) or v)
-            if (y in 112..122 && x in 125..268) continue
+            // The system's gesture handle (Figma draws one: 99 x 4, 12 above the foot).
+            if (y in 126..134 && x in 144..250) continue
             sum += d; n++
         }
         if (name != null) File(out, "$name.png").outputStream().use { diff!!.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -108,8 +108,8 @@ class LiquidGlassNavBarFigmaTest {
             val n = ((ms - (rule.mainClock.currentTime - origin)) / 16) * 16
             if (n > 0) rule.mainClock.advanceTimeBy(n)
         }
-        // The timeline's taps: Search at 750 ms, Browse at 1950, Live at 3150, Home at 4350.
-        val taps = ArrayDeque(listOf(750L to 1, 1950L to 2, 3150L to 3, 4350L to 0))
+        // The timeline's taps: Library at 13.704% of 5.4 s, Add at 39.444%, Listen at 70.741%.
+        val taps = ArrayDeque(listOf(740L to 1, 2130L to 2, 3820L to 0))
         val report = StringBuilder()
         var worst = 0.0
         figma.forEachIndexed { i, file ->
@@ -143,10 +143,10 @@ class LiquidGlassNavBarFigmaTest {
             Column {
                 sets.forEachIndexed { k, names ->
                     for (dark in listOf(false, true)) HarmonyTheme(darkTheme = dark, dynamicColors = false) {
-                        Column(Modifier.size(393.dp, 112.dp).background(com.harmony.core.ui.theme.Room.ground)) {
+                        Column(Modifier.size(393.dp, 138.dp).background(com.harmony.core.ui.theme.Room.ground)) {
                             Spacer(Modifier.height(16.dp))
                             LiquidGlassNavBar(
-                                listOf(GlassTab(names[0], GlassGlyph.Home), GlassTab(names[1], GlassGlyph.Grid), GlassTab(names[2], GlassGlyph.Plus)),
+                                listOf(GlassTab(names[0], GlassGlyph.Listen), GlassTab(names[1], GlassGlyph.Library), GlassTab(names[2], GlassGlyph.Add)),
                                 selectedIndex = if (dark) 1 else k * 2, onSelect = {}, gestureInset = 24.dp,
                             )
                         }
@@ -159,6 +159,6 @@ class LiquidGlassNavBarFigmaTest {
         val view = rule.activity.findViewById<android.view.View>(android.R.id.content)
         val full = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         rule.runOnUiThread { view.draw(Canvas(full)) }
-        File(out, "harmony-tabs.png").outputStream().use { Bitmap.createBitmap(full, 0, 0, 393, 448).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(out, "harmony-tabs.png").outputStream().use { Bitmap.createBitmap(full, 0, 0, 393, 552).compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

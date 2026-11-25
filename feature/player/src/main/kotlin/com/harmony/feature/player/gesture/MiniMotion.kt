@@ -17,7 +17,7 @@ import androidx.compose.ui.graphics.lerp
 
 /** An animated property of a layer. */
 internal enum class Prop {
-    TranslateX, TranslateY, ScaleX, ScaleY, Rotate, Width, Height, Radius, Opacity,
+    TranslateX, TranslateY, ScaleX, ScaleY, Rotate, RotateX, Width, Height, Radius, Opacity,
     Background, Fill, Stroke, Blur, ShadowBlur, ShadowAlpha,
 }
 
@@ -99,12 +99,17 @@ internal class Timeline(val durationMs: Float, private val tracks: Map<Key, Trac
         return durationMs
     }
 
-    /** The last time [layer]'s opacity is still 0 before it first shows. */
+    /**
+     * The time [layer] first shows: the end of its leading run of 0 opacity
+     * (a step-end key holds its 0 until the next key).
+     */
     fun hiddenUntil(layer: String): Float {
         val track = tracks[Key(layer, Prop.Opacity)] as? NumberTrack ?: return 0f
         var last = 0f
         for (i in track.values.indices) {
-            if (track.values[i] == 0f) last = track.times[i] else break
+            if (track.values[i] != 0f) break
+            last = track.times[i]
+            if (track.easings[i] === STEP_END && i < track.times.lastIndex) last = track.times[i + 1]
         }
         return last
     }

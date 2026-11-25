@@ -1,5 +1,13 @@
-<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="168" height="70" viewBox="0 0 168 70" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="130" height="70" viewBox="0 0 130 70" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g id="Fine cutout edge highlight">
-<path id="Vector" d="M0 1.5C16 1.5 16 9.5 18 24.5C20 45.5 29 55.5 50 55.5H102C123 55.5 132 45.5 134 24.5C136 9.5 136 1.5 152 1.5" stroke-width="0.65" stroke="#C96D80" stroke-opacity="0.11"/>
+<path id="Vector" d="M0 1.5C11 1.5 10 9.5 11 23.5C12 44.5 22 59.5 44 59.5H86C108 59.5 118 44.5 119 23.5C120 9.5 119 1.5 130 1.5" stroke="url(#paint0_linear_0_10)"/>
 </g>
+<defs>
+<linearGradient id="paint0_linear_0_10" x1="0" y1="30.5" x2="130" y2="30.5" gradientUnits="userSpaceOnUse">
+<stop stop-color="#B6E9CF" stop-opacity="0.48"/>
+<stop offset="0.26" stop-color="#99E1BC" stop-opacity="0.2"/>
+<stop offset="0.62" stop-color="#B6E9CF" stop-opacity="0.15"/>
+<stop offset="1" stop-color="#B6E9CF" stop-opacity="0.47"/>
+</linearGradient>
+</defs>
 </svg>

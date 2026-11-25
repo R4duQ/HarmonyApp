@@ -1,5 +1,8 @@
 package com.harmony.feature.player.gesture
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.ComponentActivity
@@ -38,18 +41,21 @@ class GestureMiniRecordingTest {
     }
 
     private fun record(mode: MiniMode, video: String) {
-        val figma = frames(video)
         var at by mutableStateOf(0f)
+        record(video, timelineOf(mode)!!.durationMs, { at = it }) { FrozenPlayer(mode, at) }
+    }
+
+    private fun record(video: String, duration: Float, seek: (Float) -> Unit, content: @androidx.compose.runtime.Composable () -> Unit) {
+        val figma = frames(video)
         rule.mainClock.autoAdvance = false
-        rule.setContent { FrozenPlayer(mode, at) }
-        val duration = timelineOf(mode)!!.durationMs
+        rule.setContent(content)
         val report = StringBuilder("t_ms\tmean_delta\toff_pct\n")
         val sheet = Bitmap.createBitmap(388 * 2 + 8, 80 * minOf(figma.size, 12), Bitmap.Config.ARGB_8888)
         val sheetEvery = maxOf(1, figma.size / 12)
         var worst = 0.0
         figma.forEachIndexed { i, file ->
             val t = minOf(i * 1000f / 30f, duration)
-            at = t
+            seek(t)
             val shot = rule.grab(388, 80)
             val reference = BitmapFactory.decodeFile(file.path)
             val diff = compare(reference, shot, "rec-$video-%03d".format(i))
@@ -84,4 +90,27 @@ class GestureMiniRecordingTest {
 
     @Test @Config(sdk = [34], qualifiers = "w420dp-h200dp-mdpi")
     fun autoNext() = record(MiniMode.AutoNext, "auto_next")
+
+    /**
+     * Frame 07A: Solar Drift in its first seconds, the left button showing
+     * previous track; at 5 s it turns into the replay arrow. Figma's rail
+     * grows 2 -> 6 -> 7.28 dp over the 6.6 s, which the song's progress does here.
+     */
+    @Test @Config(sdk = [34], qualifiers = "w420dp-h200dp-mdpi")
+    fun previousToReplay() {
+        var at by mutableStateOf(0f)
+        val tl = MiniMotionData.PREVIOUS_TO_REPLAY
+        record("previous_to_replay", tl.durationMs, { at = it }) {
+            val state = rememberMiniMotionState()
+            androidx.compose.runtime.LaunchedEffect(at) { state.leftMorph.snapTo(at) }
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(388.dp, 80.dp)) {
+                GestureMiniPlayer(
+                    current = solar, next = midnight, previous = midnight, isPlaying = true,
+                    progress = { tl.number("progress", Prop.Width, at, 2f) / 138f }, positionMs = { 2_000L },
+                    actions = GestureMiniActions(), labels = labels, state = state,
+                    artwork = { track, m -> FigmaArtwork(track, m) },
+                )
+            }
+        }
+    }
 }

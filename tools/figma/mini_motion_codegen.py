@@ -7,7 +7,13 @@ easing exactly as Figma exports them, nothing re-timed or approximated.
     python3 tools/figma/mini_motion_codegen.py
 
 Figma file rrilnVhuT79ENxaSaCUBnU, frames 3:6 (skip), 3:10 (skip completed),
-3:14 (replay), 3:18 (replay completed), 10:2 (automatic next: prepare & release).
+3:14 (replay), 3:18 (replay completed), 10:2 (automatic next: prepare, flip &
+release) and 52:3 (07A: previous track becomes replay).
+
+Reads both of Figma's export dialects: the older one (--motion-translate-x,
+--motion-scale-x, ...) and the current one (--translateX-transform,
+--scale-transform, translate: x y, --rotate-transform / --rotateX-transform
+in rad).
 """
 import json, re, sys
 from pathlib import Path
@@ -33,7 +39,7 @@ TIMELINES = {
         "3:341": "outline", "3:344": "trail", "3:346": "bridge", "3:347": "replayButton", "3:348": "replayIcon",
         "3:349": "replayVector", "3:354": "capsule", "3:355": "art", "3:356": "title", "3:357": "artist",
         "3:358": "rail", "3:359": "progress", "3:465": "incoming", "3:466": "inArt", "3:467": "inTitle",
-        "3:468": "inArtist", "3:472": "inRail", "3:473": "inProgress", "3:469": "pause",
+        "3:468": "inArtist", "3:472": "inRail", "3:473": "inProgress", "3:474": "restartMark", "3:469": "pause",
     }),
     "REPLAY_COMPLETED": ("motion_3_18.json", "3:18 · 05 Mini player — Replay completed", {
         "3:363": "replayButton", "3:370": "capsule",
@@ -41,20 +47,32 @@ TIMELINES = {
     "AUTO_NEXT": ("motion_10_2.json", "10:2 · 06 Mini player — Automatic next · Prepare & release", {
         "10:95": "outline", "10:187": "trail", "10:280": "bridge", "10:482": "skipButton", "10:669": "skipIcon",
         "10:682": "skipTriangle", "10:689": "skipBar", "10:11110": "ring", "10:11138": "preparing",
-        "10:11142": "core", "10:1269": "capsule", "10:1547": "art", "10:1732": "title", "10:1917": "artist",
-        "10:2102": "rail", "10:2103": "progress", "10:2677": "incoming", "10:3054": "inArt", "10:3334": "inTitle",
-        "10:3616": "inArtist", "10:3802": "inRail", "10:3896": "inProgress", "10:3992": "pause",
+        "10:11142": "core", "25:2": "flip", "10:1269": "capsule", "10:2103": "progress",
+        "10:2677": "incoming", "10:3896": "inProgress",
+    }),
+    "PREVIOUS_TO_REPLAY": ("motion_52_3.json", "52:3 · 07A Mini player — Previous Track → Replay", {
+        "52:5": "leftButton", "52:57": "previousGlyph", "52:6": "replayIcon", "52:20": "progress",
     }),
 }
 
+# Keyframe-name token -> (declared CSS property, Prop(s)).
 PROPS = {
     "--motion-translate-x": "TranslateX", "--motion-translate-y": "TranslateY",
     "--motion-scale-x": "ScaleX", "--motion-scale-y": "ScaleY", "--motion-rotate": "Rotate",
+    "translateX": "TranslateX", "translateY": "TranslateY", "scaleX": "ScaleX", "scaleY": "ScaleY",
+    "scale": "Scale", "rotate": "Rotate", "rotateX": "RotateX", "translate": "Translate",
     "width": "Width", "height": "Height", "border-radius": "Radius", "opacity": "Opacity",
     "background-color": "Background", "fill": "Fill", "stroke": "Stroke", "filter-effect-0": "Blur",
     "box-shadow": "Shadow",
 }
 COLOR_PROPS = {"Background", "Fill", "Stroke"}
+# What the current dialect declares inside a keyframe for each token.
+DECLARED = {
+    "translateX": "--translateX-transform", "translateY": "--translateY-transform",
+    "scaleX": "--scaleX-transform", "scaleY": "--scaleY-transform", "scale": "--scale-transform",
+    "rotate": "--rotate-transform", "rotateX": "--rotateX-transform", "translate": "translate",
+    "filter-effect-0": "filter",
+}
 
 
 def blocks(css):
@@ -79,6 +97,12 @@ def easing_of(decl):
     t = m.group(1).strip()
     if t == "step-end":
         return "STEP_END"
+    if t == "linear":
+        return "null"
+    # CSS's named curves, as the spec defines them.
+    named = {"ease": "0.25, 0.1, 0.25, 1", "ease-in": "0.42, 0, 1, 1", "ease-out": "0, 0, 0.58, 1", "ease-in-out": "0.42, 0, 0.58, 1"}
+    if t in named:
+        t = f"cubic-bezier({named[t]})"
     b = re.match(r"cubic-bezier\(([^)]*)\)", t)
     a, b2, c, d = [float(x) for x in b.group(1).split(",")]
     return f"CubicBezierEasing({a}f, {b2}f, {c}f, {d}f)"
@@ -105,15 +129,15 @@ def generate():
         for node in data["nodes"]:
             role = roles[node["nodeId"]]
             css = node["codeSnippets"]["css"]
-            origin = re.search(r"--motion-origin-x: ([\d.]+);", css)
+            origin = re.search(r"--motion-origin-x: ([\d.]+);", css) or re.search(r"transform-origin: ([\d.]+)% ", css)
             for kname, body in blocks(css):
-                prop_css = next(p for p in sorted(PROPS, key=len, reverse=True) if f"_{p}_0" in kname)
-                prop = PROPS[prop_css]
-                times, values, eases, shadow_blur, shadow_alpha = [], [], [], [], []
+                token = re.match(r"kf_\d+_\d+_(.+)_0$", kname).group(1)
+                prop = PROPS[token]
+                declared = DECLARED.get(token, token)
+                times, values, eases, shadow_blur, shadow_alpha, second = [], [], [], [], [], []
                 for pct, decl in frames(body):
                     times.append(pct / 100.0 * duration)
                     eases.append(easing_of(decl))
-                    declared = "filter" if prop_css == "filter-effect-0" else prop_css
                     raw = re.search(r"(?<![\w-])" + re.escape(declared) + r": ([^;]+);", decl).group(1).strip()
                     if prop in COLOR_PROPS:
                         values.append(color(raw))
@@ -123,17 +147,29 @@ def generate():
                         nums = re.match(r"0px 0px ([\d.]+)px 0px rgba\(166, 255, 204, ([\d.]+)\)", raw)
                         shadow_blur.append(kt_float(nums.group(1)))
                         shadow_alpha.append(kt_float(nums.group(2)))
+                    elif prop == "Translate":
+                        x, y = raw.split()
+                        values.append(kt_float(x.replace("px", "")))
+                        second.append(kt_float(y.replace("px", "")))
                     else:
-                        values.append(kt_float(raw.replace("px", "")))
+                        values.append(kt_float(re.sub(r"(px|rad)$", "", raw)))
                 t = ", ".join(kt_float(x) for x in times)
                 e = ", ".join(eases)
+                def number(p, vs):
+                    tracks.append(f'        Key("{role}", Prop.{p}) to NumberTrack(floatArrayOf({t}), floatArrayOf({", ".join(vs)}), arrayOf({e})),')
                 if prop == "Shadow":
-                    tracks.append(f'        Key("{role}", Prop.ShadowBlur) to NumberTrack(floatArrayOf({t}), floatArrayOf({", ".join(shadow_blur)}), arrayOf({e})),')
-                    tracks.append(f'        Key("{role}", Prop.ShadowAlpha) to NumberTrack(floatArrayOf({t}), floatArrayOf({", ".join(shadow_alpha)}), arrayOf({e})),')
+                    number("ShadowBlur", shadow_blur)
+                    number("ShadowAlpha", shadow_alpha)
+                elif prop == "Translate":
+                    number("TranslateX", values)
+                    number("TranslateY", second)
+                elif prop == "Scale":
+                    number("ScaleX", values)
+                    number("ScaleY", values)
                 elif prop in COLOR_PROPS:
                     tracks.append(f'        Key("{role}", Prop.{prop}) to ColorTrack(floatArrayOf({t}), longArrayOf({", ".join(values)}), arrayOf({e})),')
                 else:
-                    tracks.append(f'        Key("{role}", Prop.{prop}) to NumberTrack(floatArrayOf({t}), floatArrayOf({", ".join(values)}), arrayOf({e})),')
+                    number(prop, values)
             if origin and origin.group(1) != "50":
                 tracks.append(f'        // {role}: transform origin x = {origin.group(1)}%')
         # One function per track: the JVM caps a method (and a class initializer) at 64 KB.

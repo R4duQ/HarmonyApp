@@ -31,6 +31,8 @@ class GestureMiniBehaviourTest {
 
     private var skips = 0
     private var replays = 0
+    private var previousCalls = 0
+    private var before by mutableStateOf<MiniTrack?>(null)
     private var expands = 0
     private var current by mutableStateOf(midnight)
     private var position by mutableStateOf(120_000L)
@@ -52,9 +54,11 @@ class GestureMiniBehaviourTest {
                     actions = GestureMiniActions(
                         onSkip = { skips++; commandAt = rule.mainClock.currentTime; next?.let { current = it; next = null } },
                         onReplay = { replays++; commandAt = rule.mainClock.currentTime },
+                        onPrevious = { previousCalls++; commandAt = rule.mainClock.currentTime; before?.let { next = current; current = it; before = null } },
                         onExpand = { expands++ },
                     ),
                     labels = labels, state = state, reducedMotion = reducedMotion,
+                    previous = before,
                     artwork = { _, _ -> },
                 )
             }
@@ -233,5 +237,72 @@ class GestureMiniBehaviourTest {
         assertEquals(MiniMode.Rest, state.mode)
         assertTrue(!state.busy)
         assertEquals(midnight, state.shown(current))
+    }
+
+    // ---- Frame 07: previous track, then replay ------------------------------------------------
+
+    private fun leftLabel() = rule.onNodeWithTag(MiniTags.REPLAY).fetchSemanticsNode().config
+        .getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)?.joinToString()
+
+    @Test
+    fun `in a song's first 5 s the left button goes back a song, once, at the handoff`() {
+        before = solar
+        position = 2_000L
+        setUp()
+        settle(200)
+        assertEquals("Previous song", leftLabel())
+        val start = rule.mainClock.currentTime
+        rule.onNodeWithTag(MiniTags.REPLAY).performClick()
+        rule.mainClock.advanceTimeBy(100)
+        assertEquals(0, previousCalls)
+        settle()
+        assertEquals(1, previousCalls)
+        assertEquals(0, replays)
+        assertTrue(commandAt > start)
+        assertEquals(MiniMode.Rest, state.mode)
+        assertEquals(solar, state.shown(current))
+    }
+
+    @Test
+    fun `past 5 s the left button restarts the song, and turns into the replay arrow`() {
+        before = solar
+        position = 2_000L
+        setUp()
+        settle(200)
+        assertEquals(0f, state.leftMorph.value, 0f)
+        rule.runOnIdle { position = 5_200L }
+        rule.waitForIdle()
+        settle(600)
+        assertEquals("Restart song", leftLabel())
+        assertTrue("turned: ${state.leftMorph.value}", state.leftMorph.value >= LEFT_MORPH_TO_MS)
+        rule.onNodeWithTag(MiniTags.REPLAY).performClick()
+        settle()
+        assertEquals(1, replays)
+        assertEquals(0, previousCalls)
+    }
+
+    @Test
+    fun `a swipe left early goes back a song`() {
+        before = solar
+        position = 1_000L
+        setUp()
+        settle(200)
+        swipe(-140f)
+        settle()
+        assertEquals(1, previousCalls)
+        assertEquals(0, replays)
+        assertEquals(solar, state.shown(current))
+    }
+
+    @Test
+    fun `with no song before, the left button restarts even early`() {
+        before = null
+        position = 1_000L
+        setUp()
+        settle(200)
+        assertEquals("Restart song", leftLabel())
+        rule.onNodeWithTag(MiniTags.REPLAY).performClick()
+        settle()
+        assertEquals(1, replays)
     }
 }
