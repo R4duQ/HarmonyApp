@@ -186,9 +186,9 @@ fun HarmonyApp(
         TopLevel(Routes.ADD, NavItem(stringResource(R.string.nav_add), Icons.Outlined.AddCircleOutline, Icons.Rounded.AddCircle)),
     )
     val glassTabs = listOf(
-        GlassTab(stringResource(R.string.nav_listen), GlassGlyph.Home),
-        GlassTab(stringResource(R.string.nav_library), GlassGlyph.Grid),
-        GlassTab(stringResource(R.string.nav_add), GlassGlyph.Plus),
+        GlassTab(stringResource(R.string.nav_listen), GlassGlyph.Listen),
+        GlassTab(stringResource(R.string.nav_library), GlassGlyph.Library),
+        GlassTab(stringResource(R.string.nav_add), GlassGlyph.Add),
     )
     // Screens not yet rebuilt still take an EditorialPalette; it resolves from the room.
     val palette = catalogPalette()

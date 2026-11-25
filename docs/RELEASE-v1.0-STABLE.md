@@ -13,6 +13,9 @@ update over any of them. Library, playlists and settings are kept.
   next one, while the skip button shows it's getting it ready.
 - **Skipping and restarting are smoother:** the song slides in under the button
   that takes it, joined to it for a moment, and comes back out of it.
+- **The bottom bar is now charcoal glass with a mint edge.** The tab you're on
+  sits in the glass pill with its name under its icon; the pill glides to the
+  tab you pick.
 
 ## Build 180 — A glass navigation bar and a new Now Playing
 
