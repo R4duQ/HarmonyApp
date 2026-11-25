@@ -1,8 +1,18 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **180**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 179), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **181**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 180), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 181 — Previous song, and a mini player that flips
+
+- **The left button goes back a song** for the first 5 seconds of one, then
+  turns into the restart arrow. A swipe left does the same. The notification and
+  headset buttons follow the same rule.
+- **When a song ends by itself,** the mini player flips over like a card to the
+  next one, while the skip button shows it's getting it ready.
+- **Skipping and restarting are smoother:** the song slides in under the button
+  that takes it, joined to it for a moment, and comes back out of it.
 
 ## Build 180 — A glass navigation bar and a new Now Playing
 
