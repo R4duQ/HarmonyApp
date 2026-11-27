@@ -77,20 +77,44 @@ import kotlin.math.sin
  * its name, and the 5.4 s timeline's tab changes, step for step.
  */
 
-/** A tab's glyph, in Figma's 22 dp icon box (stroke 1.8, round). */
-enum class GlassGlyph(internal val path: String) {
+/**
+ * One stroke of a tab's glyph, in Figma's 22 dp icon box: its path, stroke,
+ * and the layer's box (its centre is where its landing wobble turns).
+ */
+class GlassStroke internal constructor(
+    internal val path: String,
+    internal val width: Float,
+    internal val cap: StrokeCap,
+    internal val join: StrokeJoin,
+    internal val box: Rect,
+)
+
+/** A tab's glyph: Figma's vectors, and how each settles when its tab is chosen ([Settle]). */
+enum class GlassGlyph(internal val strokes: List<GlassStroke>) {
     Listen(
-        "M3.66667 12.8333V10.0833C3.66667 8.13841 4.43928 6.27315 5.81455 4.89788C7.18982 3.52262 9.05508 2.75 11 2.75" +
-            "C12.9449 2.75 14.8102 3.52262 16.1855 4.89788C17.5607 6.27315 18.3333 8.13841 18.3333 10.0833V12.8333" +
-            "M3.66667 11H6.41667V18.3333H3.66667V11ZM15.5833 11H18.3333V18.3333H15.5833V11Z",
+        listOf(
+            GlassStroke(
+                "M2.75 12.2V11.1C2.75 6.53998 6.44 2.84998 11 2.84998C15.56 2.84998 19.25 6.53998 19.25 11.1V12.2" +
+                    "M2.75 12.2H4.85C5.97 12.2 6.7 13.02 6.7 14.1V17.55C6.7 18.43 6 19.15 5.1 19.15H4.45C3.51 19.15 2.75 18.39 2.75 17.45V12.2Z" +
+                    "M19.25 12.2H17.15C16.03 12.2 15.3 13.02 15.3 14.1V17.55C15.3 18.43 16 19.15 16.9 19.15H17.55C18.49 19.15 19.25 18.39 19.25 17.45V12.2Z",
+                1.85f, StrokeCap.Round, StrokeJoin.Miter, Rect(2.75f, 2.85f, 19.25f, 19.15f),
+            ),
+        ),
     ),
     Library(
-        "M8.25 0.916667V3.66667M0.916667 7.33333V21.0833H13.75M9.16667 11.9167H7.33333C6.97073 11.9167 6.61628 12.0242 6.31479 12.2256" +
-            "C6.0133 12.4271 5.77831 12.7134 5.63955 13.0484C5.50079 13.3834 5.46449 13.752 5.53523 14.1077C5.60597 14.4633 5.78057 14.79 6.03697 15.0464" +
-            "C6.29337 15.3028 6.62004 15.4774 6.97567 15.5481C7.3313 15.6188 7.69992 15.5825 8.03492 15.4438C8.36992 15.305 8.65625 15.07 8.85769 14.7685" +
-            "C9.05914 14.4671 9.16667 14.1126 9.16667 13.75V8.25L13.75 7.33333V11.9167M4.58333 3.66667H17.4167V18.3333H4.58333V3.66667Z",
+        listOf(
+            // The rear card, then the front one with its note.
+            GlassStroke("M2.54999 6.79999V17.05C2.54999 18.43 3.66999 19.55 5.04999 19.55H14.9", 1.7f, StrokeCap.Butt, StrokeJoin.Miter, Rect(2.55f, 6.8f, 14.9f, 19.55f)),
+            GlassStroke(
+                "M13.5 12.35V6.95001L16.1 6.15001M13.5 12.35C13.5 13.16 12.72 13.7 11.75 13.7C10.81 13.7 10.15 13.19 10.15 12.5" +
+                    "C10.15 11.75 10.86 11.2 11.86 11.2C12.8 11.2 13.5 11.67 13.5 12.35Z" +
+                    "M8.30001 2.45001H17.1C18.4 2.45001 19.45 3.50001 19.45 4.80001V14.3C19.45 15.6 18.4 16.65 17.1 16.65H8.30001" +
+                    "C7.00001 16.65 5.95001 15.6 5.95001 14.3V4.80001C5.95001 3.50001 7.00001 2.45001 8.30001 2.45001Z",
+                1.7f, StrokeCap.Butt, StrokeJoin.Miter, Rect(5.95f, 2.45f, 19.45f, 16.65f),
+            ),
+        ),
     ),
-    Add("M11 4.58333V17.4167M4.58333 11H17.4167"),
+    Add(listOf(GlassStroke("M11 3.54999V18.45M3.54999 11H18.45", 2.04f, StrokeCap.Butt, StrokeJoin.Round, Rect(3.55f, 3.55f, 18.45f, 18.45f)))),
 }
 
 /** A destination in the glass bar. */
@@ -98,8 +122,8 @@ data class GlassTab(val label: String, val glyph: GlassGlyph)
 
 /** The reference's numbers, in dp, at its 393 dp width. */
 private object Glass {
-    /** 122 in the frame, of which the gesture inset is 24 (the handle sits 12 above its foot). */
-    const val BAR_H = 98f
+    /** 110 in the frame, of which the gesture inset is 24 (the handle sits 12 above its foot). */
+    const val BAR_H = 86f
     const val FIRST_CENTRE = 73f // the first tab's centre: 21 + 104 / 2
     const val LAST_FROM_RIGHT = 72f // the last tab's centre from the right edge: 20 + 104 / 2
     const val PILL_W = 92f
@@ -108,7 +132,7 @@ private object Glass {
     const val ICON_TOP = 11f // a tab's icon at rest (the tab sits 2 above the bar, the icon 13 into it)
     const val LIFT = 7f // the selected one rises this far, its name under it
     const val LABEL_TOP = 28f
-    const val CORNER = 30f
+    const val CORNER = 27f
     val Page = Color(0xFF111411)
     val Rest = Color(0xFFA4AFA3)
     val Mint = Color(0xFF99E1BC)
@@ -118,7 +142,11 @@ private object Glass {
         0f to Color(182, 233, 207).copy(alpha = 0.083f), 0.25f to Color(153, 225, 188).copy(alpha = 0.022f),
         0.7f to Color(29, 36, 30).copy(alpha = 0.044f), 1f to Color(12, 14, 12).copy(alpha = 0.28f),
     )
-    val SurfaceRim = Color(182, 233, 207).copy(alpha = 0.4f)
+    /** The bar's 0.9 rim, top to bottom. */
+    val SurfaceRim = arrayOf(
+        0f to Color(0xFFB6E9CF).copy(alpha = 0.4f), 0.18f to Color(0xFF99E1BC).copy(alpha = 0.19f), 0.55f to Color(0xFFA4AFA3).copy(alpha = 0.1f),
+        0.83f to Color(0xFF99E1BC).copy(alpha = 0.17f), 1f to Color(0xFFB6E9CF).copy(alpha = 0.28f),
+    )
     val Edge = arrayOf(
         0f to Color(0xFFB6E9CF).copy(alpha = 0.48f), 0.26f to Color(0xFF99E1BC).copy(alpha = 0.2f),
         0.62f to Color(0xFFB6E9CF).copy(alpha = 0.15f), 1f to Color(0xFFB6E9CF).copy(alpha = 0.47f),
@@ -129,7 +157,11 @@ private object Glass {
         0f to Color(182, 233, 207).copy(alpha = 0.14f), 0.32f to Color(153, 225, 188).copy(alpha = 0.044f),
         0.73f to Color(29, 36, 30).copy(alpha = 0.065f), 1f to Color(12, 14, 12).copy(alpha = 0.19f),
     )
-    val PillRim = Color(182, 233, 207).copy(alpha = 0.7f)
+    /** The pill's 1 dp rim, top to bottom. */
+    val PillRim = arrayOf(
+        0f to Color(0xFFB6E9CF).copy(alpha = 0.7f), 0.22f to Color(0xFF99E1BC).copy(alpha = 0.38f), 0.57f to Color(0xFFA4AFA3).copy(alpha = 0.14f),
+        0.82f to Color(0xFF99E1BC).copy(alpha = 0.22f), 1f to Color(0xFFB6E9CF).copy(alpha = 0.37f),
+    )
 }
 
 /** CSS's ease-in-out and ease-out, as the timeline uses them. */
@@ -150,6 +182,64 @@ private fun hopBetween(a: Int, b: Int): Hop = when (setOf(a, b)) {
     setOf(1, 2) -> Hop(470f, 197.4f, 98.7f, 361.9f)
     else -> if (abs(a - b) == 1) Hop(450f, 189f, 94.5f, 346.5f) else Hop(590f, 247.8f, 94.4f, 489.7f)
 }
+
+/**
+ * A property's keys after a tab lands, in ms from the landing: the first
+ * segment eases out, the rest ease in and out, as the timeline has them.
+ */
+private class Keys(val times: FloatArray, val values: FloatArray, val rest: Float) {
+    fun at(t: Float): Float {
+        if (t <= 0f) return rest
+        var from = 0f
+        var a = rest
+        for (i in times.indices) {
+            if (t < times[i]) {
+                val f = (t - from) / (times[i] - from)
+                return a + (values[i] - a) * (if (i == 0) EaseOut else EaseInOut).transform(f)
+            }
+            from = times[i]
+            a = values[i]
+        }
+        return values.last()
+    }
+}
+
+/** How one stroke settles when its tab is chosen: turn (rad), scale and shift, about its box's centre. */
+private class Settle(
+    val rotate: Keys? = null,
+    val scaleX: Keys? = null,
+    val scaleY: Keys? = null,
+    val shiftX: Keys? = null,
+    val shiftY: Keys? = null,
+)
+
+private fun keys(times: FloatArray, vararg values: Float, rest: Float = 0f) = Keys(times, values, rest)
+
+/** The 8:4 timeline's landings (Library at 22.037 %, Add at 48.148 %, Listen at 81.667 % of 5.4 s), per stroke. */
+private fun settleOf(glyph: GlassGlyph): List<Settle> = when (glyph) {
+    // The cards knock against each other and settle.
+    GlassGlyph.Library -> {
+        val rear = floatArrayOf(160f, 300f, 440f)
+        val front = floatArrayOf(140f, 285f, 430f)
+        listOf(
+            Settle(rotate = keys(rear, -0.095993f, 0.029671f, 0f), shiftX = keys(rear, -1.5f, 0.22f, 0f), shiftY = keys(rear, 0.85f, -0.26f, 0f)),
+            Settle(rotate = keys(front, 0.139626f, -0.040143f, 0f), shiftX = keys(front, 0.95f, -0.3f, 0f), shiftY = keys(front, -2.15f, 0.55f, 0f)),
+        )
+    }
+    // The plus swells and turns a quarter, overshooting; turned, it is the same plus.
+    GlassGlyph.Add -> {
+        val scale = keys(floatArrayOf(135f, 290f, 420f), 1.17f, 0.97f, 1f, rest = 1f)
+        listOf(Settle(rotate = keys(floatArrayOf(150f, 270f, 400f), 1.082104f, 1.692969f, 1.570796f), scaleX = scale, scaleY = scale))
+    }
+    // The headphones tip, narrow and bob.
+    GlassGlyph.Listen -> {
+        val t = floatArrayOf(190f, 340f, 530f)
+        listOf(Settle(rotate = keys(t, 0.139626f, -0.06545f, 0f), scaleX = keys(t, 0.91f, 0.96f, 1f, rest = 1f), shiftY = keys(t, -1.3f, 0.35f, 0f)))
+    }
+}
+
+/** The longest landing, after which the bar is still. */
+private const val SETTLE_MS = 540f
 
 /** Where everything is at one instant: the carrier's slot, the pill's stretch, and how selected each tab looks. */
 private class GlassPose(val carrier: Float, val stretch: Float, val lift: FloatArray)
@@ -198,7 +288,9 @@ fun LiquidGlassNavBar(
     val labelStyle = TextStyle(fontFamily = InterMedium, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 1.3.em, color = Glass.Mint)
     val density = LocalDensity.current
     val labels = remember(tabs, density) { tabs.map { measurer.measure(it.label, labelStyle) } }
-    val glyphs = remember(tabs) { tabs.map { PathParser().parsePathString(it.glyph.path).toPath() } }
+    val glyphs = remember(tabs) {
+        tabs.map { tab -> tab.glyph.strokes.map { PathParser().parsePathString(it.path).toPath() } }
+    }
     val still = com.harmony.core.ui.theme.reducedMotion
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -216,14 +308,17 @@ fun LiquidGlassNavBar(
                 // The tap was a frame ago (it took one to get here): start a frame in, as the timeline does at the tap.
                 clock.snapTo(FRAME_MS)
             } else if (clock.value == 0f) {
-                clock.snapTo(hop.duration)
+                clock.snapTo(hop.duration + SETTLE_MS)
                 return@LaunchedEffect
             }
-            if (still) clock.snapTo(hop.duration)
-            else clock.animateTo(hop.duration, tween((hop.duration - clock.value).toInt().coerceAtLeast(0), easing = LinearEasing))
+            // The change, then the new tab's icon settling.
+            val end = hop.duration + SETTLE_MS
+            if (still) clock.snapTo(end)
+            else clock.animateTo(end, tween((end - clock.value).toInt().coerceAtLeast(0), easing = LinearEasing))
         }
         val now = pose(from, target, clock.value, hop, layout)
-        Canvas(Modifier.matchParentSize()) { drawGlass(layout, now, glyphs, labels) }
+        val settling = clock.value - hop.duration
+        Canvas(Modifier.matchParentSize()) { drawGlass(layout, now, tabs, glyphs, labels, target, if (still) 0f else settling) }
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth().height(Glass.BAR_H.dp).selectableGroup()) {
                 tabs.forEachIndexed { i, tab ->
@@ -296,7 +391,15 @@ private fun DrawScope.innerShadow(shape: Path, bounds: Rect, dy: Float, blur: Fl
     }
 }
 
-private fun DrawScope.drawGlass(layout: GlassLayout, pose: GlassPose, glyphs: List<Path>, labels: List<TextLayoutResult>) {
+private fun DrawScope.drawGlass(
+    layout: GlassLayout,
+    pose: GlassPose,
+    tabs: List<GlassTab>,
+    glyphs: List<List<Path>>,
+    labels: List<TextLayoutResult>,
+    landed: Int,
+    settling: Float,
+) {
     val u = density
     scale(u, u, pivot = Offset.Zero) {
         val w = layout.width
@@ -337,7 +440,7 @@ private fun DrawScope.drawGlass(layout: GlassLayout, pose: GlassPose, glyphs: Li
                 ),
             )
         }
-        drawPath(rim, Glass.SurfaceRim, style = Stroke(0.9f))
+        drawPath(rim, Brush.verticalGradient(*Glass.SurfaceRim, startY = 0f, endY = h), style = Stroke(0.9f))
 
         // The highlight along the notch, then the notch itself in the page's colour (only below the bar's edge).
         drawPath(edge(c), Brush.horizontalGradient(*Glass.Edge, startX = c - 65f, endX = c + 65f), style = Stroke(1f))
@@ -356,6 +459,8 @@ private fun DrawScope.drawGlass(layout: GlassLayout, pose: GlassPose, glyphs: Li
             val mid = Offset(c, Glass.PILL_H / 2f)
             drawPath(pillPath, Brush.linearGradient(*Glass.LightBody, start = mid - Offset(dx, dy) * half, end = mid + Offset(dx, dy) * half))
             drawPath(pillPath, Brush.verticalGradient(*Glass.LightGlaze, startY = 0f, endY = Glass.PILL_H))
+            // The pill's Glass effect (refraction 0.67) dims what shows through it by about a third, as Figma renders it.
+            drawPath(pillPath, Color.Black.copy(alpha = 0.32f))
             // Shadow 0 5 10, outside the pill only (CSS box-shadow).
             drawIntoCanvas { canvas ->
                 val nc = canvas.nativeCanvas
@@ -367,7 +472,10 @@ private fun DrawScope.drawGlass(layout: GlassLayout, pose: GlassPose, glyphs: Li
             drawPath(pillPath, Brush.verticalGradient(*Glass.PillFill, startY = 0f, endY = Glass.PILL_H))
             innerShadow(pillPath, Rect(pill.left, pill.top, pill.right, pill.bottom), -1f, 5f, Color(12, 14, 12).copy(alpha = 0.32f))
             innerShadow(pillPath, Rect(pill.left, pill.top, pill.right, pill.bottom), 1f, 2f, Color(182, 233, 207).copy(alpha = 0.24f))
-            drawRoundRect(Glass.PillRim, topLeft = Offset(left + 0.5f, 0.5f), size = Size(Glass.PILL_W - 1f, Glass.PILL_H - 1f), cornerRadius = CornerRadius(21.5f), style = Stroke(1f))
+            drawRoundRect(
+                Brush.verticalGradient(*Glass.PillRim, startY = 0f, endY = Glass.PILL_H),
+                topLeft = Offset(left + 0.5f, 0.5f), size = Size(Glass.PILL_W - 1f, Glass.PILL_H - 1f), cornerRadius = CornerRadius(21.5f), style = Stroke(1f),
+            )
         }
 
         // The tabs: the selected one's icon raised, mint, with its name under it.
@@ -375,7 +483,21 @@ private fun DrawScope.drawGlass(layout: GlassLayout, pose: GlassPose, glyphs: Li
             val s = pose.lift[i]
             val centre = layout.centre(i.toFloat())
             translate(centre - Glass.ICON / 2f, Glass.ICON_TOP - Glass.LIFT * s) {
-                drawPath(glyphs[i], lerp(Glass.Rest, Glass.Mint, s), style = Stroke(1.8f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                val strokes = tabs[i].glyph.strokes
+                val settles = if (i == landed && settling > 0f) settleOf(tabs[i].glyph) else null
+                strokes.forEachIndexed { k, stroke ->
+                    val m = settles?.getOrNull(k)
+                    val pivot = stroke.box.center
+                    withTransform({
+                        if (m != null) {
+                            translate(m.shiftX?.at(settling) ?: 0f, m.shiftY?.at(settling) ?: 0f)
+                            rotate(Math.toDegrees((m.rotate?.at(settling) ?: 0f).toDouble()).toFloat(), pivot)
+                            scale(m.scaleX?.at(settling) ?: 1f, m.scaleY?.at(settling) ?: 1f, pivot)
+                        }
+                    }) {
+                        drawPath(glyphs[i][k], lerp(Glass.Rest, Glass.Mint, s), style = Stroke(stroke.width, cap = stroke.cap, join = stroke.join))
+                    }
+                }
             }
             if (s > 0.003f) {
                 val text = labels[i]

@@ -2,6 +2,7 @@ package com.harmony.feature.player.neu
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -12,136 +13,111 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import com.harmony.feature.player.R
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /*
- * The neumorphic Now Playing from Figma (file Bj9Z7C1JD7kaXGK8h5Tw8M, frames
- * 12:8 light and 12:18 dark): its colours, shadows, type and the prototype's
- * own transitions (Smart Animate, Figma's "Ease out" = cubic-bezier(0, 0, .58, 1)).
+ * Now Playing from Figma (file Bj9Z7C1JD7kaXGK8h5Tw8M): frames 12:8 / 85:639
+ * light and 12:18 / 85:949 dark. Flat surfaces on a warm ground, a hairline
+ * edge, lavender for "pressed" and "on", and the prototype's own transitions
+ * (Smart Animate with Figma's easing presets).
  */
 
 /** Figma's "Ease out" preset. */
 internal val FigmaEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
-/** A Figma drop or inner shadow: offset, blur (CSS px, as Figma shows it) and colour, in dp. */
-@Immutable
-internal data class NeuShadow(val dx: Float, val dy: Float, val blur: Float, val color: Color)
-
-/** A vertical gradient as Figma stores it: stops top to bottom. */
-@Immutable
-internal data class NeuGradient(val stops: List<Pair<Float, Color>>) {
-    fun brush(height: Float): Brush = Brush.verticalGradient(*stops.toTypedArray(), startY = 0f, endY = height)
-}
+/** Figma's "Ease in and out" preset. */
+internal val FigmaEaseInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
 
 @Immutable
 internal class NeuPalette(
     val dark: Boolean,
+    /** The page. */
     val ground: Color,
+    /** Buttons, the time card, the mix button and the tools. */
+    val surface: Color,
+    /** Their 1 dp edge, the header rule, the waveform's baseline. */
+    val line: Color,
+    /** Pressed, and repeat or shuffle on. */
+    val pressed: Color,
     val ink: Color,
     val muted: Color,
     val accent: Color,
     val waveRest: Color,
-    /** 40 and 54 dp buttons, the lossless pill, the mix button. */
-    val raised: List<NeuShadow>,
-    /** The 42 dp header buttons and favourite. */
-    val raisedLarge: List<NeuShadow>,
-    /** The listening tools. */
-    val raisedTool: List<NeuShadow>,
-    val raisedSleeve: List<NeuShadow>,
-    /** Pressed, On and Playing: the surface sinks. */
-    val pressed: List<NeuShadow>,
-    /** The waveform's channel. */
-    val channel: List<NeuShadow>,
-    val playFill: NeuGradient,
-    val playStroke: NeuGradient,
+    /** Repeat's "on" dot. */
+    val repeatDot: Color,
+    /** The lossless key and the details card (a shade apart from [surface] in dark). */
+    val pill: Color,
+    val pillLine: Color,
+    /** Play / pause: Paused and Playing fills, and the glyph on them. */
+    val playPaused: Color,
+    val playPlaying: Color,
     val playIcon: Color,
-    val surroundStroke: NeuGradient,
-    val surroundInset: List<NeuShadow>,
+    /** The sculpted ring around play / pause (light only). */
+    val surround: Color?,
     val record: Color,
     val grooveOdd: Color,
     val grooveEven: Color,
-    val recordLabel: Color,
-    val recordShadow: NeuShadow,
-    val card: List<NeuShadow>,
+    /** The record's drop shadow: (5.4, 6.3), blur 12.6. */
+    val recordShadow: Color,
+    /** Behind the audio details card. */
+    val scrim: Color,
 )
 
 private fun hex(v: Long, a: Float = 1f) = Color(v).copy(alpha = a)
 
 internal val NeuLight = NeuPalette(
     dark = false,
-    ground = hex(0xFFE8ECEE),
-    ink = hex(0xFF25383B),
-    muted = hex(0xFF5C6D72),
-    accent = hex(0xFF26775B),
-    waveRest = hex(0xFFB6C5CA),
-    raised = listOf(NeuShadow(5f, 5f, 10f, hex(0xFFB8C4CA, 0.7f)), NeuShadow(-4f, -4f, 10f, hex(0xFFFFFFFF, 0.96f))),
-    raisedLarge = listOf(NeuShadow(6f, 6f, 12f, hex(0xFFB8C4CA, 0.7f)), NeuShadow(-5f, -5f, 12f, hex(0xFFFFFFFF, 0.96f))),
-    raisedTool = listOf(NeuShadow(3f, 3f, 7f, hex(0xFFB8C4CA, 0.55f)), NeuShadow(-3f, -3f, 7f, hex(0xFFFFFFFF, 0.9f))),
-    raisedSleeve = listOf(NeuShadow(5.4f, 5.4f, 10.8f, hex(0xFFB8C4CA, 0.7f)), NeuShadow(-4.5f, -4.5f, 10.8f, hex(0xFFFFFFFF, 0.96f))),
-    pressed = listOf(NeuShadow(2f, 2f, 4f, hex(0xFFB8C4CA, 0.65f)), NeuShadow(-2f, -2f, 4f, hex(0xFFFFFFFF, 0.9f))),
-    channel = listOf(NeuShadow(3f, 3f, 6f, hex(0xFFB8C4CA, 0.65f)), NeuShadow(-3f, -3f, 6f, hex(0xFFFFFFFF, 0.9f))),
-    playFill = NeuGradient(listOf(0f to hex(0xFFB6E6D3), 0.48f to hex(0xFF9DDBC2), 1f to hex(0xFF85C9AF))),
-    playStroke = NeuGradient(listOf(0f to hex(0xFFEFFFF6, 0.88f), 0.4f to hex(0xFFCCF1E0, 0.28f), 1f to hex(0xFF609E87, 0.34f))),
-    playIcon = hex(0xFF194F3C),
-    surroundStroke = NeuGradient(listOf(0f to hex(0xFFFFFFFF, 0.72f), 0.5f to hex(0xFFCAD4D8, 0.1f), 1f to hex(0xFFBDCBCE, 0.42f))),
-    surroundInset = listOf(NeuShadow(3f, 3f, 6f, hex(0xFF9EAFB5, 0.46f)), NeuShadow(-3f, -3f, 6f, hex(0xFFFFFFFF, 0.94f))),
+    ground = hex(0xFFF2F2EE),
+    surface = hex(0xFFFAFAF7),
+    line = hex(0xFFD4D4CD),
+    pressed = hex(0xFFE8E5F7),
+    ink = hex(0xFF191A1D),
+    muted = hex(0xFF57575E),
+    accent = hex(0xFF5956C2),
+    waveRest = hex(0xFFCBCAD6),
+    repeatDot = hex(0xFF26775B),
+    pill = hex(0xFFFAFAF7),
+    pillLine = hex(0xFFD4D4CD),
+    playPaused = hex(0xFF191A1D),
+    playPlaying = hex(0xFF37364D),
+    playIcon = hex(0xFFF9F8FF),
+    surround = hex(0xFFD4D4CD),
     record = hex(0xFF15191A),
     grooveOdd = hex(0xFF343C3E),
     grooveEven = hex(0xFF252B2D),
-    recordLabel = hex(0xFF6E9B89),
-    recordShadow = NeuShadow(5.4f, 6.3f, 12.6f, hex(0xFFB8C4CA, 0.45f)),
-    card = listOf(NeuShadow(0f, 10f, 24f, hex(0xFFB8C4CA, 0.7f)), NeuShadow(-2f, -2f, 7f, hex(0xFFFFFFFF, 0.8f))),
+    recordShadow = hex(0xFFB8C4CA, 0.45f),
+    scrim = hex(0xFF15141B, 0.16f),
 )
 
-/*
- * Dark is frame 12:18. Its play button and surround are the light frame's
- * newer ones (the gradient, the gradient rim and the sculpted surround), in
- * dark's colours: the same steps around dark's #91D8BA as light's around
- * #9BD8BF, and the rim and surround lit with dark's own highlight and shade.
- */
 internal val NeuDark = NeuPalette(
     dark = true,
-    ground = hex(0xFF25292B),
-    ink = hex(0xFFEDF4F1),
-    muted = hex(0xFFA6B4B5),
-    accent = hex(0xFF91D8BA),
-    waveRest = hex(0xFF414B4E),
-    raised = listOf(NeuShadow(5f, 5f, 10f, hex(0xFF111416, 0.65f)), NeuShadow(-4f, -4f, 10f, hex(0xFF41484A, 0.45f))),
-    raisedLarge = listOf(NeuShadow(6f, 6f, 12f, hex(0xFF111416, 0.65f)), NeuShadow(-5f, -5f, 12f, hex(0xFF41484A, 0.45f))),
-    raisedTool = listOf(NeuShadow(3f, 3f, 7f, hex(0xFF111416, 0.5f)), NeuShadow(-3f, -3f, 7f, hex(0xFF41484A, 0.3f))),
-    raisedSleeve = listOf(NeuShadow(5.4f, 5.4f, 10.8f, hex(0xFF111416, 0.65f)), NeuShadow(-4.5f, -4.5f, 10.8f, hex(0xFF41484A, 0.45f))),
-    pressed = listOf(NeuShadow(2f, 2f, 4f, hex(0xFF111416, 0.8f)), NeuShadow(-2f, -2f, 4f, hex(0xFF41484A, 0.4f))),
-    channel = listOf(NeuShadow(3f, 3f, 6f, hex(0xFF111416, 0.8f)), NeuShadow(-3f, -3f, 6f, hex(0xFF41484A, 0.4f))),
-    playFill = NeuGradient(listOf(0f to hex(0xFFACE6CE), 0.48f to hex(0xFF93DBBD), 1f to hex(0xFF7BC9AA))),
-    playStroke = NeuGradient(listOf(0f to hex(0xFFC8F3E1, 0.7f), 0.4f to hex(0xFFA6E3CA, 0.22f), 1f to hex(0xFF3E6E5D, 0.4f))),
-    playIcon = hex(0xFF154733),
-    surroundStroke = NeuGradient(listOf(0f to hex(0xFF41484A, 0.72f), 0.5f to hex(0xFF2E3335, 0.1f), 1f to hex(0xFF111416, 0.42f))),
-    surroundInset = listOf(NeuShadow(3f, 3f, 6f, hex(0xFF111416, 0.8f)), NeuShadow(-3f, -3f, 6f, hex(0xFF41484A, 0.4f))),
-    record = hex(0xFF15191A),
-    grooveOdd = hex(0xFF343C3E),
-    grooveEven = hex(0xFF252B2D),
-    recordLabel = hex(0xFF4B7061),
-    recordShadow = NeuShadow(5.4f, 6.3f, 12.6f, hex(0xFF111416, 0.45f)),
-    card = listOf(NeuShadow(0f, 10f, 24f, hex(0xFF111416, 0.85f)), NeuShadow(-2f, -2f, 7f, hex(0xFF41484A, 0.22f))),
+    ground = hex(0xFF18181C),
+    surface = hex(0xFF212126),
+    line = hex(0xFF393942),
+    pressed = hex(0xFF353249),
+    ink = hex(0xFFF4F3F7),
+    muted = hex(0xFFB4B1BE),
+    accent = hex(0xFFA19DEA),
+    waveRest = hex(0xFF464550),
+    repeatDot = hex(0xFF91D8BA),
+    pill = hex(0xFF23232A),
+    pillLine = hex(0xFF41414B),
+    playPaused = hex(0xFFA19DEA),
+    playPlaying = hex(0xFFB2AEF4),
+    playIcon = hex(0xFF1B1928),
+    surround = null,
+    record = hex(0xFF222229),
+    grooveOdd = hex(0xFF42424C),
+    grooveEven = hex(0xFF34343D),
+    recordShadow = hex(0xFF111416, 0.45f),
+    scrim = hex(0xFF090910, 0.44f),
 )
 
 /** The palette for the app's theme. */
@@ -156,96 +132,46 @@ internal val Inter = FontFamily(
     Font(R.font.inter_bold, FontWeight.Bold),
 )
 
+/** IBM Plex Mono Medium: the small caps labels, the format key, the details card. */
+internal val PlexMono = FontFamily(Font(R.font.ibm_plex_mono_medium, FontWeight.Medium))
+
+/** Bitcount Grid Single SemiBold (CRSV 0, ELSH 0, ELXP 0): the elapsed time. */
+internal val Bitcount = FontFamily(Font(R.font.bitcount_grid_single_semibold, FontWeight.SemiBold))
+
 /** CSS blur (Figma's number) to Android's blur radius: sigma = blur / 2, Skia's sigma = 0.57735 r + 0.5. */
 internal fun blurRadiusPx(blurDp: Float, density: Float): Float {
     val sigma = blurDp / 2f * density
     return ((sigma - 0.5f) / 0.57735f).coerceAtLeast(0.1f)
 }
 
-private fun shadowPaint(color: Color, alpha: Float, blurDp: Float, density: Float) = android.graphics.Paint().apply {
-    isAntiAlias = true
-    this.color = color.copy(alpha = color.alpha * alpha).toArgb()
-    maskFilter = android.graphics.BlurMaskFilter(blurRadiusPx(blurDp, density), android.graphics.BlurMaskFilter.Blur.NORMAL)
-}
-
 /**
- * A Figma rounded frame: drop shadows outside, the fill, inner shadows
- * clipped inside, and an inside stroke. [dropAlpha] and [innerAlpha] carry
- * Smart Animate between a raised and a pressed state.
+ * The prototype's timings for a button that springs back after a tap:
+ * Pressed in [pressMs] ([pressEasing]), held [holdMs], back in [releaseMs].
  */
-internal fun Modifier.neuSurface(
-    radius: Dp,
-    fill: Brush,
-    drop: List<NeuShadow> = emptyList(),
-    dropAlpha: Float = 1f,
-    inner: List<NeuShadow> = emptyList(),
-    innerAlpha: Float = 1f,
-    stroke: NeuGradient? = null,
-    strokeWidth: Dp = 0.dp,
-): Modifier = drawWithCache {
-    val r = radius.toPx().coerceAtMost(size.minDimension / 2f)
-    val outline = android.graphics.Path().apply {
-        addRoundRect(0f, 0f, size.width, size.height, r, r, android.graphics.Path.Direction.CW)
-    }
-    // The outside of the shape, for inner shadows: a frame around it, wide enough for any blur.
-    val pad = 64.dp.toPx()
-    val ring = android.graphics.Path().apply {
-        fillType = android.graphics.Path.FillType.EVEN_ODD
-        addRect(-pad, -pad, size.width + pad, size.height + pad, android.graphics.Path.Direction.CW)
-        addRoundRect(0f, 0f, size.width, size.height, r, r, android.graphics.Path.Direction.CW)
-    }
-    val dropPaints = drop.map { shadowPaint(it.color, dropAlpha, it.blur, density) }
-    val innerPaints = inner.map { shadowPaint(it.color, innerAlpha, it.blur, density) }
-    val sw = strokeWidth.toPx()
-    val strokeBrush = stroke?.brush(size.height)
-    onDrawBehind {
-        drawIntoCanvas { canvas ->
-            val nc = canvas.nativeCanvas
-            if (dropAlpha > 0.001f) drop.forEachIndexed { i, s ->
-                nc.save()
-                nc.translate(s.dx * density, s.dy * density)
-                nc.drawPath(outline, dropPaints[i])
-                nc.restore()
-            }
-        }
-        drawRoundRect(fill, cornerRadius = CornerRadius(r))
-        if (innerAlpha > 0.001f && inner.isNotEmpty()) drawIntoCanvas { canvas ->
-            val nc = canvas.nativeCanvas
-            nc.save()
-            nc.clipPath(outline)
-            inner.forEachIndexed { i, s ->
-                nc.save()
-                nc.translate(s.dx * density, s.dy * density)
-                nc.drawPath(ring, innerPaints[i])
-                nc.restore()
-            }
-            nc.restore()
-        }
-        if (strokeBrush != null && sw > 0f) {
-            drawRoundRect(
-                strokeBrush,
-                topLeft = Offset(sw / 2f, sw / 2f),
-                size = Size(size.width - sw, size.height - sw),
-                cornerRadius = CornerRadius((r - sw / 2f).coerceAtLeast(0f)),
-                style = Stroke(sw),
-            )
-        }
-    }
-}
-
-/** The prototype's timings for a button that springs back after a tap. */
 @Immutable
-internal data class PressTiming(val pressMs: Int, val holdMs: Int, val releaseMs: Int) {
+internal data class PressTiming(
+    val pressMs: Int,
+    val holdMs: Int,
+    val releaseMs: Int,
+    val pressEasing: Easing = FigmaEaseOut,
+    val releaseEasing: Easing = FigmaEaseOut,
+) {
     companion object {
-        /** Back, skip, top back, more: Pressed in 90 ms, after 90 ms back in 180 ms. */
+        /** Back, top back, more, the other keys: Pressed in 90 ms, after 90 ms back in 180 ms. */
         val Standard = PressTiming(90, 90, 180)
-        /** Lossless: Pressed in 90 ms, after 70 ms back in 160 ms (the details open as it rises). */
-        val Lossless = PressTiming(90, 70, 160)
+        /** Lossless: Pressed in 90 ms, after 55 ms back in 160 ms as the details dissolve in. */
+        val Lossless = PressTiming(90, 55, 160)
+        /**
+         * Previous and next when they change the song: the "Apăsat" frames
+         * come in over 140 ms (ease in and out), and 14 ms later the record
+         * frame takes over in 85 ms (ease out), which lets the key up.
+         */
+        val Skip = PressTiming(140, 14, 85, pressEasing = FigmaEaseInOut)
     }
 }
 
 /**
- * 0 at rest, 1 pressed. A press sinks the button in [PressTiming.pressMs];
+ * 0 at rest, 1 pressed. A press sinks the key in [PressTiming.pressMs];
  * once it is down and the finger is up, it holds [PressTiming.holdMs] and
  * rises in [PressTiming.releaseMs], so a quick tap plays the prototype's
  * whole Resting → Pressed → Resting sequence.
@@ -262,7 +188,7 @@ internal fun pressProgress(source: MutableInteractionSource, timing: PressTiming
                 is PressInteraction.Press -> {
                     releaseJob?.cancel()
                     pressJob = launch {
-                        p.animateTo(1f, if (still) snap() else tween(timing.pressMs, easing = FigmaEaseOut))
+                        p.animateTo(1f, if (still) snap() else tween(timing.pressMs, easing = timing.pressEasing))
                     }
                 }
                 is PressInteraction.Release, is PressInteraction.Cancel -> {
@@ -270,7 +196,7 @@ internal fun pressProgress(source: MutableInteractionSource, timing: PressTiming
                     releaseJob = launch {
                         pressing?.join()
                         if (!still) delay(timing.holdMs.toLong())
-                        p.animateTo(0f, if (still) snap() else tween(timing.releaseMs, easing = FigmaEaseOut))
+                        p.animateTo(0f, if (still) snap() else tween(timing.releaseMs, easing = timing.releaseEasing))
                     }
                 }
             }
@@ -296,9 +222,9 @@ internal fun NeuPalette.asPlayerPalette() = com.harmony.feature.player.PlayerPal
     background = ground,
     ink = ink,
     muted = muted,
-    control = ground,
-    controlEdge = muted.copy(alpha = 0.16f),
-    primaryControl = playFill.stops[1].second,
+    control = surface,
+    controlEdge = line,
+    primaryControl = playPaused,
     onPrimaryControl = playIcon,
     accent = accent,
     live = accent,

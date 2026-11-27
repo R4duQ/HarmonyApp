@@ -131,6 +131,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.harmony.core.model.OutputForm
 import com.harmony.feature.player.neu.NeuAudioDetails
+import com.harmony.feature.player.neu.NeuPreviousButton
+import com.harmony.feature.player.neu.NeuTimeCard
+import com.harmony.feature.player.neu.DetailsAnchor
+import com.harmony.feature.player.neu.detailsAnchor
+import com.harmony.feature.player.neu.rememberNowPlayingMotion
+import com.harmony.feature.player.neu.FigmaEaseInOut
+import com.harmony.feature.player.neu.FigmaEaseOut
+import androidx.compose.animation.core.snap
 import com.harmony.feature.player.neu.NeuFavoriteButton
 import com.harmony.feature.player.neu.NeuFormatPill
 import com.harmony.feature.player.neu.NeuGlyph
@@ -144,7 +152,6 @@ import com.harmony.feature.player.neu.NeuTitle
 import com.harmony.feature.player.neu.NeuToggleButton
 import com.harmony.feature.player.neu.NeuTool
 import com.harmony.feature.player.neu.NeuTools
-import com.harmony.feature.player.neu.NeuWaveform
 import com.harmony.feature.player.neu.asPlayerPalette
 import com.harmony.feature.player.neu.audioFields
 import com.harmony.feature.player.neu.interStyle
@@ -186,6 +193,9 @@ import kotlin.math.abs
  */
 /** Fraction of the artwork width a swipe must cross to commit a skip. */
 private const val SWIPE_SKIP_FRACTION = 0.22f
+
+/** Previous restarts the song after this much of it, as the player does (HarmonyPlayer.MAX_SEEK_TO_PREVIOUS_MS). */
+private const val REPLAY_AFTER_MS = 5_000L
 
 /** Widest the portrait player's column grows, in dp (tablets held upright). */
 private const val PORTRAIT_MAX_CONTENT_DP = 600
@@ -584,15 +594,39 @@ internal fun ColumnScope.NowPlayingBody(
     var menuOpen by remember { mutableStateOf(false) }
     var showDetails by rememberSaveable { mutableStateOf(false) }
     val tag = formatTagFor(audioInfo, song?.bitDepth)
-    val fields = audioInfo?.let { audioFields(it.format, it.isLossless, it.sampleRateHz, song?.bitDepth, it.bitrateKbps) }.orEmpty()
+    val fields = audioInfo?.let { audioFields(it.format, it.sampleRateHz, song?.bitDepth, it.bitrateKbps) }.orEmpty()
     val gestureScope = rememberCoroutineScope()
     val still = com.harmony.core.ui.theme.reducedMotion
-    // The prototype opens the details as the pill rises: 90 ms down, 70 ms held.
+    val anchor = remember { DetailsAnchor() }
+    // The prototype opens the details as the key rises: down, 55 ms held, then the overlay.
     val openDetails: () -> Unit = {
         gestureScope.launch {
-            if (!still) kotlinx.coroutines.delay(160)
+            if (!still) kotlinx.coroutines.delay(55)
             showDetails = true
         }
+    }
+
+    // The record, the words and the key follow the prototype's motion (NeuMotion.kt).
+    val motion = rememberNowPlayingMotion(song, state.durationMs, state.isPlaying, state.positionMs, progress)
+    val shownElapsed = dragFraction?.let { (it * state.durationMs).toLong() } ?: motion.elapsed(state.positionMs, song?.id)
+    val shownProgress = dragFraction ?: motion.progress(progress, song?.id)
+    // Previous replays the song from five seconds in (as the player does), and says so with its arrow.
+    val replaying = song != null && !motion.swapping && state.positionMs > REPLAY_AFTER_MS
+    var restarted by remember { mutableStateOf(false) }
+    val replay by animateFloatAsState(
+        targetValue = if (replaying) 1f else 0f,
+        animationSpec = when {
+            still -> snap()
+            restarted -> tween(240, easing = FigmaEaseInOut)
+            else -> tween(170, easing = FigmaEaseOut)
+        },
+        finishedListener = { restarted = false },
+        label = "previous-replay",
+    )
+    val onNext: () -> Unit = { motion.markTapped(); cb.onNext() }
+    val onPrevious: () -> Unit = {
+        if (replaying) restarted = true else motion.markTapped()
+        cb.onPrevious()
     }
 
     // Short phones (a 640dp screen, or a large font) tighten the rhythm so the
@@ -612,7 +646,9 @@ internal fun ColumnScope.NowPlayingBody(
 
     val header = @Composable {
         NeuHeader(
-            albumName = song?.album,
+            albumName = motion.face.album,
+            outgoingAlbum = motion.outgoing?.let { it.album ?: "Nothing playing" },
+            settle = motion.settle.value,
             palette = neu,
             onBack = cb.onBack,
             onMore = { menuOpen = true },
@@ -638,31 +674,54 @@ internal fun ColumnScope.NowPlayingBody(
         )
     }
     val formatRow = @Composable { modifier: Modifier, centered: Boolean ->
-        BoxWithConstraints(modifier.fillMaxWidth()) {
-            val cardWidth = maxWidth
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
-            ) {
-                if (tag != null) Box {
-                    NeuFormatPill(tag.first, tag.second, neu, onClick = openDetails)
-                    NeuAudioDetails(showDetails, fields, neu, width = cardWidth, anchorHeight = 30.dp, onDismiss = { showDetails = false })
-                }
-                if (reason != null) {
-                    Text(
-                        reason,
-                        style = interStyle(11f, FontWeight.Medium, neu.muted),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = if (tag != null) 12.dp else 0.dp).weight(1f, fill = !centered),
-                    )
-                }
+        Row(
+            modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
+        ) {
+            if (tag != null) NeuFormatPill(tag.first, tag.second, neu, onClick = openDetails)
+            if (reason != null) {
+                Text(
+                    reason,
+                    style = interStyle(11f, FontWeight.Medium, neu.muted),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = if (tag != null) 12.dp else 0.dp).weight(1f, fill = !centered),
+                )
             }
         }
     }
-    val transport = @Composable {
-        NeuTransport(state, neu, smartStyle, journeyProgress, cb)
+    val record = @Composable { modifier: Modifier ->
+        ArtworkPager(
+            song = song,
+            motion = motion,
+            isPlaying = state.isPlaying,
+            gestureScope = gestureScope,
+            onNext = onNext,
+            onPrevious = onPrevious,
+            onPlayPause = cb.onPlayPause,
+            onQueue = cb.onQueue,
+            modifier = modifier,
+        )
+    }
+    val timeCard = @Composable { compact: Boolean ->
+        NeuTimeBlock(
+            elapsedMs = shownElapsed,
+            restarted = restarted,
+            elapsedAlpha = motion.elapsedAlpha.value,
+            motion = motion,
+            progress = shownProgress,
+            waveform = waveform,
+            playing = state.isPlaying,
+            dragging = dragFraction != null,
+            neu = neu,
+            cb = cb,
+            compact = compact,
+            modifier = Modifier.detailsAnchor(anchor),
+        )
+    }
+    val transport = @Composable { height: Int ->
+        NeuTransport(state, neu, smartStyle, journeyProgress, motion.playLook.value, replay, onPrevious, onNext, cb, height)
     }
     val mixButton = @Composable {
         if (steer != null) {
@@ -691,21 +750,11 @@ internal fun ColumnScope.NowPlayingBody(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                ArtworkPager(
-                    song = song,
-                    isPlaying = state.isPlaying,
-                    gestureScope = gestureScope,
-                    onNext = cb.onNext,
-                    onPrevious = cb.onPrevious,
-                    onPlayPause = cb.onPlayPause,
-                    onQueue = cb.onQueue,
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .fillMaxWidth(),
-                )
+                record(Modifier.weight(1f, fill = false).fillMaxWidth())
                 NeuTitle(
-                    title = song?.title ?: "Nothing playing",
-                    artist = song?.artist.orEmpty(),
+                    face = motion.face,
+                    outgoing = motion.outgoing,
+                    settle = motion.settle.value,
                     palette = neu,
                     centered = true,
                     titleSize = if (short) 19f else 21f,
@@ -728,9 +777,9 @@ internal fun ColumnScope.NowPlayingBody(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                formatRow(Modifier.padding(top = 8.dp), true)
-                NeuSeekBlock(progress, waveform, state, dragFraction, neu, cb, channelHeight = 52)
-                transport()
+                formatRow(Modifier.padding(top = 8.dp, bottom = 6.dp), true)
+                timeCard(true)
+                transport(96)
                 if (mixStatus != null) MixStatusLine(mixStatus, pp, centered = true, modifier = Modifier.padding(vertical = 6.dp))
                 NeuTools(tools, neu, Modifier.padding(top = 6.dp, bottom = 8.dp))
             }
@@ -740,41 +789,49 @@ internal fun ColumnScope.NowPlayingBody(
         // The record is the centre of the screen and takes whatever height the
         // controls leave; on a short phone it shrinks rather than pushing the
         // transport off screen.
-        ArtworkPager(
-            song = song,
-            isPlaying = state.isPlaying,
-            gestureScope = gestureScope,
-            onNext = cb.onNext,
-            onPrevious = cb.onPrevious,
-            onPlayPause = cb.onPlayPause,
-            onQueue = cb.onQueue,
-            modifier = (if (scrollable) Modifier.height(230.dp) else Modifier.weight(1f).heightIn(min = 110.dp))
-                .fillMaxWidth(),
+        record(
+            (if (scrollable) Modifier.height(230.dp) else Modifier.weight(1f).heightIn(min = 110.dp)).fillMaxWidth(),
         )
-        // Track details: title, artist, favourite, and the format pill (150 dp).
-        Box(Modifier.fillMaxWidth().height(if (short) 124.dp else 150.dp)) {
+        // Track details: title, artist, favourite, and the format key (128 dp).
+        // With a large system font the lines need their own height, so they stack.
+        if (LocalDensity.current.fontScale > 1.3f) {
+            Box(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 8.dp)) {
+                NeuTitle(
+                    face = motion.face,
+                    outgoing = motion.outgoing,
+                    settle = motion.settle.value,
+                    palette = neu,
+                    titleSize = 24f,
+                    modifier = Modifier.padding(end = 54.dp),
+                )
+                NeuFavoriteButton(isFavorite, cb.onToggleFavorite, neu, Modifier.align(Alignment.TopEnd))
+            }
+            formatRow(Modifier.padding(bottom = 8.dp), false)
+        } else Box(Modifier.fillMaxWidth().height(if (short) 112.dp else 128.dp)) {
             NeuTitle(
-                title = song?.title ?: "Nothing playing",
-                artist = song?.artist.orEmpty(),
+                face = motion.face,
+                outgoing = motion.outgoing,
+                settle = motion.settle.value,
                 palette = neu,
-                titleSize = if (short) 22f else 26f,
-                modifier = Modifier.padding(top = 13.dp, end = 54.dp),
+                titleSize = if (short) 24f else 30f,
+                modifier = Modifier.padding(top = if (short) 9.dp else 13.dp, end = 54.dp),
             )
-            NeuFavoriteButton(isFavorite, cb.onToggleFavorite, neu, Modifier.align(Alignment.TopEnd).offset(y = 17.dp))
-            formatRow(Modifier.offset(y = if (short) 74.dp else 80.dp), false)
+            NeuFavoriteButton(isFavorite, cb.onToggleFavorite, neu, Modifier.align(Alignment.TopEnd).offset(y = if (short) 11.dp else 17.dp))
+            formatRow(Modifier.offset(y = if (short) 61.dp else 73.dp), false)
         }
-        NeuSeekBlock(progress, waveform, state, dragFraction, neu, cb, channelHeight = if (short) 52 else 60)
-        transport()
-        Spacer(Modifier.height(if (short) 4.dp else 12.dp))
+        timeCard(short)
+        Spacer(Modifier.height(2.dp))
+        transport(if (short) 96 else 106)
         if (mixStatus != null) MixStatusLine(mixStatus, pp, centered = true, modifier = Modifier.padding(bottom = 6.dp))
-        // "Start a mix from this song" (82 dp); short screens reach it through Steer.
+        // "Start a mix from this song" (66 dp); short screens reach it through Steer.
         if (!short && steer != null) {
-            Box(Modifier.fillMaxWidth().height(if (mixStatus != null) 68.dp else 82.dp), contentAlignment = Alignment.TopCenter) {
-                Box(Modifier.padding(top = if (mixStatus != null) 0.dp else 14.dp)) { mixButton() }
+            Box(Modifier.fillMaxWidth().height(if (mixStatus != null) 58.dp else 66.dp), contentAlignment = Alignment.TopCenter) {
+                Box(Modifier.padding(top = if (mixStatus != null) 0.dp else 8.dp)) { mixButton() }
             }
         }
-        NeuTools(tools, neu, Modifier.padding(bottom = 4.dp))
+        NeuTools(tools, neu)
     }
+    NeuAudioDetails(showDetails, fields, neu, anchor, onDismiss = { showDetails = false })
 }
 
 /** The overflow menu: queue, Smart Shuffle, lyrics when there are some, the equalizer. */
@@ -817,51 +874,60 @@ private fun PlayerMenu(
 }
 
 /**
- * The waveform channel and the times under it (94 dp in the frame). The
- * music's level, while playing, lifts the bars around the playhead.
+ * The time card: the elapsed time (held and faded while the record swaps,
+ * cross-faded as it ticks), the waveform and the length. The music's level,
+ * while playing, lifts the bars around the playhead.
  */
 @Composable
-private fun NeuSeekBlock(
+private fun NeuTimeBlock(
+    elapsedMs: Long,
+    restarted: Boolean,
+    elapsedAlpha: Float,
+    motion: com.harmony.feature.player.neu.NowPlayingMotion,
     progress: Float,
     waveform: FloatArray,
-    state: PlayerState,
-    dragFraction: Float?,
+    playing: Boolean,
+    dragging: Boolean,
     neu: com.harmony.feature.player.neu.NeuPalette,
     cb: NowPlayingCallbacks,
-    channelHeight: Int,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     // Only react while actually playing: paused on a loud peak would
     // otherwise leave the bars frozen mid-swell, which reads as a stuck UI.
-    val live = if (state.isPlaying) liveAudioLevel() else AudioLevel()
+    val live = if (playing) liveAudioLevel() else AudioLevel()
     val level by animateFloatAsState(
         targetValue = live.level,
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f),
         label = "waveform-level",
     )
-    Column(Modifier.fillMaxWidth()) {
-        Spacer(Modifier.height(4.dp))
-        NeuWaveform(
-            progress = progress,
-            waveform = waveform,
-            palette = neu,
-            onScrub = cb.onScrub,
-            onScrubFinished = cb.onScrubFinished,
-            onScrubCancel = cb.onScrubCancel,
-            height = channelHeight.dp,
-            level = level,
-        )
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp)) {
-            val shownPosition = dragFraction?.let { (it * state.durationMs).toLong() } ?: state.positionMs
-            val time = interStyle(11f, FontWeight.Medium, neu.muted)
-            Text(formatDuration(shownPosition), style = time, modifier = Modifier.padding(start = 1.dp))
-            Spacer(Modifier.weight(1f))
-            Text(formatDuration(state.durationMs), style = time, modifier = Modifier.padding(end = 11.dp))
-        }
-    }
+    val still = com.harmony.core.ui.theme.reducedMotion
+    NeuTimeCard(
+        elapsed = formatDuration(elapsedMs),
+        elapsedAlpha = elapsedAlpha,
+        // A restart cross-fades with the prototype's 240 ms; a tick with its 170 ms; a drag follows the finger.
+        elapsedMs = when {
+            still || dragging -> 0
+            restarted -> 240
+            else -> 170
+        },
+        duration = formatDuration(motion.face.durationMs),
+        outgoingDuration = motion.outgoing?.let { formatDuration(it.durationMs) },
+        settle = motion.settle.value,
+        progress = progress,
+        waveform = waveform,
+        palette = neu,
+        onScrub = cb.onScrub,
+        onScrubFinished = cb.onScrubFinished,
+        onScrubCancel = cb.onScrubCancel,
+        compact = compact,
+        level = level,
+        modifier = modifier,
+    )
 }
 
 /**
- * Repeat · previous · play/pause in its surround · next · shuffle (114 dp in
+ * Repeat · previous · play/pause in its ring · next · shuffle (106 dp in
  * the frame). Read in the order you use them (accessibility A12): previous,
  * play, next, then the two modes, though repeat and shuffle bracket the row.
  */
@@ -871,40 +937,49 @@ private fun NeuTransport(
     neu: com.harmony.feature.player.neu.NeuPalette,
     smartStyle: SmartShuffleStyle,
     journeyProgress: Float?,
+    playLook: Float,
+    replay: Float,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
     cb: NowPlayingCallbacks,
+    height: Int,
 ) {
     val haptics = LocalHapticFeedback.current
-    Box(Modifier.fillMaxWidth().height(102.dp).semantics { isTraversalGroup = true }) {
+    val top = (height - 106) / 2f
+    Box(Modifier.fillMaxWidth().height(height.dp).semantics { isTraversalGroup = true }) {
         NeuToggleButton(
             on = state.repeatMode != RepeatMode.OFF,
             glyph = NeuGlyph.Repeat,
             contentDescription = "Repeat mode: ${state.repeatMode}",
             palette = neu,
             onClick = cb.onRepeat,
+            dot = neu.repeatDot,
             badge = if (state.repeatMode == RepeatMode.ONE) "1" else null,
-            modifier = Modifier.align(Alignment.CenterStart).semantics { traversalIndex = 4f },
+            modifier = Modifier.offset(y = (32 + top).dp).semantics { traversalIndex = 4f },
         )
-        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-            NeuPressButton(
-                onClick = cb.onPrevious, contentDescription = "Previous",
-                width = 54.dp, height = 54.dp, radius = 18.dp, raised = neu.raised, palette = neu,
-                pressedShiftX = (-2.5).dp, pressedAlpha = 0.9f,
-                modifier = Modifier.semantics { traversalIndex = 0f },
-            ) { NeuIcon(NeuGlyph.Previous, neu.ink) }
-            Spacer(Modifier.width(9.dp))
+        Row(Modifier.align(Alignment.TopCenter).offset(y = (7 + top).dp)) {
+            NeuPreviousButton(
+                replay = replay,
+                onClick = onPrevious,
+                contentDescription = if (replay > 0.5f) "Back to the start" else "Previous",
+                palette = neu,
+                modifier = Modifier.offset(y = 17.dp).semantics { traversalIndex = 0f },
+            )
+            Spacer(Modifier.width(12.dp))
             NeuPlayButton(
-                playing = state.isPlaying,
+                look = playLook,
                 onClick = cb.onPlayPause,
                 contentDescription = if (state.isPlaying) "Pause" else "Play",
                 palette = neu,
                 modifier = Modifier.semantics { traversalIndex = 1f },
             )
-            Spacer(Modifier.width(9.dp))
+            Spacer(Modifier.width(12.dp))
             NeuPressButton(
-                onClick = cb.onNext, contentDescription = "Next",
-                width = 54.dp, height = 54.dp, radius = 18.dp, raised = neu.raised, palette = neu,
+                onClick = onNext, contentDescription = "Next",
+                width = 54.dp, height = 54.dp, radius = 27.dp, palette = neu,
+                timing = com.harmony.feature.player.neu.PressTiming.Skip,
                 pressedShiftX = 2.5.dp, pressedAlpha = 0.9f,
-                modifier = Modifier.semantics { traversalIndex = 2f },
+                modifier = Modifier.offset(y = 17.dp).semantics { traversalIndex = 2f },
             ) { NeuIcon(NeuGlyph.Next, neu.ink) }
         }
         val mode = state.shuffleMode
@@ -928,7 +1003,7 @@ private fun NeuTransport(
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 cb.onMixSheet()
             },
-            modifier = Modifier.align(Alignment.CenterEnd).semantics { traversalIndex = 3f },
+            modifier = Modifier.align(Alignment.TopEnd).offset(y = (32 + top).dp).semantics { traversalIndex = 3f },
         )
     }
 }
@@ -977,6 +1052,7 @@ internal fun MixStatusLine(status: MixStatusUi, palette: PlayerPalette, centered
 @Composable
 private fun ArtworkPager(
     song: Song?,
+    motion: com.harmony.feature.player.neu.NowPlayingMotion,
     isPlaying: Boolean,
     gestureScope: CoroutineScope,
     onNext: () -> Unit,
@@ -1026,15 +1102,15 @@ private fun ArtworkPager(
                                 // direction of travel, THEN the track changes,
                                 // so the motion reads as cause and effect
                                 // rather than a jump cut.
+                                // Far enough: the record settles back and swaps
+                                // to the next (or previous) song, as next does.
                                 total <= -threshold -> {
-                                    offsetX.animateTo(-width.toFloat(), tween(160))
                                     onNext()
-                                    offsetX.snapTo(0f)
+                                    offsetX.animateTo(0f, tween(160, easing = com.harmony.feature.player.neu.FigmaEaseOut))
                                 }
                                 total >= threshold -> {
-                                    offsetX.animateTo(width.toFloat(), tween(160))
                                     onPrevious()
-                                    offsetX.snapTo(0f)
+                                    offsetX.animateTo(0f, tween(160, easing = com.harmony.feature.player.neu.FigmaEaseOut))
                                 }
                                 // Not far enough: spring back, so a hesitant
                                 // swipe is obviously cancellable.
@@ -1056,22 +1132,18 @@ private fun ArtworkPager(
                     (width * 1.6f)).coerceIn(0f, 0.65f)
             },
     ) {
-        AnimatedContent(
-            targetState = song?.id,
-            transitionSpec = {
-                (fadeIn(tween(350)) + scaleIn(initialScale = 0.92f, animationSpec = tween(350)))
-                    .togetherWith(fadeOut(tween(250)) + scaleOut(targetScale = 1.04f, animationSpec = tween(250)))
-            },
-            label = "artwork-change",
+        NeuRecord(
+            artworkUri = motion.face.artworkUri,
+            outgoingArt = motion.outgoing?.artworkUri,
+            settle = motion.settle.value,
+            labelArt = motion.labelArt,
+            tuck = motion.tuck.value,
+            spin = motion.spin.value,
+            gloss = motion.gloss.value,
+            albumName = motion.face.album,
+            palette = neuPalette(),
             modifier = Modifier.fillMaxSize(),
-        ) { _ ->
-            NeuRecord(
-                artworkUri = song?.artworkUri,
-                albumName = song?.album,
-                palette = neuPalette(),
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        )
     }
 }
 

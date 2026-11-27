@@ -51,7 +51,7 @@ class LiquidGlassNavBarFigmaTest {
         rule.mainClock.autoAdvance = false
         rule.setContent {
             HarmonyTheme(darkTheme = true, dynamicColors = false) {
-                Column(Modifier.size(393.dp, 144.dp).background(Color(0xFF111411))) {
+                Column(Modifier.size(393.dp, 132.dp).background(Color(0xFF111411))) {
                     Spacer(Modifier.height(22.dp))
                     LiquidGlassNavBar(tabs, selected, onSelect = { selected = it }, gestureInset = 24.dp)
                 }
@@ -66,21 +66,21 @@ class LiquidGlassNavBarFigmaTest {
         val view = rule.activity.findViewById<android.view.View>(android.R.id.content)
         val full = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         rule.runOnUiThread { view.draw(Canvas(full)) }
-        return Bitmap.createBitmap(full, 0, 0, 393, 144)
+        return Bitmap.createBitmap(full, 0, 0, 393, 132)
     }
 
     /** Mean channel delta outside the system's home indicator (which Figma draws and the app does not). */
     private fun delta(figma: Bitmap, actual: Bitmap, name: String? = null): Double {
         var sum = 0.0; var n = 0
-        val diff = name?.let { Bitmap.createBitmap(393 * 3, 144, Bitmap.Config.ARGB_8888) }
-        for (y in 0 until 144) for (x in 0 until 393) {
+        val diff = name?.let { Bitmap.createBitmap(393 * 3, 132, Bitmap.Config.ARGB_8888) }
+        for (y in 0 until 132) for (x in 0 until 393) {
             val a = figma.getPixel(x, y); val b = actual.getPixel(x, y)
             val d = maxOf(abs((a shr 16 and 255) - (b shr 16 and 255)), abs((a shr 8 and 255) - (b shr 8 and 255)), abs((a and 255) - (b and 255)))
             diff?.setPixel(x, y, a); diff?.setPixel(x + 393, y, b)
             val v = (d * 4).coerceAtMost(255)
             diff?.setPixel(x + 786, y, (0xFF shl 24) or (v shl 16) or (v shl 8) or v)
             // The system's gesture handle (Figma draws one: 99 x 4, 12 above the foot).
-            if (y in 126..134 && x in 144..250) continue
+            if (y in 114..122 && x in 144..250) continue
             sum += d; n++
         }
         if (name != null) File(out, "$name.png").outputStream().use { diff!!.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -98,7 +98,7 @@ class LiquidGlassNavBarFigmaTest {
         val ffmpeg = listOf("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg").firstOrNull { File(it).canExecute() }
         assumeTrue("ffmpeg is needed to read Figma's video", ffmpeg != null)
         val frames = File(out, "video").apply { deleteRecursively(); mkdirs() }
-        ProcessBuilder(ffmpeg, "-loglevel", "error", "-i", File(dir, "navbar_motion.mp4").path, "-vf", "format=rgb24,crop=393:144:0:0", File(frames, "f%03d.png").path)
+        ProcessBuilder(ffmpeg, "-loglevel", "error", "-i", File(dir, "navbar_motion.mp4").path, "-vf", "format=rgb24,crop=393:132:0:0", File(frames, "f%03d.png").path)
             .inheritIO().start().waitFor()
         val figma = frames.listFiles()!!.filter { it.name.startsWith("f") }.sorted()
         show()
