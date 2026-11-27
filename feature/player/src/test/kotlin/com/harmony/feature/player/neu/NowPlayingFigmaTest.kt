@@ -39,19 +39,21 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import kotlin.math.abs
 
-/** Figma's 68 bars in frame 12:8 (heights in dp, of a 40 dp reach). */
-internal val FigmaBars = intArrayOf(
-    8, 23, 32, 32, 26, 18, 14, 15, 17, 16, 9, 20, 32, 39, 36, 25, 11, 16, 19, 18, 16, 17, 22, 29, 32, 27, 14, 18, 31, 35, 30, 22,
-    15, 12, 14, 15, 11, 15, 27, 37, 38, 30, 16, 13, 21, 21, 18, 16, 19, 25, 30, 28, 19, 13, 27, 35, 34, 26, 17, 11, 11, 12, 12, 11,
-    22, 33, 38, 34,
+/** Figma's 68 bars in frame 85:639 (heights in dp, of a 34.3 dp reach). */
+internal val FigmaBars = floatArrayOf(
+    7f, 20.2f, 28.2f, 28.2f, 22.9f, 15.8f, 12.3f, 13.2f, 15f, 14.1f, 7.9f, 17.6f, 28.2f, 34.3f, 31.7f, 22f, 9.7f, 14.1f, 16.7f, 15.8f,
+    14.1f, 15f, 19.4f, 25.5f, 28.2f, 23.8f, 12.3f, 15.8f, 27.3f, 30.8f, 26.4f, 19.4f, 13.2f, 10.6f, 12.3f, 13.2f, 9.7f, 13.2f, 23.8f, 32.6f,
+    33.4f, 26.4f, 14.1f, 11.4f, 18.5f, 18.5f, 15.8f, 14.1f, 16.7f, 22f, 26.4f, 24.6f, 16.7f, 11.4f, 23.8f, 30.8f, 29.9f, 22.9f, 15f, 9.7f,
+    9.7f, 10.6f, 10.6f, 9.7f, 19.4f, 29f, 33.4f, 29.9f,
 )
 
 internal val npDir: File get() = File(repoRoot, "design/figma/now-playing")
 
 /**
  * Now Playing as the app draws it (NowPlayingBody, the screen's own
- * composable), against Figma's render of frames 12:8 (light) and 12:18
- * (dark), pixel for pixel at 393 × 918, with the frames' own song.
+ * composable), against Figma's render of frames 12:8 / 12:18 (paused) and
+ * 85:639 / 85:949 (playing), pixel for pixel at 393 × 918, with the frames'
+ * own song. Reduced motion holds the label upright, as the frames show it.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -62,7 +64,7 @@ class NowPlayingFigmaTest {
     private fun render(dark: Boolean, playing: Boolean = false, shuffle: Boolean = false, repeat: Boolean = false) {
         val song = designSong(1).copy(
             title = "sdp interlude", artist = "Travis Scott", album = "Birds in the Trap Sing McKnight",
-            durationMs = 191_000, artworkUri = Uri.fromFile(File(npDir, "art_square.png")).toString(), bitDepth = 16,
+            durationMs = 191_000, artworkUri = Uri.fromFile(File(npDir, "cover_a.png")).toString(), bitDepth = 16,
         )
         val queue = List(17) { if (it == 0) song else designSong(it + 1L) }
         val state = PlayerState(
@@ -74,7 +76,7 @@ class NowPlayingFigmaTest {
         )
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            HarmonyTheme(darkTheme = dark, dynamicColors = false) {
+            HarmonyTheme(darkTheme = dark, dynamicColors = false, reducedMotion = true) {
                 val neu = neuPalette()
                 Column(Modifier.size(393.dp, 918.dp).background(neu.ground)) {
                     Spacer(Modifier.height(34.dp))
@@ -84,7 +86,7 @@ class NowPlayingFigmaTest {
                             audioInfo = MiniPlayerAudioInfo(format = "FLAC", bitrateKbps = 830, sampleRateHz = 44_100, isLossless = true),
                             output = OutputChoice(null, false, null), journeyProgress = null,
                             smartStyle = SmartShuffleStyle.BALANCED, progress = 41f / 191f, dragFraction = null,
-                            waveform = FloatArray(FigmaBars.size) { FigmaBars[it] / 40f }, playScale = 1f,
+                            waveform = FloatArray(FigmaBars.size) { FigmaBars[it] / 34.3f }, playScale = 1f,
                             cb = NowPlayingCallbacks(onEqualizer = {}),
                             steer = SteerCallbacks(steerable = false, energy = null, mood = null),
                         )
@@ -105,8 +107,8 @@ class NowPlayingFigmaTest {
 
     /** The frame's sections (y ranges), named, for the report. */
     private val sections = listOf(
-        "header" to (34 until 110), "record" to (110 until 398), "details" to (398 until 548),
-        "waveform" to (548 until 642), "controls" to (642 until 756), "mix" to (756 until 838), "tools" to (838 until 898),
+        "header" to (34 until 110), "record" to (110 until 398), "details" to (398 until 526),
+        "time" to (526 until 666), "controls" to (666 until 772), "mix" to (772 until 838), "tools" to (838 until 898),
     )
 
     private fun compareTo(figmaName: String, name: String): Map<String, Double> {
@@ -137,16 +139,27 @@ class NowPlayingFigmaTest {
         return result + ("all" to total)
     }
 
-    @Test fun light() {
+    @Test fun lightPaused() {
         render(dark = false)
         val r = compareTo("np_light.png", "np-light")
-        assertTrue(r.toString(), r.getValue("all") < 6.0)
+        assertTrue(r.toString(), r.getValue("all") < 5.0)
     }
 
-    @Test fun dark() {
+    @Test fun darkPaused() {
         render(dark = true)
         val r = compareTo("np_dark.png", "np-dark")
-        // Dark's play button and surround are the light frame's newer ones (by request), so that section differs on purpose.
-        assertTrue(r.toString(), r.getValue("all") < 7.0)
+        assertTrue(r.toString(), r.getValue("all") < 5.0)
+    }
+
+    @Test fun lightPlaying() {
+        render(dark = false, playing = true)
+        val r = compareTo("np_light_playing.png", "np-light-playing")
+        assertTrue(r.toString(), r.getValue("all") < 5.0)
+    }
+
+    @Test fun darkPlaying() {
+        render(dark = true, playing = true)
+        val r = compareTo("np_dark_playing.png", "np-dark-playing")
+        assertTrue(r.toString(), r.getValue("all") < 5.0)
     }
 }

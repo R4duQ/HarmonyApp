@@ -24,6 +24,15 @@ Upstream license files and copyright notices remain authoritative for the respec
 - Inter 3.019 and 3.19 (SIL Open Font License 1.1), copyright 2016 The Inter Project Authors, in
   feature/player/src/main/res/font (the mini player, Now Playing and the navigation bar, as
   designed in Figma). Source: https://github.com/rsms/inter
+- IBM Plex Mono Medium (SIL Open Font License 1.1), copyright 2017 IBM Corp., bundled as
+  feature/player/src/main/res/font/ibm_plex_mono_medium.ttf (Now Playing's small labels and the
+  audio details). Source: https://github.com/IBM/plex; the license text is in
+  feature/player/src/main/res/raw/ibm_plex_mono_ofl.txt.
+- Bitcount Grid Single (SIL Open Font License 1.1), copyright The Bitcount Project Authors,
+  bundled as feature/player/src/main/res/font/bitcount_grid_single_semibold.ttf: the variable
+  font fixed at SemiBold (CRSV 0, ELSH 0, ELXP 0) and cut to Basic Latin, for Now Playing's
+  elapsed time. Source: https://github.com/petrvanblokland/TYPETR-Bitcount; the license text
+  is in feature/player/src/main/res/raw/bitcount_ofl.txt.
 - Bricolage Grotesque (SIL Open Font License 1.1), copyright 2022 The Bricolage
   Grotesque Project Authors. Source: https://github.com/ateliertriay/bricolage
   The variable font is bundled as core/ui/src/main/res/font/bricolage_grotesque.ttf;

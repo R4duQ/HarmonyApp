@@ -33,7 +33,7 @@ import java.io.File
 import kotlin.math.abs
 
 /**
- * Every button state against Figma's state panels (15:2 light, 15:116 dark),
+ * Every key state against Figma's state panels (15:2 light, 15:116 dark),
  * at the panels' own positions, and the press timing against the
  * prototype's: Pressed in 90 ms, held 90, back in 180.
  */
@@ -43,53 +43,66 @@ import kotlin.math.abs
 class NeuStatesFigmaTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    /** name, x, y, w, h of each variant in the panel. */
+    /** name, (x, y) and size of each variant in the panel. */
     private val slots = listOf(
-        Triple("back-rest", 35 to 92, 54), Triple("back-pressed", 126 to 92, 54),
-        Triple("skip-rest", 242 to 92, 54), Triple("skip-pressed", 333 to 92, 54),
-        Triple("shuffle-off", 449 to 92, 40), Triple("shuffle-on", 540 to 92, 40),
-        Triple("repeat-off", 656 to 92, 40), Triple("repeat-on", 747 to 92, 40),
-        Triple("topback-rest", 316 to 324, 42), Triple("topback-pressed", 442 to 324, 42),
-        Triple("more-rest", 576 to 324, 42), Triple("more-pressed", 702 to 324, 42),
+        Triple("back-rest", 35 to 92, 54 to 54), Triple("back-pressed", 126 to 92, 54 to 56),
+        Triple("skip-rest", 242 to 92, 54 to 54), Triple("skip-pressed", 333 to 92, 54 to 56),
+        Triple("shuffle-off", 449 to 92, 40 to 40), Triple("shuffle-on", 540 to 92, 40 to 40),
+        Triple("repeat-off", 656 to 92, 40 to 40), Triple("repeat-on", 747 to 92, 40 to 40),
+        Triple("lossless-rest", 34 to 186, 132 to 44), Triple("lossless-pressed", 186 to 186, 132 to 44),
+        Triple("play-paused", 36 to 324, 76 to 76), Triple("play-playing", 162 to 324, 76 to 78),
+        Triple("topback-rest", 316 to 324, 42 to 42), Triple("topback-pressed", 442 to 324, 42 to 44),
+        Triple("more-rest", 576 to 324, 42 to 42), Triple("more-pressed", 702 to 324, 42 to 44),
     )
 
     @Composable
-    private fun Panel(p: NeuPalette) {
-        Box(Modifier.size(850.dp, 450.dp).background(p.ground)) {
+    private fun Panel(p: NeuPalette, panel: androidx.compose.ui.graphics.Color) {
+        Box(Modifier.size(850.dp, 450.dp).background(panel)) {
             @Composable fun at(x: Int, y: Int, content: @Composable () -> Unit) = Box(Modifier.offset(x.dp, y.dp)) { content() }
             for ((pressed, x) in listOf(0f to 35, 1f to 126)) at(x, 92) {
-                NeuPressButton({}, "Previous", 54.dp, 54.dp, 18.dp, p.raised, p, pressedShiftX = (-2.5).dp, pressedAlpha = 0.9f, pressedOverride = pressed) { NeuIcon(NeuGlyph.Previous, p.ink) }
+                NeuPreviousButton(0f, {}, "Previous", p, pressedOverride = pressed)
             }
             for ((pressed, x) in listOf(0f to 242, 1f to 333)) at(x, 92) {
-                NeuPressButton({}, "Next", 54.dp, 54.dp, 18.dp, p.raised, p, pressedShiftX = 2.5.dp, pressedAlpha = 0.9f, pressedOverride = pressed) { NeuIcon(NeuGlyph.Next, p.ink) }
+                NeuPressButton({}, "Next", 54.dp, 54.dp, 27.dp, p, pressedShiftX = 2.5.dp, pressedAlpha = 0.9f, pressedOverride = pressed) { NeuIcon(NeuGlyph.Next, p.ink) }
             }
             at(449, 92) { NeuToggleButton(false, NeuGlyph.Shuffle, "", p, {}) }
             at(540, 92) { NeuToggleButton(true, NeuGlyph.Shuffle, "", p, {}) }
-            at(656, 92) { NeuToggleButton(false, NeuGlyph.Repeat, "", p, {}) }
-            at(747, 92) { NeuToggleButton(true, NeuGlyph.Repeat, "", p, {}) }
+            at(656, 92) { NeuToggleButton(false, NeuGlyph.Repeat, "", p, {}, dot = p.repeatDot) }
+            at(747, 92) { NeuToggleButton(true, NeuGlyph.Repeat, "", p, {}, dot = p.repeatDot) }
+            at(34, 186) { NeuFormatPill("Lossless", "", p, {}, pressedOverride = 0f) }
+            at(186, 186) { NeuFormatPill("Lossless", "", p, {}, pressedOverride = 1f) }
+            at(30, 318) { NeuPlayButton(0f, {}, "", p.let { NeuPalette0(it) }) }
+            at(156, 318) { NeuPlayButton(1f, {}, "", p.let { NeuPalette0(it) }) }
             for ((pressed, x) in listOf(0f to 316, 1f to 442)) at(x, 324) {
-                NeuPressButton({}, "Back", 42.dp, 42.dp, 14.dp, p.raisedLarge, p, pressedShiftX = (-2.5).dp, pressedOverride = pressed) { NeuIcon(NeuGlyph.Back, p.ink) }
+                NeuPressButton({}, "Back", 42.dp, 42.dp, 21.dp, p, pressedShiftX = (-2.5).dp, pressedOverride = pressed) { NeuIcon(NeuGlyph.Back, p.ink) }
             }
             for ((pressed, x) in listOf(0f to 576, 1f to 702)) at(x, 324) {
-                NeuPressButton({}, "More", 42.dp, 42.dp, 14.dp, p.raisedLarge, p, pressedAlpha = 0.6f, pressedOverride = pressed) { NeuIcon(NeuGlyph.More, p.ink) }
+                NeuPressButton({}, "More", 42.dp, 42.dp, 21.dp, p, pressedAlpha = 0.6f, pressedOverride = pressed) { NeuIcon(NeuGlyph.More, p.ink) }
             }
         }
     }
 
+    /** The panel shows play / pause without its ring. */
+    private fun NeuPalette0(p: NeuPalette) = NeuPalette(
+        p.dark, p.ground, p.surface, p.line, p.pressed, p.ink, p.muted, p.accent, p.waveRest, p.repeatDot, p.pill, p.pillLine,
+        p.playPaused, p.playPlaying, p.playIcon, null, p.record, p.grooveOdd, p.grooveEven, p.recordShadow, p.scrim,
+    )
+
     private fun check(dark: Boolean, figmaName: String) {
         rule.mainClock.autoAdvance = false
-        rule.setContent { HarmonyTheme(darkTheme = dark, dynamicColors = false) { Panel(neuPalette()) } }
+        val figma = BitmapFactory.decodeFile(File(npDir, figmaName).path)
+        val panel = androidx.compose.ui.graphics.Color(figma.getPixel(425, 440))
+        rule.setContent { HarmonyTheme(darkTheme = dark, dynamicColors = false) { Panel(neuPalette(), panel) } }
         repeat(4) { rule.mainClock.advanceTimeBy(200); rule.waitForIdle() }
         val view = rule.activity.findViewById<android.view.View>(android.R.id.content)
         val shot = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         rule.runOnUiThread { view.draw(Canvas(shot)) }
-        val figma = BitmapFactory.decodeFile(File(npDir, figmaName).path)
         val report = StringBuilder()
         var worst = 0.0
         for ((name, xy, size) in slots) {
-            // The button and 10 dp of its shadows around it.
+            // The key and 4 dp around it.
             var sum = 0.0; var n = 0
-            for (y in xy.second - 10 until xy.second + size + 10) for (x in xy.first - 10 until xy.first + size + 10) {
+            for (y in xy.second - 4 until xy.second + size.second + 4) for (x in xy.first - 4 until xy.first + size.first + 4) {
                 val a = figma.getPixel(x, y); val b = shot.getPixel(x, y)
                 sum += maxOf(abs((a shr 16 and 255) - (b shr 16 and 255)), abs((a shr 8 and 255) - (b shr 8 and 255)), abs((a and 255) - (b and 255))); n++
             }
@@ -101,7 +114,7 @@ class NeuStatesFigmaTest {
         File(out, "states-${if (dark) "dark" else "light"}.png").outputStream().use { Bitmap.createBitmap(shot, 0, 0, 850, 450).compress(Bitmap.CompressFormat.PNG, 100, it) }
         File(out, "states-${if (dark) "dark" else "light"}.txt").writeText(report.toString())
         println("states ${if (dark) "dark" else "light"}: worst %.2f\n$report".format(worst))
-        assertTrue(report.toString(), worst < 6.0)
+        assertTrue(report.toString(), worst < 5.0)
     }
 
     @Test fun light() = check(false, "states_light.png")

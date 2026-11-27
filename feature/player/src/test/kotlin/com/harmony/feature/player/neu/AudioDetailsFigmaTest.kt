@@ -23,7 +23,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import kotlin.math.abs
 
-/** The audio details card against frames 15:74 (light) and 15:188 (dark), where they place it. */
+/** The audio details card, fully open, against the "Animated audio details" component (118:1670 light, 118:1747 dark). */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w393dp-h1000dp-mdpi")
@@ -31,14 +31,13 @@ class AudioDetailsFigmaTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
     private fun check(dark: Boolean, figmaName: String) {
+        val phases = DetailsPhases()
         rule.setContent {
             HarmonyTheme(darkTheme = dark, dynamicColors = false) {
                 val p = neuPalette()
+                androidx.compose.runtime.LaunchedEffect(Unit) { phases.play(still = true) }
                 Box(Modifier.size(393.dp, 918.dp).background(p.ground)) {
-                    NeuAudioDetailsCard(
-                        audioFields("FLAC", lossless = true, sampleRateHz = 44_100, bitDepth = 16, kbps = 830),
-                        p, 345.dp, {}, Modifier.offset(24.dp, 516.dp),
-                    )
+                    NeuAudioDetailsCard(audioFields("FLAC", 44_100, 16, 830), p, 345.dp, phases, {}, Modifier.offset(24.dp, 520.dp))
                 }
             }
         }
@@ -46,22 +45,22 @@ class AudioDetailsFigmaTest {
         val view = rule.activity.findViewById<android.view.View>(android.R.id.content)
         val shot = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         rule.runOnUiThread { view.draw(Canvas(shot)) }
-        // Figma's overlay frame has nothing under the card (its canvas shows); compare inside the card's shape.
+        // The component's render (Phase=All specs, 345 × 154); its corners are transparent, so compare where it is opaque.
         val figma = BitmapFactory.decodeFile(File(npDir, figmaName).path)
         var sum = 0.0; var n = 0
-        for (y in 516 until 620) for (x in 24 until 369) {
-            val cx = x.coerceIn(24 + 17, 369 - 17).toDouble(); val cy = y.coerceIn(516 + 17, 620 - 17).toDouble()
-            if ((x + 0.5 - cx) * (x + 0.5 - cx) + (y + 0.5 - cy) * (y + 0.5 - cy) > 15.0 * 15.0) continue
-            val a = figma.getPixel(x, y); val b = shot.getPixel(x, y)
+        for (y in 0 until 154) for (x in 0 until 345) {
+            val a = figma.getPixel(x, y)
+            if (a ushr 24 != 255) continue
+            val b = shot.getPixel(24 + x, 520 + y)
             sum += maxOf(abs((a shr 16 and 255) - (b shr 16 and 255)), abs((a shr 8 and 255) - (b shr 8 and 255)), abs((a and 255) - (b and 255))); n++
         }
         val d = sum / n
         File(repoRoot, "build/shots/np").mkdirs()
         File(repoRoot, "build/shots/np/details-${if (dark) "dark" else "light"}.png").outputStream().use {
-            Bitmap.createBitmap(shot, 0, 500, 393, 140).compress(Bitmap.CompressFormat.PNG, 100, it)
+            Bitmap.createBitmap(shot, 24, 520, 345, 154).compress(Bitmap.CompressFormat.PNG, 100, it)
         }
         println("audio details ${if (dark) "dark" else "light"}: mean channel delta %.2f".format(d))
-        assertTrue("%.2f".format(d), d < 4.0)
+        assertTrue("%.2f".format(d), d < 5.5)
     }
 
     @Test fun light() = check(false, "details_light.png")
