@@ -1,8 +1,23 @@
 # Harmony 1.0
 
-First stable version. Android versionName **1.0**, versionCode **181**: higher than
-every earlier build, including the earlier 1.0 builds (100 to 180), so it installs as an
+First stable version. Android versionName **1.0**, versionCode **182**: higher than
+every earlier build, including the earlier 1.0 builds (100 to 181), so it installs as an
 update over any of them. Library, playlists and settings are kept.
+
+## Build 182 — A new Now Playing, with a record that turns
+
+- **Now Playing has a new look,** in light and in dark: warm off-white or charcoal,
+  thin-edged buttons, a lavender accent, the cover flat with the record beside it,
+  and a time card with the elapsed time in big dot-matrix figures over the waveform.
+- **The record's label turns** while the music plays, and settles upright on pause.
+- **When the song changes,** the record slides under the cover, comes back out with
+  the next song's label, and then the cover, title and artist fade over to it.
+- **Previous shows a replay arrow** once a song is more than five seconds in, and
+  takes you back to its start.
+- **Tap LOSSLESS** to open the audio details over the time card: codec, sample rate,
+  bit depth and bitrate.
+- **The bottom bar is slimmer, with new icons,** and the icon of the tab you pick
+  settles with a small bounce of its own.
 
 ## Build 181 — Previous song, and a mini player that flips
 
